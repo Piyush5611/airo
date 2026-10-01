@@ -168,6 +168,20 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [advantageAudience, setAdvantageAudience] = useState(true);
+  const [specialCategory, setSpecialCategory] = useState('none');
+  const [ageMin, setAgeMin] = useState('18');
+  const [ageMax, setAgeMax] = useState('65');
+  const [gender, setGender] = useState('all');
+  const [interests, setInterests] = useState([]);
+  const [interestQuery, setInterestQuery] = useState('');
+  const [interestHits, setInterestHits] = useState([]);
+  const [locationMode, setLocationMode] = useState('india');
+  const [cities, setCities] = useState([]);
+  const [cityQuery, setCityQuery] = useState('');
+  const [cityHits, setCityHits] = useState([]);
+  const [locales, setLocales] = useState([]);
+  const [localeQuery, setLocaleQuery] = useState('');
+  const [localeHits, setLocaleHits] = useState([]);
   const [placements, setPlacements] = useState('advantage');
   const [feeds, setFeeds] = useState(['facebook_feed', 'instagram_feed', 'facebook_story', 'instagram_story']);
   const [conversion, setConversion] = useState('instant_form');
@@ -214,6 +228,45 @@ function MetaAdsManager({ id, data, canManage, reload }) {
     loadIdentity();
     return undefined;
   }, [id, canManage]);
+
+  useEffect(() => {
+    if (!canManage || cityQuery.trim().length < 2) {
+      setCityHits([]);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      api.get(`/api/connections/${id}/meta/audience?kind=city&q=${encodeURIComponent(cityQuery.trim())}`)
+        .then((result) => setCityHits(result?.results || []))
+        .catch(() => setCityHits([]));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [id, canManage, cityQuery]);
+
+  useEffect(() => {
+    if (!canManage || interestQuery.trim().length < 2) {
+      setInterestHits([]);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      api.get(`/api/connections/${id}/meta/audience?kind=interest&q=${encodeURIComponent(interestQuery.trim())}`)
+        .then((result) => setInterestHits(result?.results || []))
+        .catch(() => setInterestHits([]));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [id, canManage, interestQuery]);
+
+  useEffect(() => {
+    if (!canManage || localeQuery.trim().length < 2) {
+      setLocaleHits([]);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      api.get(`/api/connections/${id}/meta/audience?kind=locale&q=${encodeURIComponent(localeQuery.trim())}`)
+        .then((result) => setLocaleHits(result?.results || []))
+        .catch(() => setLocaleHits([]));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [id, canManage, localeQuery]);
 
   useEffect(() => {
     if (!canManage || !pageId) return undefined;
@@ -265,6 +318,14 @@ function MetaAdsManager({ id, data, canManage, reload }) {
       setError('Choose at least one placement.');
       return;
     }
+    if (step === 1 && locationMode === 'cities' && !cities.length) {
+      setError('Add at least one city, or choose all of India.');
+      return;
+    }
+    if (step === 1 && !(Number(ageMin) >= 13 && Number(ageMax) <= 65 && Number(ageMin) <= Number(ageMax))) {
+      setError('Set an age range from 13 to 65.');
+      return;
+    }
     if (step === 2) {
       if (!pageId) { setError('Choose a Facebook Page.'); return; }
       if (headline.trim().length < 2) { setError('Enter a headline.'); return; }
@@ -307,6 +368,13 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         startDate,
         endDate,
         advantageAudience,
+        specialCategory,
+        ageMin: Number(ageMin),
+        ageMax: Number(ageMax),
+        gender,
+        interests,
+        locations: locationMode === 'cities' ? cities : [],
+        locales,
         placements,
         placementFeeds: feeds,
         conversion: objective === 'OUTCOME_LEADS' ? conversion : 'website',
@@ -410,7 +478,6 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           </div>
           {step === 0 ? (
             <>
-              <p className="quiet">This is a housing campaign, the same category Meta uses for real estate.</p>
               <label className="stack-field">Campaign name
                 <input value={name} onChange={(event) => setName(event.target.value)} maxLength={180} />
               </label>
@@ -420,6 +487,15 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                   <option value="OUTCOME_TRAFFIC">Traffic</option>
                   <option value="OUTCOME_AWARENESS">Awareness</option>
                   <option value="OUTCOME_SALES">Sales</option>
+                </select>
+              </label>
+              <label className="stack-field">Special ad category
+                <select value={specialCategory} onChange={(event) => setSpecialCategory(event.target.value)}>
+                  <option value="none">None</option>
+                  <option value="HOUSING">Housing</option>
+                  <option value="EMPLOYMENT">Employment</option>
+                  <option value="CREDIT">Credit</option>
+                  <option value="ISSUES_ELECTIONS_POLITICS">Social issues, elections or politics</option>
                 </select>
               </label>
               <Switch checked={abTest} onChange={setAbTest} label="A/B test" hint="Creates two ad sets and splits the budget. One uses Advantage+ audience, the other does not." />
@@ -463,14 +539,112 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                 <input type="datetime-local" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
               </label>
               <h3>Audience</h3>
-              <Switch checked={advantageAudience} onChange={setAdvantageAudience} label="Advantage+ audience" hint="On uses Meta's suggestions. Off keeps the location control only." />
-              <dl className="review-list">
-                <div><dt>Location</dt><dd>India</dd></div>
-                <div><dt>Age</dt><dd>18–65, locked for housing ads</dd></div>
-                <div><dt>Gender</dt><dd>All genders, locked for housing ads</dd></div>
-                <div><dt>Detailed targeting</dt><dd>Not available for housing ads</dd></div>
-                <div><dt>Languages</dt><dd>All languages</dd></div>
-              </dl>
+              <Switch checked={advantageAudience} onChange={setAdvantageAudience} label="Advantage+ audience" hint="On lets Meta reach people beyond the cities you pick. Off keeps only those cities." />
+              <label className="stack-field">Location
+                <select value={locationMode} onChange={(event) => setLocationMode(event.target.value)}>
+                  <option value="india">All of India</option>
+                  <option value="cities">Specific cities</option>
+                </select>
+              </label>
+              {locationMode === 'cities' ? (
+                <>
+                  <label className="stack-field">Search city
+                    <input value={cityQuery} onChange={(event) => setCityQuery(event.target.value)} placeholder="Mumbai, Pune, Jaipur" />
+                  </label>
+                  {cityHits.length ? (
+                    <ul className="pick-results">
+                      {cityHits.map((hit) => (
+                        <li key={hit.key}>
+                          <button type="button" className="btn" onClick={() => {
+                            setCities((current) => current.some((item) => item.key === hit.key) ? current : [...current, { ...hit, radius: 10 }]);
+                            setCityQuery('');
+                            setCityHits([]);
+                          }}>{hit.name}{hit.region ? `, ${hit.region}` : ''}</button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {cities.map((city) => (
+                    <div key={city.key} className="pick-chip">
+                      <span>{city.name}{city.region ? `, ${city.region}` : ''}</span>
+                      <select value={city.radius} onChange={(event) => setCities((current) => current.map((item) => item.key === city.key ? { ...item, radius: Number(event.target.value) } : item))} aria-label={`${city.name} radius`}>
+                        <option value={1}>1 km</option>
+                        <option value={10}>10 km</option>
+                        <option value={25}>25 km</option>
+                        <option value={40}>40 km</option>
+                        <option value={60}>60 km</option>
+                        <option value={80}>80 km</option>
+                      </select>
+                      <button type="button" className="btn" onClick={() => setCities((current) => current.filter((item) => item.key !== city.key))}>Remove</button>
+                    </div>
+                  ))}
+                </>
+              ) : null}
+              <label className="stack-field">Age from
+                <input type="number" min="13" max="65" value={ageMin} onChange={(event) => setAgeMin(event.target.value)} />
+              </label>
+              <label className="stack-field">Age to
+                <input type="number" min="13" max="65" value={ageMax} onChange={(event) => setAgeMax(event.target.value)} />
+              </label>
+              <label className="stack-field">Gender
+                <select value={gender} onChange={(event) => setGender(event.target.value)}>
+                  <option value="all">All</option>
+                  <option value="men">Men</option>
+                  <option value="women">Women</option>
+                </select>
+              </label>
+              <label className="stack-field">Detailed targeting
+                <input value={interestQuery} onChange={(event) => setInterestQuery(event.target.value)} placeholder="Search an interest" />
+              </label>
+              {interestHits.length ? (
+                <ul className="pick-results">
+                  {interestHits.map((hit) => (
+                    <li key={hit.id}>
+                      <button type="button" className="btn" onClick={() => {
+                        setInterests((current) => current.some((item) => item.id === hit.id) ? current : [...current, hit]);
+                        setInterestQuery('');
+                        setInterestHits([]);
+                      }}>{hit.name}</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {interests.length ? (
+                <div className="choice-grid">
+                  {interests.map((item) => (
+                    <div key={item.id} className="pick-chip">
+                      <span>{item.name}</span>
+                      <button type="button" className="btn" onClick={() => setInterests((current) => current.filter((row) => row.id !== item.id))}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <label className="stack-field">Languages
+                <input value={localeQuery} onChange={(event) => setLocaleQuery(event.target.value)} placeholder="Leave empty for all languages, or search Hindi, English" />
+              </label>
+              {localeHits.length ? (
+                <ul className="pick-results">
+                  {localeHits.map((hit) => (
+                    <li key={hit.key}>
+                      <button type="button" className="btn" onClick={() => {
+                        setLocales((current) => current.some((item) => item.key === hit.key) ? current : [...current, hit]);
+                        setLocaleQuery('');
+                        setLocaleHits([]);
+                      }}>{hit.name}</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {locales.length ? (
+                <div className="choice-grid">
+                  {locales.map((item) => (
+                    <div key={item.key} className="pick-chip">
+                      <span>{item.name}</span>
+                      <button type="button" className="btn" onClick={() => setLocales((current) => current.filter((row) => row.key !== item.key))}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="quiet">No language selected, so Meta includes all languages.</p>}
               <h3>Placements</h3>
               <label className="stack-field">Placement
                 <select value={placements} onChange={(event) => setPlacements(event.target.value)}>
@@ -601,7 +775,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                 <div><dt>Conversion</dt><dd>{objective === 'OUTCOME_LEADS' ? label(conversion) : 'Website or reach'}</dd></div>
                 <div><dt>Budget</dt><dd>{money(dailyBudget, currency)} · {budgetLevel === 'campaign' ? 'Campaign' : 'Ad set'} · {budgetMode}</dd></div>
                 <div><dt>Schedule</dt><dd>{startDate || 'Starts when published'}{endDate ? ` to ${endDate}` : ''}</dd></div>
-                <div><dt>Audience</dt><dd>{advantageAudience ? 'Advantage+ on' : 'Advantage+ off'} · India</dd></div>
+                <div><dt>Audience</dt><dd>{advantageAudience ? 'Advantage+ on' : 'Advantage+ off'} · {gender} · {ageMin}–{ageMax} · {locationMode === 'cities' && cities.length ? cities.map((city) => city.name).join(', ') : 'India'} · {interests.length ? interests.map((item) => item.name).join(', ') : 'No interests'} · {locales.length ? locales.map((item) => item.name).join(', ') : 'All languages'}</dd></div>
                 <div><dt>Placements</dt><dd>{placements === 'advantage' ? 'Advantage+ placements' : `${feeds.length} selected`}</dd></div>
                 <div><dt>Pixel</dt><dd>{pixels.find((pixel) => pixel.id === pixelId)?.name || 'Not selected'}</dd></div>
                 <div><dt>Identity</dt><dd>{pageName} · {instagramName}</dd></div>

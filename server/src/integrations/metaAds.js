@@ -323,7 +323,7 @@ export async function createMetaCampaign({ apiKey, accountId, name, objective, d
     name: String(name).slice(0, 180),
     objective,
     status: status === 'ACTIVE' ? 'ACTIVE' : 'PAUSED',
-    special_ad_categories: JSON.stringify(['HOUSING']),
+    special_ad_categories: JSON.stringify([]),
     daily_budget: String(budget),
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP'
   }, 'POST');
@@ -374,6 +374,33 @@ export async function listAdInstagram({ apiKey, accountId }) {
     .map((row) => ({ id: String(row.id), name: row.username ? `@${row.username}` : 'Instagram' }));
 }
 
+export async function searchMetaAudience({ apiKey, kind, query }) {
+  const q = String(query || '').trim().slice(0, 40);
+  if (!/^[\p{L}\p{N} .'-]{2,40}$/u.test(q)) return [];
+  if (kind === 'interest') {
+    const data = await graph('search', apiKey, { type: 'adinterest', q, limit: '12' });
+    return (data.data || [])
+      .map((row) => ({ id: String(row.id), name: String(row.name || '').slice(0, 120) }))
+      .filter((row) => /^\d{1,20}$/.test(row.id) && row.name);
+  }
+  if (kind === 'locale') {
+    const data = await graph('search', apiKey, { type: 'adlocale', q, limit: '12' });
+    return (data.data || [])
+      .map((row) => ({ key: Number(row.key), name: String(row.name || '').slice(0, 80) }))
+      .filter((row) => Number.isInteger(row.key) && row.key > 0 && row.name);
+  }
+  const data = await graph('search', apiKey, {
+    type: 'adgeolocation',
+    q,
+    location_types: JSON.stringify(['city']),
+    country_code: 'IN',
+    limit: '12'
+  });
+  return (data.data || [])
+    .filter((row) => row.type === 'city' && row.country_code === 'IN' && /^\d{1,20}$/.test(String(row.key)))
+    .map((row) => ({ key: String(row.key), name: String(row.name || '').slice(0, 80), region: String(row.region || '').slice(0, 80) }));
+}
+
 export async function listMetaPixels({ apiKey, accountId }) {
   const rows = await list(`act_${actId(accountId)}/adspixels`, apiKey, { fields: 'id,name', limit: '50' });
   return rows
@@ -422,10 +449,34 @@ function scheduleTime(value) {
 }
 
 function targetingFor(input) {
+  const cities = Array.isArray(input.locations) ? input.locations : [];
+  const geo = cities.length
+    ? {
+      cities: cities.map((city) => ({
+        key: String(city.key),
+        radius: Math.min(80, Math.max(1, Number(city.radius) || 10)),
+        distance_unit: 'kilometer'
+      }))
+    }
+    : { countries: ['IN'] };
   const targeting = {
-    geo_locations: { countries: ['IN'] },
+    geo_locations: geo,
     targeting_automation: { advantage_audience: input.advantageAudience === false ? 0 : 1 }
   };
+  const locales = (Array.isArray(input.locales) ? input.locales : [])
+    .map((item) => Number(item.key))
+    .filter((key) => Number.isInteger(key) && key > 0);
+  if (locales.length) targeting.locales = locales;
+  const ageMin = Number(input.ageMin);
+  const ageMax = Number(input.ageMax);
+  if (Number.isInteger(ageMin)) targeting.age_min = ageMin;
+  if (Number.isInteger(ageMax)) targeting.age_max = ageMax;
+  if (input.gender === 'men') targeting.genders = [1];
+  if (input.gender === 'women') targeting.genders = [2];
+  const interests = Array.isArray(input.interests) ? input.interests : [];
+  if (interests.length) {
+    targeting.flexible_spec = [{ interests: interests.map((item) => ({ id: String(item.id), name: item.name })) }];
+  }
   if (input.placements !== 'manual') return targeting;
   const feeds = Array.isArray(input.placementFeeds) ? input.placementFeeds : [];
   const facebook = [];
@@ -585,11 +636,12 @@ export async function createMetaAd(input) {
   const formId = plan.lead ? await createLeadForm(pageId, pageToken, name, website.toString()) : '';
   const campaignLevel = input.budgetLevel === 'campaign';
   const budgetKey = input.budgetMode === 'lifetime' ? 'lifetime_budget' : 'daily_budget';
+  const allowedCategory = ['HOUSING', 'EMPLOYMENT', 'CREDIT', 'ISSUES_ELECTIONS_POLITICS'];
   const campaignParams = {
     name: String(name).slice(0, 180),
     objective,
     status: 'PAUSED',
-    special_ad_categories: JSON.stringify(['HOUSING']),
+    special_ad_categories: JSON.stringify(allowedCategory.includes(input.specialCategory) ? [input.specialCategory] : []),
     is_adset_budget_sharing_enabled: 'false'
   };
   if (campaignLevel) {

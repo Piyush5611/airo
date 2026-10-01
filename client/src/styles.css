@@ -288,6 +288,10 @@ label.stack-field { display: flex; flex-direction: column; gap: 6px; font-size: 
 .toggle.is-on { background: var(--ink); color: white; border-color: var(--ink); }
 .connect-missing { display: grid; gap: 8px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: 14px; background: var(--surface-2); }
 .choice-grid { display: grid; gap: 0; }
+.pick-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pick-results .btn, .pick-chip { justify-content: flex-start; }
+.pick-chip { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pick-chip select { width: auto; min-width: 110px; }
 .ad-studio { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
 .ad-preview { border: 1px solid var(--line); border-radius: 16px; padding: 14px; background: white; display: grid; gap: 8px; }
 .ad-preview img { width: 100%; border-radius: 12px; aspect-ratio: 1.2; object-fit: cover; }

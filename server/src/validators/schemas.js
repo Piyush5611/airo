@@ -110,6 +110,23 @@ export const metaAdSchema = body({
   startDate: z.string().max(40).optional(),
   endDate: z.string().max(40).optional(),
   advantageAudience: z.boolean().optional(),
+  specialCategory: z.enum(['none', 'HOUSING', 'EMPLOYMENT', 'CREDIT', 'ISSUES_ELECTIONS_POLITICS']).optional(),
+  ageMin: z.number().int().min(13).max(65).optional(),
+  ageMax: z.number().int().min(13).max(65).optional(),
+  gender: z.enum(['all', 'men', 'women']).optional(),
+  interests: z.array(z.object({
+    id: z.string().regex(/^\d{1,20}$/),
+    name: z.string().min(1).max(120)
+  })).max(15).optional(),
+  locations: z.array(z.object({
+    key: z.string().regex(/^\d{1,20}$/),
+    name: z.string().min(1).max(80),
+    radius: z.number().int().min(1).max(80)
+  })).max(15).optional(),
+  locales: z.array(z.object({
+    key: z.number().int().positive().max(100000),
+    name: z.string().min(1).max(80)
+  })).max(8).optional(),
   placements: z.enum(['advantage', 'manual']).optional(),
   placementFeeds: z.array(z.enum(['facebook_feed', 'facebook_story', 'instagram_feed', 'instagram_story'])).max(4).optional(),
   conversion: z.enum(['instant_form', 'messenger', 'website', 'instant_messenger', 'website_forms', 'website_calls', 'calls']).optional(),

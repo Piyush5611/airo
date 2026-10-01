@@ -1,6 +1,6 @@
 import { CATEGORIES } from '../domain/providers.js';
 import { NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
-import { createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -215,8 +215,9 @@ export async function saveProviderApi(auth, req) {
       await verifyNexcall({ apiKey, baseUrl: url });
     } catch (error) {
       if (error.code === 'nexcall_unreachable') {
-        const detail = error.cause?.code || error.cause?.message || '';
-        throw new ApiError(422, detail ? `The API did not respond. ${detail}` : 'The API did not respond.', 'validation_error');
+        const cause = error.cause;
+        const timedOut = cause?.name === 'TimeoutError' || cause?.code === 23 || cause?.code === 'ABORT_ERR';
+        throw new ApiError(422, timedOut ? 'The API did not respond. The AIRO server timed out reaching W-Caller.' : 'The API did not respond.', 'validation_error');
       }
       throw new ApiError(422, 'Wrong API.', 'validation_error');
     }
@@ -427,6 +428,15 @@ export async function metaPages(auth, id) {
   const secret = await metaSecret(auth, id);
   const pages = await listMetaPages({ apiKey: secret.apiKey, accountId: secret.accountId });
   return { pages };
+}
+
+export async function metaAudienceSearch(auth, id, kind, query) {
+  const secret = await metaSecret(auth, id);
+  try {
+    return { results: await searchMetaAudience({ apiKey: secret.apiKey, kind, query }) };
+  } catch (error) {
+    return { results: [], note: error.message };
+  }
 }
 
 export async function metaPixels(auth, id) {

@@ -51,6 +51,14 @@ async function pull(baseUrl, path, apiKey) {
   return body;
 }
 
+export async function nexcallCallReport({ apiKey, baseUrl = NEXCALL_BASE, from, to, userId, callType }) {
+  const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
+  const params = new URLSearchParams({ from, to, page: '1', limit: '20' });
+  if (userId) params.set('user_id', String(userId));
+  if (callType) params.set('call_type', callType);
+  return pull(base, `/reports/calls?${params}`, apiKey);
+}
+
 export async function verifyNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {
   const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
   await pull(base, '/leads?page=1&limit=1', apiKey);

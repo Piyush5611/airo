@@ -152,8 +152,20 @@ export async function receiveWebhook(body) {
           reply: Boolean(message.text?.body)
         });
         if (saved?.reply) {
-          answerWithModel(saved).catch((error) => {
-            console.error('WhatsApp model reply skipped:', error?.message || error);
+          answerWithModel(saved).catch(async (error) => {
+            const reason = String(error?.message || 'The model did not reply.').slice(0, 180);
+            console.error('WhatsApp model reply skipped:', reason);
+            try {
+              await repo.insertMessage({
+                conversationId: saved.conversationId,
+                direction: 'outbound',
+                body: 'Reply was not sent.',
+                actionTaken: `Not sent · ${reason}`
+              });
+              notifyWhatsappMessage(saved.conversationId);
+            } catch {
+              // The inbound message is already saved.
+            }
           });
         }
       }
@@ -190,7 +202,17 @@ async function storeInbound({ phone, name, body, reply }) {
       organizationId = owner.organizationId;
     }
     const duplicate = reply ? await repo.recentSameInbound(conversationId, body) : null;
-    if (duplicate) return null;
+    if (duplicate) {
+      const sent = await repo.replyAfter(conversationId, duplicate.id);
+      if (sent) return null;
+      return {
+        conversationId,
+        organizationId,
+        recognized: Boolean(owner),
+        businessLabel: owner?.label || '',
+        reply: true
+      };
+    }
     await repo.touchConversation(conversationId);
   }
   await repo.insertMessage({
@@ -211,10 +233,14 @@ async function storeInbound({ phone, name, body, reply }) {
 
 async function answerWithModel(saved) {
   const history = await repo.messages(saved.conversationId);
-  const messages = history.slice(-12).map((row) => ({
-    role: row.direction === 'outbound' ? 'assistant' : 'user',
-    content: row.body
-  }));
+  const messages = history
+    .filter((row) => !String(row.actionTaken || '').startsWith('Not sent'))
+    .slice(-12)
+    .map((row) => ({
+      role: row.direction === 'outbound' ? 'assistant' : 'user',
+      content: row.body
+    }));
+  while (messages[0]?.role === 'assistant') messages.shift();
   const answer = await replyWhatsapp({
     organizationId: saved.organizationId,
     recognized: saved.recognized,

@@ -1,5 +1,6 @@
 import { ApiError } from '../utils/errors.js';
 import { decryptJson, encryptJson } from '../utils/cryptoBox.js';
+import { reportFacts } from './whatsappReport.js';
 import { recordAudit } from './auditService.js';
 import { listLlmModels, llmProviderName, replyLlm, verifyLlm, WHATSAPP_BRIEF } from '../integrations/llm.js';
 import { LLM_PURPOSES, purposeLabel } from '../domain/llmPurposes.js';
@@ -179,7 +180,12 @@ function withoutPermissionNote(reply) {
   return kept || reply;
 }
 
-async function whatsappFacts({ organizationId, recognized, businessLabel }) {
+function wantsReport(messages) {
+  const last = [...(messages || [])].reverse().find((row) => row.role === 'user');
+  return /report|nexcall|aaj|today|lead|call|summary|data|hisab|employee|team|hafte|week|mahine|month|kal\b|yesterday|filter|kitne|performance|booking/i.test(String(last?.content || ''));
+}
+
+async function whatsappFacts({ organizationId, recognized, businessLabel, messages }) {
   if (!recognized || !organizationId) {
     return 'This WhatsApp number is not registered to a business in AIRO. Do not name a business or share connection status.';
   }
@@ -211,45 +217,65 @@ async function whatsappFacts({ organizationId, recognized, businessLabel }) {
   } catch {
     lines.push('Connections: status could not be read');
   }
+  if (wantsReport(messages)) {
+    try { lines.push(await reportFacts(organizationId, messages)); } catch {
+      lines.push('The report could not be read.');
+    }
+  }
   return lines.join('\n');
 }
 
+async function whatsappModels() {
+  const attempts = [];
+  const primary = await repo.connectionByPurpose('whatsapp');
+  if (primary?.credentialCiphertext) attempts.push({ purpose: 'whatsapp', row: primary });
+  const backup = await repo.connectionByPurpose('assistant');
+  if (backup?.credentialCiphertext && Number(backup.id) !== Number(primary?.id)) {
+    attempts.push({ purpose: 'assistant', row: backup });
+  }
+  return attempts;
+}
+
 export async function replyWhatsapp({ organizationId, recognized, businessLabel, messages }) {
-  let row;
-  let purpose = 'whatsapp';
+  let attempts;
   try {
-    row = await repo.connectionByPurpose('whatsapp');
-    if (!row?.credentialCiphertext) {
-      purpose = 'assistant';
-      row = await repo.connectionByPurpose('assistant');
-    }
+    attempts = await whatsappModels();
   } catch (error) {
     if (schemaMissing(error)) return null;
     throw error;
   }
-  if (!row?.credentialCiphertext) return null;
-  const text = await replyLlm({
-    provider: row.provider,
-    model: row.modelName,
-    apiKey: await readKey(row),
-    baseUrl: row.baseUrl || '',
-    messages,
-    facts: await whatsappFacts({ organizationId, recognized, businessLabel }),
-    system: WHATSAPP_BRIEF
-  });
-  await recordAudit({ auth: null, ip: null }, {
-    action: 'llm.chat',
-    resource: 'llm_connection',
-    resourceId: row.id,
-    organizationId: organizationId || null,
-    metadata: { purpose, provider: row.provider, model: row.modelName, channel: 'whatsapp' }
-  });
-  return {
-    text: String(text || '').slice(0, 4000),
-    purpose,
-    providerName: llmProviderName(row.provider),
-    model: row.modelName
-  };
+  if (!attempts.length) return null;
+  const facts = await whatsappFacts({ organizationId, recognized, businessLabel, messages });
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      const text = await replyLlm({
+        provider: attempt.row.provider,
+        model: attempt.row.modelName,
+        apiKey: await readKey(attempt.row),
+        baseUrl: attempt.row.baseUrl || '',
+        messages,
+        facts,
+        system: WHATSAPP_BRIEF
+      });
+      await recordAudit({ auth: null, ip: null }, {
+        action: 'llm.chat',
+        resource: 'llm_connection',
+        resourceId: attempt.row.id,
+        organizationId: organizationId || null,
+        metadata: { purpose: attempt.purpose, provider: attempt.row.provider, model: attempt.row.modelName, channel: 'whatsapp' }
+      });
+      return {
+        text: String(text || '').slice(0, 4000),
+        purpose: attempt.purpose,
+        providerName: llmProviderName(attempt.row.provider),
+        model: attempt.row.modelName
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 export async function chatLlm(req) {

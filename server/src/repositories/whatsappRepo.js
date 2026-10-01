@@ -135,6 +135,16 @@ export function insertConversation({ organizationId, contactName, contactPhone, 
   );
 }
 
+export function replyAfter(conversationId, messageId) {
+  return one(
+    `SELECT id FROM whatsapp_messages
+     WHERE conversation_id = ? AND id > ? AND direction = 'outbound'
+       AND (action_taken IS NULL OR action_taken NOT LIKE 'Not sent%')
+     LIMIT 1`,
+    [conversationId, messageId]
+  );
+}
+
 export function recentSameInbound(conversationId, body) {
   return one(
     `SELECT id FROM whatsapp_messages

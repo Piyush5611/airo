@@ -100,7 +100,9 @@ export function setBusiness(organizationId, enabled) {
 export function conversations() {
   return many(
     `SELECT c.id, c.organization_id AS organizationId, o.name AS organizationName, c.contact_name AS contactName,
-            c.contact_phone AS contactPhone, c.topic, c.status, c.last_message_at AS lastMessageAt
+            c.contact_phone AS contactPhone, c.topic, c.status, c.last_message_at AS lastMessageAt,
+            (SELECT m.body FROM whatsapp_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS lastMessage,
+            (SELECT m.direction FROM whatsapp_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS lastDirection
      FROM whatsapp_conversations c
      JOIN organizations o ON o.id = c.organization_id
      ORDER BY c.last_message_at DESC`

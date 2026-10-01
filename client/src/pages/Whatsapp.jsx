@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useResource } from '../data.js';
 import { label, num, when } from '../format.js';
@@ -11,16 +11,21 @@ export function PlatformWhatsapp() {
   const [section, setSection] = useSection(SECTIONS);
   const [open, setOpen] = useState(null);
   const detail = useResource(open ? `/api/admin/whatsapp/conversations/${open}` : null);
+  useEffect(() => {
+    const first = data?.conversations?.[0]?.id;
+    if (first) setOpen((current) => current || first);
+  }, [data]);
   return (
     <Page eyebrow="Platform" title="WhatsApp chatbot" lede="One AIRO chatbot for every business. People do the work in the conversation. Only Super Admin and Developer/Admin manage it.">
       <Subnav items={SECTIONS} value={section} onChange={setSection} />
       <State loading={loading} error={error} onRetry={reload}>
         {data ? (
           <div className="stack">
+            {section === 'Overview' || section === 'Conversations' ? <ChatInbox data={data} open={open} setOpen={setOpen} detail={detail} /> : null}
             {section === 'Overview' ? <Overview data={data} reload={reload} /> : null}
             {section === 'Connection' ? <ConnectPanel data={data} reload={reload} /> : null}
             {section === 'Businesses' ? <Businesses data={data} reload={reload} /> : null}
-            {section === 'Conversations' || section === 'Logs' ? (
+            {section === 'Logs' ? (
               <>
                 <Table
                   columns={[
@@ -64,16 +69,69 @@ export function PlatformWhatsapp() {
   );
 }
 
-function Overview({ data, reload }) {
+function initials(name) {
+  const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase() || '').join('') || '?';
+}
+
+function ChatInbox({ data, open, setOpen, detail }) {
+  const people = data.conversations || [];
+  const active = detail.data?.conversation?.id === open ? detail.data.conversation : null;
+  const messages = active ? detail.data.messages || [] : [];
   return (
-    <>
-      <div className="metric-strip">
-        <div className="metric"><span>Bot</span><strong>{label(data.bot.status)}</strong><em>{data.bot.phoneLabel}</em></div>
-        <div className="metric"><span>Businesses</span><strong>{num(data.summary.enabled)}</strong><em>{num(data.summary.businesses)} enrolled</em></div>
-        <div className="metric"><span>Open conversations</span><strong>{num(data.summary.openConversations)}</strong><em>Across those businesses</em></div>
+    <section className="wa-inbox" aria-label="WhatsApp chats">
+      <div className="wa-people">
+        <header>
+          <h2>Chats</h2>
+          <p className="quiet">{data.bot.phoneLabel || 'WhatsApp number'}</p>
+        </header>
+        {people.length ? people.map((person) => (
+          <button key={person.id} type="button" className={person.id === open ? 'wa-person is-on' : 'wa-person'} onClick={() => setOpen(person.id)}>
+            <span className="wa-avatar" aria-hidden="true">{initials(person.contactName)}</span>
+            <span>
+              <strong>{person.contactName}</strong>
+              <em>{person.organizationName} · {person.contactPhone}</em>
+              <p>{person.lastDirection === 'outbound' ? 'AIRO: ' : ''}{person.lastMessage || 'No message yet'}</p>
+            </span>
+          </button>
+        )) : <p className="quiet wa-empty">No chats yet. A message to this number will show here with the person's name.</p>}
       </div>
-      <ConnectPanel data={data} reload={reload} />
-    </>
+      <div className="wa-thread">
+        {active ? (
+          <>
+            <header>
+              <span className="wa-avatar" aria-hidden="true">{initials(active.contactName)}</span>
+              <div>
+                <strong>{active.contactName}</strong>
+                <p className="quiet">{active.contactPhone} · {active.organizationName}</p>
+              </div>
+              <Badge value={active.status} />
+            </header>
+            <div className="wa-bubbles">
+              {messages.map((message) => (
+                <article key={message.id} className={message.direction === 'outbound' ? 'wa-bubble out' : 'wa-bubble in'}>
+                  <b>{message.direction === 'outbound' ? 'AIRO' : active.contactName}</b>
+                  <span>{message.body}</span>
+                  <small>{when(message.createdAt)}{message.actionTaken ? ` · ${message.actionTaken}` : ''}</small>
+                </article>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="quiet wa-empty">{detail.loading && open ? 'Opening chat…' : 'Select a person to read the chat.'}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Overview({ data }) {
+  return (
+    <div className="metric-strip">
+      <div className="metric"><span>Bot</span><strong>{label(data.bot.status)}</strong><em>{data.bot.phoneLabel}</em></div>
+      <div className="metric"><span>Businesses</span><strong>{num(data.summary.enabled)}</strong><em>{num(data.summary.businesses)} enrolled</em></div>
+      <div className="metric"><span>Open conversations</span><strong>{num(data.summary.openConversations)}</strong><em>Across those businesses</em></div>
+    </div>
   );
 }
 

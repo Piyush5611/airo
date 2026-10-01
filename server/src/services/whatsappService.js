@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { env } from '../config/env.js';
 import { ApiError } from '../utils/errors.js';
 import { decryptJson, encryptJson } from '../utils/cryptoBox.js';
 import { recordAudit } from './auditService.js';
@@ -122,7 +123,9 @@ export async function verifyWebhook(query) {
   const challenge = query['hub.challenge'];
   if (mode !== 'subscribe' || !token || !challenge) return null;
   const secret = await savedSecret();
-  if (!secret || !sameSecret(secret.verifyToken, token)) return null;
+  const saved = secret?.verifyToken && sameSecret(secret.verifyToken, token);
+  const fromEnv = env.whatsappVerifyToken && sameSecret(env.whatsappVerifyToken, token);
+  if (!saved && !fromEnv) return null;
   return String(challenge);
 }
 

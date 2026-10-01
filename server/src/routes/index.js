@@ -13,6 +13,7 @@ import * as intel from '../services/intelligenceService.js';
 import * as workspace from '../services/workspaceService.js';
 import * as platform from '../services/platformService.js';
 import * as whatsapp from '../services/whatsappService.js';
+import * as metaWebhook from '../services/metaWebhookService.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -30,6 +31,17 @@ router.get('/whatsapp/webhook', asyncHandler(async (req, res) => {
 
 router.post('/whatsapp/webhook', asyncHandler(async (req, res) => {
   await whatsapp.receiveWebhook(req.body);
+  res.sendStatus(200);
+}));
+
+router.get('/meta/webhook', asyncHandler(async (req, res) => {
+  const challenge = metaWebhook.verifyWebhook(req.query);
+  if (!challenge) return res.sendStatus(403);
+  res.status(200).type('text/plain').send(challenge);
+}));
+
+router.post('/meta/webhook', asyncHandler(async (req, res) => {
+  await metaWebhook.receiveWebhook(req.body);
   res.sendStatus(200);
 }));
 

@@ -105,6 +105,17 @@ export function setWebhookToken(id, token) {
   );
 }
 
+export function liveConnections(providerKey) {
+  return many(
+    `SELECT c.id, c.organization_id AS organizationId, cred.ciphertext
+     FROM integration_connections c
+     JOIN integration_providers p ON p.id = c.provider_id
+     JOIN integration_credentials cred ON cred.connection_id = c.id
+     WHERE p.provider_key = ? AND c.status = 'connected' AND c.mode = 'live'`,
+    [providerKey]
+  );
+}
+
 export function findByWebhookToken(token) {
   return one(
     `SELECT id, organization_id AS organizationId, status

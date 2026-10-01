@@ -36,6 +36,8 @@ export const env = {
   jwtSecret: required('JWT_SECRET'),
   jwtRefreshSecret: required('JWT_REFRESH_SECRET'),
   credentialsKey: read('CREDENTIALS_KEY', ''),
+  whatsappVerifyToken: read('WHATSAPP_VERIFY_TOKEN', ''),
+  metaVerifyToken: read('META_VERIFY_TOKEN', ''),
   seedPassword: read('SEED_PASSWORD', 'AiroDemo#2026'),
   db: {
     host: required('DB_HOST'),

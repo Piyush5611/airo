@@ -2,7 +2,6 @@
  * Nexcall is the W-Caller external CRM pull API.
  * Read-only. Auth is x-api-key. Data stays scoped to that key's business.
  */
-import dns from 'node:dns';
 import https from 'node:https';
 
 export const NEXCALL_BASE = 'https://w-caller.workians.com/api/external';
@@ -76,8 +75,9 @@ function pull(baseUrl, path, apiKey) {
       },
       ALPNProtocols: ['http/1.1'],
       servername: url.hostname,
-      timeout: 15000,
-      lookup: (hostname, options, callback) => dns.lookup(hostname, { family: 4 }, callback)
+      family: 4,
+      autoSelectFamily: false,
+      timeout: 15000
     }, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));

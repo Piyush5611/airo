@@ -83,7 +83,7 @@ function ChatInbox({ data, open, setOpen, detail }) {
       <div className="wa-people">
         <header>
           <h2>Chats</h2>
-          <p className="quiet">{data.bot.phoneLabel || 'WhatsApp number'}</p>
+          <p className="quiet">{data.bot.connected ? data.bot.phoneLabel : 'Connect the chatbot to see live chats'}</p>
         </header>
         {people.length ? people.map((person) => (
           <button key={person.id} type="button" className={person.id === open ? 'wa-person is-on' : 'wa-person'} onClick={() => setOpen(person.id)}>

@@ -74,56 +74,6 @@ async function ensureWhatsapp(connection) {
       [org.id, org.name]
     );
   }
-  const [count] = await connection.query(`SELECT COUNT(*) AS total FROM whatsapp_conversations`);
-  if (Number(count[0]?.total || 0) > 0 || !orgs.length) return;
-  const prestige = orgs.find((org) => /prestige/i.test(org.name));
-  const aurelia = orgs.find((org) => /aurelia/i.test(org.name));
-  const samples = [
-    prestige && {
-      org: prestige.id,
-      contact: 'Meera Nair',
-      phone: '+91 98100 11021',
-      topic: 'leads',
-      messages: [
-        ['inbound', 'Which high-intent leads are still untouched?', null],
-        ['outbound', 'Three Prestige leads scored 80 or above are still new. Rohan Bhatia is first.', 'Opened the lead inbox for this workspace']
-      ]
-    },
-    prestige && {
-      org: prestige.id,
-      contact: 'Kabir Malhotra',
-      phone: '+91 98100 11044',
-      topic: 'campaigns',
-      messages: [
-        ['inbound', 'Why did cost per lead move on Noida Extension?', null],
-        ['outbound', 'The Noida Extension campaign is carrying the CPL rise. Spend is up against last week.', 'Opened campaign performance']
-      ]
-    },
-    aurelia && {
-      org: aurelia.id,
-      contact: 'Vikram Singh',
-      phone: '+91 98111 22010',
-      topic: 'sales',
-      messages: [
-        ['inbound', 'What is open in the pipeline this week?', null],
-        ['outbound', 'Aurelia has open deals on record. I can list stage and value from this workspace only.', 'Read pipeline for this organization']
-      ]
-    }
-  ].filter(Boolean);
-  for (const sample of samples) {
-    const [created] = await connection.query(
-      `INSERT INTO whatsapp_conversations (organization_id, contact_name, contact_phone, topic, status, last_message_at)
-       VALUES (?, ?, ?, ?, 'open', UTC_TIMESTAMP())`,
-      [sample.org, sample.contact, sample.phone, sample.topic]
-    );
-    for (const [direction, body, action] of sample.messages) {
-      await connection.query(
-        `INSERT INTO whatsapp_messages (conversation_id, direction, body, action_taken, created_at)
-         VALUES (?, ?, ?, ?, UTC_TIMESTAMP())`,
-        [created.insertId, direction, body, action]
-      );
-    }
-  }
 }
 
 const entry = process.argv[1]?.replaceAll('\\', '/');

@@ -584,40 +584,6 @@ async function seed() {
   });
   await insert(conn, 'whatsapp_businesses', { organization_id: prestige, enabled: 1, business_label: 'Prestige Homes' });
   await insert(conn, 'whatsapp_businesses', { organization_id: aurelia, enabled: 1, business_label: 'Aurelia Estates' });
-  const leadChat = await insert(conn, 'whatsapp_conversations', {
-    organization_id: prestige, contact_name: 'Meera Nair', contact_phone: '+91 98100 11021', topic: 'leads',
-    status: 'open', last_message_at: utc(daysAgo(0, 11))
-  });
-  await insert(conn, 'whatsapp_messages', {
-    conversation_id: leadChat, direction: 'inbound', body: 'Which high-intent leads are still untouched?', created_at: utc(daysAgo(0, 11))
-  });
-  await insert(conn, 'whatsapp_messages', {
-    conversation_id: leadChat, direction: 'outbound', action_taken: 'Opened the lead inbox for this workspace',
-    body: 'Three Prestige leads scored 80 or above are still new. Rohan Bhatia is first.', created_at: utc(daysAgo(0, 11))
-  });
-  const campaignChat = await insert(conn, 'whatsapp_conversations', {
-    organization_id: prestige, contact_name: 'Kabir Malhotra', contact_phone: '+91 98100 11044', topic: 'campaigns',
-    status: 'waiting', last_message_at: utc(daysAgo(0, 10))
-  });
-  await insert(conn, 'whatsapp_messages', {
-    conversation_id: campaignChat, direction: 'inbound', body: 'Why did cost per lead move on Noida Extension?', created_at: utc(daysAgo(0, 10))
-  });
-  await insert(conn, 'whatsapp_messages', {
-    conversation_id: campaignChat, direction: 'outbound', action_taken: 'Opened campaign performance',
-    body: 'The Noida Extension campaign is carrying the CPL rise. Spend is up against last week.', created_at: utc(daysAgo(0, 10))
-  });
-  const salesChat = await insert(conn, 'whatsapp_conversations', {
-    organization_id: aurelia, contact_name: 'Vikram Singh', contact_phone: '+91 98111 22010', topic: 'sales',
-    status: 'open', last_message_at: utc(daysAgo(1, 16))
-  });
-  await insert(conn, 'whatsapp_messages', {
-    conversation_id: salesChat, direction: 'inbound', body: 'What is open in the pipeline this week?', created_at: utc(daysAgo(1, 16))
-  });
-  await insert(conn, 'whatsapp_messages', {
-    conversation_id: salesChat, direction: 'outbound', action_taken: 'Read pipeline for this organization',
-    body: 'Aurelia has open deals on record. Stage and value stay inside this workspace.', created_at: utc(daysAgo(1, 16))
-  });
-
   await conn.end();
   await refreshAll();
   await pool.end();

@@ -264,7 +264,7 @@ export async function writeAdPlan({ intake, publicAds, english }) {
     `Language: ${english ? 'English' : 'Hinglish'}.`,
     `Category: ${intake.category}`,
     `Product: ${intake.product}`,
-    `Website: ${intake.website}`,
+    `Website: ${intake.website || 'No website. Use the Facebook Page. Do not invent a website.'}`,
     `Region: ${intake.region}`,
     `Daily budget: ${intake.dailyBudget}`,
     `Objective: ${intake.objectiveLabel}`,

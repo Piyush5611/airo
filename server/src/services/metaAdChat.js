@@ -136,6 +136,19 @@ function httpsWebsite(text) {
   }
 }
 
+function withoutWebsite(text) {
+  const value = String(text || '').toLowerCase();
+  if (/^(no|nahi|nahin|nhi|none|skip)$/i.test(value.trim())) return true;
+  const mentionsSite = /web\s*si|website|site\b|link\b/.test(value);
+  const denies = /don'?t|do not|nahi|nahin|nhi|no\b|without|not have|nai/.test(value);
+  return mentionsSite && denies;
+}
+
+function adLink(payload) {
+  if (payload.website) return payload.website;
+  return `https://www.facebook.com/${payload.pageId}`;
+}
+
 function publicImageUrl(text) {
   const match = String(text || '').match(/https:\/\/[^\s]+/i);
   if (!match) return null;
@@ -261,7 +274,7 @@ export async function handleMetaAdChat({ organizationId, conversationId, recogni
       )
     };
   }
-  return continueDraft(organizationId, conversationId, draft, text);
+  return continueDraft(organizationId, conversationId, draft, text, messages);
 }
 
 async function begin(organizationId, conversationId, text) {
@@ -273,10 +286,72 @@ async function begin(organizationId, conversationId, text) {
   return {
     text: say(
       english,
-      'I am the AIRO assistant. To run a Meta ad I need the business details first. What is the business category?',
-      'I am the AIRO assistant. Meta ad chalane ke liye pehle business details. Category kya hai?'
+      'I am the AIRO assistant. First, the business intake. What is the business category?',
+      'I am the AIRO assistant. Pehle business intake. Category kya hai?'
     )
   };
+}
+
+function applyObjective(payload, objective) {
+  payload.objectiveKey = objective.key;
+  payload.objectiveLabel = objective.label;
+  payload.conversion = payload.noWebsite && objective.key === 'OUTCOME_LEADS' ? 'messenger' : objective.conversion;
+  payload.cta = payload.conversion === 'messenger' ? 'MESSAGE_PAGE' : objective.cta;
+}
+
+function nextIntake(payload) {
+  if (!payload.category) return 'category';
+  if (!payload.product) return 'product';
+  if (!payload.website && !payload.noWebsite) return 'website';
+  if (!payload.region && !(Array.isArray(payload.locations) && payload.locations.length)) return 'region';
+  if (!payload.dailyBudget) return 'budget';
+  if (!payload.objectiveKey) return 'objective';
+  if (payload.noWebsite && payload.objectiveKey === 'OUTCOME_SALES' && !payload.website) return 'shop';
+  return 'special';
+}
+
+function intakePrompt(step, english, payload) {
+  if (step === 'category') return say(english, 'What is the business category?', 'Business category kya hai?');
+  if (step === 'product') return say(english, 'What product or service should the ad sell?', 'Product ya service kya hai?');
+  if (step === 'website') {
+    return say(
+      english,
+      'Send the website link, starting with https. If there is no website, say no website.',
+      'Website link bhejo, https se. Website nahi hai to no website likho.'
+    );
+  }
+  if (step === 'region') {
+    return payload?.noWebsite
+      ? say(english, 'No website is fine. The ad will use this business Facebook Page. Which city should it target? Or say all India.', 'Website nahi hai to theek hai. Ad is business ki Facebook Page use karegi. Kaunsi city target karni hai? Ya all India likho.')
+      : say(english, 'Which city should this ad target? Or say all India.', 'Kaunsi city target karni hai? Ya all India likho.');
+  }
+  if (step === 'budget') return say(english, 'What is the daily budget? Send a number, for example 500.', 'Daily budget kitna hai? Number bhejo, jaise 500.');
+  if (step === 'objective') {
+    return say(english, 'What is the objective: leads, appointments, or ecommerce sales?', 'Objective kya hai: leads, appointments, ya ecommerce sales?');
+  }
+  if (step === 'shop') {
+    return say(english, 'Ecommerce sales need an https shop link. Send that link, or reply leads or appointments.', 'Ecommerce sales ke liye https shop link chahiye. Link bhejo, ya leads ya appointments likho.');
+  }
+  return say(
+    english,
+    'Special ad category: reply housing, employment, credit, or issues. If this is not one of those, reply none.',
+    'Special ad category: housing, employment, credit, ya issues. Inme se nahi hai to none likho.'
+  );
+}
+
+function rememberedSite(payload, messages) {
+  if (payload.website || payload.noWebsite) return;
+  const lines = (messages || []).filter((row) => row.role === 'user').map((row) => String(row.content || ''));
+  if (lines.some((line) => withoutWebsite(line))) {
+    payload.website = '';
+    payload.noWebsite = true;
+    return;
+  }
+  const site = lines.map((line) => httpsWebsite(line)).find(Boolean);
+  if (site) {
+    payload.website = site;
+    payload.noWebsite = false;
+  }
 }
 
 function langOf(draft, text) {
@@ -285,7 +360,7 @@ function langOf(draft, text) {
   return draft.payload.lang === 'en';
 }
 
-async function continueDraft(organizationId, conversationId, draft, text) {
+async function continueDraft(organizationId, conversationId, draft, text, messages) {
   const english = langOf(draft, text);
   const payload = { ...draft.payload, lang: english ? 'en' : 'hi' };
   const ask = (step, message) => saveDraft(organizationId, conversationId, step, payload, draft.campaignId).then(() => ({ text: message }));
@@ -300,13 +375,26 @@ async function continueDraft(organizationId, conversationId, draft, text) {
   if (draft.step === 'product') {
     if (text.length < 2) return { text: say(english, 'Tell me the product or service.', 'Product ya service likho.') };
     payload.product = text.slice(0, 120);
-    return ask('website', say(english, 'Send the website link. It must start with https.', 'Website link bhejo. https se start hona chahiye.'));
+    return ask('website', say(
+      english,
+      'Send the website link, starting with https. If there is no website, say no website.',
+      'Website link bhejo, https se. Website nahi hai to no website likho.'
+    ));
   }
   if (draft.step === 'website') {
+    rememberedSite(payload, messages);
     const website = httpsWebsite(text);
-    if (!website) return { text: say(english, 'Send a website link that starts with https.', 'https se start hone wala website link bhejo.') };
-    payload.website = website;
-    return ask('region', say(english, 'Which city should this ad target? Or say all India.', 'Kaunsi city target karni hai? Ya all India likho.'));
+    if (website) {
+      payload.website = website;
+      payload.noWebsite = false;
+    } else if (withoutWebsite(text) || payload.noWebsite) {
+      payload.website = '';
+      payload.noWebsite = true;
+    } else {
+      return { text: say(english, 'Send an https website link, or say no website.', 'https website link bhejo, ya no website likho.') };
+    }
+    const step = nextIntake(payload);
+    return ask(step, intakePrompt(step, english, payload));
   }
   if (draft.step === 'region' || draft.step === 'region_pick') {
     return pickRegion(organizationId, conversationId, payload, text, english, draft.step);
@@ -317,22 +405,39 @@ async function continueDraft(organizationId, conversationId, draft, text) {
       return { text: say(english, 'Send the daily budget as a number, for example 500.', 'Daily budget number mein bhejo, jaise 500.') };
     }
     payload.dailyBudget = Math.round(amount);
-    return ask('objective', say(english, 'What is the objective: leads, appointments, or ecommerce sales?', 'Objective kya hai: leads, appointments, ya ecommerce sales?'));
+    const step = nextIntake(payload);
+    return ask(step, intakePrompt(step, english, payload));
   }
   if (draft.step === 'objective') {
     const objective = objectiveFrom(text);
     if (!objective) {
       return { text: say(english, 'Reply with leads, appointments, or ecommerce sales.', 'Leads, appointments, ya ecommerce sales likho.') };
     }
-    payload.objectiveKey = objective.key;
-    payload.objectiveLabel = objective.label;
-    payload.conversion = objective.conversion;
-    payload.cta = objective.cta;
-    return ask('special', say(
-      english,
-      'Special ad category: reply housing, employment, credit, or issues. If this is not one of those, reply none.',
-      'Special ad category: housing, employment, credit, ya issues. Inme se nahi hai to none likho.'
-    ));
+    applyObjective(payload, objective);
+    const step = nextIntake(payload);
+    return ask(step, intakePrompt(step, english, payload));
+  }
+  if (draft.step === 'shop') {
+    const website = httpsWebsite(text);
+    if (website) {
+      payload.website = website;
+      payload.noWebsite = false;
+      payload.objectiveKey = 'OUTCOME_SALES';
+      payload.objectiveLabel = 'ecommerce sales';
+      payload.conversion = 'website';
+      payload.cta = 'SHOP_NOW';
+    } else {
+      const objective = objectiveFrom(text);
+      if (!objective || objective.key === 'OUTCOME_SALES') {
+        return { text: say(english, 'Send the https shop link, or reply leads or appointments.', 'https shop link bhejo, ya leads ya appointments likho.') };
+      }
+      payload.objectiveKey = objective.key;
+      payload.objectiveLabel = objective.label;
+      payload.conversion = objective.key === 'OUTCOME_LEADS' ? 'messenger' : objective.conversion;
+      payload.cta = payload.conversion === 'messenger' ? 'MESSAGE_PAGE' : objective.cta;
+    }
+    const step = nextIntake(payload);
+    return ask(step, intakePrompt(step, english, payload));
   }
   if (draft.step === 'special') {
     const special = specialFrom(text);
@@ -500,8 +605,8 @@ async function buildPlan(organizationId, conversationId, payload, english) {
       say(english, `Strategy: ${payload.strategy}`, `Strategy: ${payload.strategy}`),
       say(
         english,
-        `Page ${payload.pageName}. Objective ${payload.objectiveLabel}. Daily budget ${payload.dailyBudget}. Region ${payload.region}. Special category ${payload.specialCategory || 'none'}.`,
-        `Page ${payload.pageName}. Objective ${payload.objectiveLabel}. Daily budget ${payload.dailyBudget}. Region ${payload.region}. Special category ${payload.specialCategory || 'none'}.`
+        `Page ${payload.pageName}. Objective ${payload.objectiveLabel}. Daily budget ${payload.dailyBudget}. Region ${payload.region}. ${payload.website ? `Website ${payload.website}` : 'No website, so the ad uses the Facebook Page.'} Special category ${payload.specialCategory || 'none'}.`,
+        `Page ${payload.pageName}. Objective ${payload.objectiveLabel}. Daily budget ${payload.dailyBudget}. Region ${payload.region}. ${payload.website ? `Website ${payload.website}` : 'Website nahi hai, isliye ad Facebook Page use karegi.'} Special category ${payload.specialCategory || 'none'}.`
       ),
       interestLine,
       `Headline: ${payload.headline}`,
@@ -554,7 +659,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
       pageId: payload.pageId,
       headline: payload.headline,
       message: payload.message,
-      link: payload.website,
+      link: adLink(payload),
       imageBase64,
       publish: false,
       budgetLevel: 'adset',

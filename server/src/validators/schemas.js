@@ -85,6 +85,8 @@ export const metaStatusSchema = body({
   status: z.enum(['PAUSED', 'ACTIVE'])
 });
 
+const optionalId = z.union([z.string().regex(/^\d{5,20}$/), z.literal('')]).optional();
+
 export const metaAdSchema = body({
   name: z.string().min(2).max(180),
   objective: z.enum(['OUTCOME_LEADS', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_SALES']),
@@ -95,7 +97,23 @@ export const metaAdSchema = body({
   link: z.string().url().max(500),
   imageBase64: z.string().min(100).max(4000000),
   country: z.string().regex(/^[A-Z]{2}$/).optional(),
-  publish: z.boolean()
+  publish: z.boolean(),
+  budgetLevel: z.enum(['campaign', 'adset']).optional(),
+  budgetMode: z.enum(['daily', 'lifetime']).optional(),
+  startDate: z.string().max(40).optional(),
+  endDate: z.string().max(40).optional(),
+  advantageAudience: z.boolean().optional(),
+  placements: z.enum(['advantage', 'manual']).optional(),
+  placementFeeds: z.array(z.enum(['facebook_feed', 'facebook_story', 'instagram_feed', 'instagram_story'])).max(4).optional(),
+  conversion: z.enum(['instant_form', 'messenger', 'website']).optional(),
+  pixelId: optionalId,
+  instagramId: optionalId,
+  dynamicCreative: z.boolean().optional(),
+  abTest: z.boolean().optional(),
+  creativeTest: z.boolean().optional(),
+  headlineB: z.string().max(80).optional(),
+  messageB: z.string().max(500).optional(),
+  cta: z.enum(['LEARN_MORE', 'SIGN_UP', 'CONTACT_US', 'MESSAGE_PAGE', 'SHOP_NOW']).optional()
 });
 
 export const configSchema = body({

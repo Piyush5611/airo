@@ -146,6 +146,12 @@ client.post('/connections/:id/sync', requirePermission('connections.manage'), va
 client.get('/connections/:id/meta/pages', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.metaPages(req.auth, req.params.id));
 }));
+client.get('/connections/:id/meta/pixels', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.metaPixels(req.auth, req.params.id));
+}));
+client.get('/connections/:id/meta/instagram', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.metaInstagram(req.auth, req.params.id, req.query.pageId));
+}));
 client.post('/connections/:id/meta/campaigns', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaCampaignSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.createMetaCampaign(req.auth, req, req.params.id), 201);
 }));

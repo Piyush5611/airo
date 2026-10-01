@@ -1,6 +1,6 @@
 import { CATEGORIES } from '../domain/providers.js';
 import { NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall } from '../integrations/nexcall.js';
-import { createMetaAd, createMetaCampaign as createOnMeta, listMetaPages, pullMetaAds, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { createMetaAd, createMetaCampaign as createOnMeta, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -424,6 +424,25 @@ export async function metaPages(auth, id) {
   const secret = await metaSecret(auth, id);
   const pages = await listMetaPages({ apiKey: secret.apiKey });
   return { pages };
+}
+
+export async function metaPixels(auth, id) {
+  const secret = await metaSecret(auth, id);
+  try {
+    return { pixels: await listMetaPixels({ apiKey: secret.apiKey, accountId: secret.accountId }) };
+  } catch (error) {
+    return { pixels: [], note: error.message };
+  }
+}
+
+export async function metaInstagram(auth, id, pageId) {
+  const secret = await metaSecret(auth, id);
+  if (!/^\d{5,20}$/.test(String(pageId || ''))) return { profiles: [] };
+  try {
+    return { profiles: await listPageInstagram({ apiKey: secret.apiKey, pageId }) };
+  } catch (error) {
+    return { profiles: [], note: error.message };
+  }
 }
 
 export async function publishMetaAd(auth, req, id) {

@@ -357,12 +357,69 @@ export async function listMetaPages({ apiKey }) {
     .map((row) => ({ id: String(row.id), name: String(row.name).slice(0, 180) }));
 }
 
-const AD_PLANS = {
-  OUTCOME_TRAFFIC: { goal: 'LINK_CLICKS', destination: 'WEBSITE', cta: 'LEARN_MORE', lead: false },
-  OUTCOME_AWARENESS: { goal: 'REACH', destination: 'WEBSITE', cta: 'LEARN_MORE', lead: false },
-  OUTCOME_LEADS: { goal: 'LEAD_GENERATION', destination: 'ON_AD', cta: 'SIGN_UP', lead: true },
-  OUTCOME_SALES: { goal: 'LINK_CLICKS', destination: 'WEBSITE', cta: 'SHOP_NOW', lead: false }
-};
+export async function listMetaPixels({ apiKey, accountId }) {
+  const rows = await list(`act_${actId(accountId)}/adspixels`, apiKey, { fields: 'id,name', limit: '50' });
+  return rows
+    .filter((row) => row.id)
+    .map((row) => ({ id: String(row.id), name: String(row.name || 'Pixel').slice(0, 180) }));
+}
+
+export async function listPageInstagram({ apiKey, pageId }) {
+  const token = await pageAccessToken(apiKey, pageId);
+  const page = await graph(String(pageId), token, { fields: 'instagram_business_account{id,username}' });
+  const profile = page.instagram_business_account;
+  if (!profile?.id) return [];
+  return [{ id: String(profile.id), name: profile.username ? `@${profile.username}` : 'Instagram' }];
+}
+
+function deliveryPlan(objective, conversion, pixelId) {
+  if (objective === 'OUTCOME_AWARENESS') {
+    return { goal: 'REACH', destination: 'WEBSITE', cta: 'LEARN_MORE', lead: false, messenger: false };
+  }
+  if (conversion === 'messenger') {
+    return { goal: 'CONVERSATIONS', destination: 'MESSENGER', cta: 'MESSAGE_PAGE', lead: false, messenger: true };
+  }
+  if (conversion === 'website' || objective === 'OUTCOME_TRAFFIC' || objective === 'OUTCOME_SALES') {
+    return {
+      goal: pixelId ? 'OFFSITE_CONVERSIONS' : 'LINK_CLICKS',
+      destination: 'WEBSITE',
+      cta: objective === 'OUTCOME_SALES' ? 'SHOP_NOW' : 'LEARN_MORE',
+      lead: false,
+      messenger: false
+    };
+  }
+  return { goal: 'LEAD_GENERATION', destination: 'ON_AD', cta: 'SIGN_UP', lead: true, messenger: false };
+}
+
+function scheduleTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()) || date.getTime() < Date.now() - 60000) return '';
+  return String(Math.floor(date.getTime() / 1000));
+}
+
+function targetingFor(input) {
+  const targeting = {
+    geo_locations: { countries: ['IN'] },
+    targeting_automation: { advantage_audience: input.advantageAudience === false ? 0 : 1 }
+  };
+  if (input.placements !== 'manual') return targeting;
+  const feeds = Array.isArray(input.placementFeeds) ? input.placementFeeds : [];
+  const facebook = [];
+  const instagram = [];
+  if (feeds.includes('facebook_feed')) facebook.push('feed');
+  if (feeds.includes('facebook_story')) facebook.push('story');
+  if (feeds.includes('instagram_feed')) instagram.push('stream');
+  if (feeds.includes('instagram_story')) instagram.push('story');
+  const platforms = [];
+  if (facebook.length) platforms.push('facebook');
+  if (instagram.length) platforms.push('instagram');
+  if (!platforms.length) throw new ApiError(422, 'Choose at least one placement.', 'validation_error');
+  targeting.publisher_platforms = platforms;
+  if (facebook.length) targeting.facebook_positions = facebook;
+  if (instagram.length) targeting.instagram_positions = instagram;
+  return targeting;
+}
 
 function imageBytes(raw) {
   const cleaned = String(raw || '').replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').replace(/\s/g, '');
@@ -405,67 +462,145 @@ async function createLeadForm(pageId, pageToken, name, link) {
   return String(created.id);
 }
 
-export async function createMetaAd({ apiKey, accountId, name, objective, dailyBudget, pageId, headline, message, link, imageBase64, country, publish }) {
-  const plan = AD_PLANS[objective];
-  if (!plan) throw new ApiError(422, 'Choose a Meta campaign objective.', 'validation_error');
-  const website = new URL(link);
+function storySpec(input, linkData) {
+  const spec = { page_id: input.pageId, link_data: linkData };
+  if (input.instagramId) spec.instagram_actor_id = input.instagramId;
+  return spec;
+}
+
+async function makeCreative(act, apiKey, input, imageHash, formId, plan, variant) {
+  const headline = String(variant?.headline || input.headline).slice(0, 80);
+  const text = String(variant?.message || input.message).slice(0, 500);
+  const website = input.website.toString();
+  const cta = plan.messenger ? 'MESSAGE_PAGE' : plan.lead ? 'SIGN_UP' : (input.cta || plan.cta);
+  const useDynamic = input.dynamicCreative && !plan.lead && !plan.messenger;
+  if (useDynamic) {
+    const titles = [{ text: headline }];
+    const bodies = [{ text }];
+    if (input.headlineB) titles.push({ text: String(input.headlineB).slice(0, 80) });
+    if (input.messageB) bodies.push({ text: String(input.messageB).slice(0, 500) });
+    const created = await graph(`act_${act}/adcreatives`, apiKey, {
+      name: `${input.name} creative`.slice(0, 180),
+      object_story_spec: JSON.stringify({ page_id: input.pageId, ...(input.instagramId ? { instagram_actor_id: input.instagramId } : {}) }),
+      asset_feed_spec: JSON.stringify({
+        images: [{ hash: imageHash }],
+        bodies,
+        titles,
+        link_urls: [{ website_url: website }],
+        call_to_action_types: [cta],
+        ad_formats: ['SINGLE_IMAGE']
+      })
+    }, 'POST');
+    if (!created.id) throw new ApiError(422, 'Meta Ads did not return an ad creative.', 'validation_error');
+    return String(created.id);
+  }
+  const destination = plan.lead ? 'https://fb.me/' : plan.messenger ? `https://m.me/${input.pageId}` : website;
+  const linkData = {
+    message: text,
+    name: headline,
+    image_hash: imageHash,
+    link: destination,
+    call_to_action: plan.lead
+      ? { type: 'SIGN_UP', value: { lead_gen_form_id: formId } }
+      : { type: cta, value: { link: destination } }
+  };
+  const created = await graph(`act_${act}/adcreatives`, apiKey, {
+    name: `${input.name} ${variant?.label || 'creative'}`.slice(0, 180),
+    object_story_spec: JSON.stringify(storySpec(input, linkData))
+  }, 'POST');
+  if (!created.id) throw new ApiError(422, 'Meta Ads did not return an ad creative.', 'validation_error');
+  return String(created.id);
+}
+
+async function makeAd(act, apiKey, name, adsetId, creativeId) {
+  const created = await graph(`act_${act}/ads`, apiKey, {
+    name: String(name).slice(0, 180),
+    adset_id: adsetId,
+    creative: JSON.stringify({ creative_id: creativeId }),
+    status: 'PAUSED'
+  }, 'POST');
+  if (!created.id) throw new ApiError(422, 'Meta Ads did not return an ad.', 'validation_error');
+  return String(created.id);
+}
+
+export async function createMetaAd(input) {
+  const {
+    apiKey, accountId, name, objective, dailyBudget, pageId, headline, message, link, imageBase64, publish
+  } = input;
+  const pixelId = input.pixelId || '';
+  const plan = deliveryPlan(objective, input.conversion, pixelId);
+  let website;
+  try { website = new URL(link); } catch { throw new ApiError(422, 'Enter a valid website link.', 'validation_error'); }
   if (website.protocol !== 'https:') throw new ApiError(422, 'The website link must start with https.', 'validation_error');
+  if (input.budgetMode === 'lifetime' && !input.endDate) {
+    throw new ApiError(422, 'A lifetime budget needs an end date.', 'validation_error');
+  }
   const bytes = imageBytes(imageBase64);
   const act = actId(accountId);
   const account = await graph(`act_${act}`, apiKey, { fields: 'currency' });
-  const budget = Math.round(Number(dailyBudget) * (OFFSET[account.currency] || 100));
-  if (!Number.isFinite(budget) || budget < 1) throw new ApiError(422, 'Enter a daily budget.', 'validation_error');
+  const fullBudget = Math.round(Number(dailyBudget) * (OFFSET[account.currency] || 100));
+  if (!Number.isFinite(fullBudget) || fullBudget < 1) throw new ApiError(422, 'Enter a daily budget.', 'validation_error');
   const pageToken = await pageAccessToken(apiKey, pageId);
   const imageHash = await uploadImage(act, apiKey, bytes);
   const formId = plan.lead ? await createLeadForm(pageId, pageToken, name, website.toString()) : '';
-  const campaign = await graph(`act_${act}/campaigns`, apiKey, {
+  const campaignLevel = input.budgetLevel === 'campaign';
+  const budgetKey = input.budgetMode === 'lifetime' ? 'lifetime_budget' : 'daily_budget';
+  const campaignParams = {
     name: String(name).slice(0, 180),
     objective,
     status: 'PAUSED',
     special_ad_categories: JSON.stringify(['HOUSING']),
     is_adset_budget_sharing_enabled: 'false'
-  }, 'POST');
-  if (!campaign.id) throw new ApiError(422, 'Meta Ads did not return a campaign.', 'validation_error');
-  const adsetParams = {
-    name: `${name} ad set`.slice(0, 180),
-    campaign_id: campaign.id,
-    daily_budget: String(budget),
-    billing_event: 'IMPRESSIONS',
-    optimization_goal: plan.goal,
-    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    destination_type: plan.destination,
-    targeting: JSON.stringify({
-      geo_locations: { countries: [country || 'IN'] },
-      targeting_automation: { advantage_audience: 0 }
-    }),
-    status: 'PAUSED'
   };
-  if (plan.lead) adsetParams.promoted_object = JSON.stringify({ page_id: pageId });
-  const adset = await graph(`act_${act}/adsets`, apiKey, adsetParams, 'POST');
-  if (!adset.id) throw new ApiError(422, 'Meta Ads did not return an ad set.', 'validation_error');
-  const linkData = {
-    message: String(message).slice(0, 500),
-    name: String(headline).slice(0, 80),
-    image_hash: imageHash,
-    link: plan.lead ? 'https://fb.me/' : website.toString(),
-    call_to_action: plan.lead
-      ? { type: plan.cta, value: { lead_gen_form_id: formId } }
-      : { type: plan.cta, value: { link: website.toString() } }
-  };
-  const creative = await graph(`act_${act}/adcreatives`, apiKey, {
-    name: `${name} creative`.slice(0, 180),
-    object_story_spec: JSON.stringify({ page_id: pageId, link_data: linkData })
-  }, 'POST');
-  if (!creative.id) throw new ApiError(422, 'Meta Ads did not return an ad creative.', 'validation_error');
-  const ad = await graph(`act_${act}/ads`, apiKey, {
-    name: `${name} ad`.slice(0, 180),
-    adset_id: adset.id,
-    creative: JSON.stringify({ creative_id: creative.id }),
-    status: 'PAUSED'
-  }, 'POST');
-  if (!ad.id) throw new ApiError(422, 'Meta Ads did not return an ad.', 'validation_error');
-  if (publish) {
-    await setMetaCampaignStatus({ apiKey, campaignId: String(campaign.id), status: 'ACTIVE' });
+  if (campaignLevel) {
+    campaignParams[budgetKey] = String(fullBudget);
+    campaignParams.bid_strategy = 'LOWEST_COST_WITHOUT_CAP';
   }
-  return { campaignId: String(campaign.id), adsetId: String(adset.id), adId: String(ad.id) };
+  const campaign = await graph(`act_${act}/campaigns`, apiKey, campaignParams, 'POST');
+  if (!campaign.id) throw new ApiError(422, 'Meta Ads did not return a campaign.', 'validation_error');
+  const versions = input.abTest ? [true, false] : [input.advantageAudience !== false];
+  const share = Math.max(1, Math.floor(fullBudget / versions.length));
+  const start = scheduleTime(input.startDate);
+  const end = scheduleTime(input.endDate);
+  if (input.budgetMode === 'lifetime' && !end) {
+    throw new ApiError(422, 'The end date must be in the future.', 'validation_error');
+  }
+  const creativeInput = { ...input, website, pageId, name };
+  let firstAdset = '';
+  let firstAd = '';
+  for (const [index, advantage] of versions.entries()) {
+    const adsetParams = {
+      name: `${name} ${versions.length > 1 ? `test ${index + 1}` : 'ad set'}`.slice(0, 180),
+      campaign_id: campaign.id,
+      billing_event: 'IMPRESSIONS',
+      optimization_goal: plan.goal,
+      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+      destination_type: plan.destination,
+      targeting: JSON.stringify(targetingFor({ ...input, advantageAudience: advantage })),
+      status: 'PAUSED'
+    };
+    if (!campaignLevel) adsetParams[budgetKey] = String(share);
+    if (start) adsetParams.start_time = start;
+    if (end) adsetParams.end_time = end;
+    if (plan.lead || plan.messenger) adsetParams.promoted_object = JSON.stringify({ page_id: pageId });
+    if (pixelId && plan.destination === 'WEBSITE' && plan.goal === 'OFFSITE_CONVERSIONS') {
+      adsetParams.promoted_object = JSON.stringify({ pixel_id: pixelId, custom_event_type: 'LEAD' });
+    }
+    const adset = await graph(`act_${act}/adsets`, apiKey, adsetParams, 'POST');
+    if (!adset.id) throw new ApiError(422, 'Meta Ads did not return an ad set.', 'validation_error');
+    if (!firstAdset) firstAdset = String(adset.id);
+    const primary = await makeCreative(act, apiKey, creativeInput, imageHash, formId, plan);
+    const ad = await makeAd(act, apiKey, `${name} ad`, adset.id, primary);
+    if (!firstAd) firstAd = ad;
+    if (input.creativeTest && input.headlineB && !input.dynamicCreative) {
+      const second = await makeCreative(act, apiKey, creativeInput, imageHash, formId, plan, {
+        headline: input.headlineB,
+        message: input.messageB || message,
+        label: 'test'
+      });
+      await makeAd(act, apiKey, `${name} ad B`, adset.id, second);
+    }
+  }
+  if (publish) await setMetaCampaignStatus({ apiKey, campaignId: String(campaign.id), status: 'ACTIVE' });
+  return { campaignId: String(campaign.id), adsetId: firstAdset, adId: firstAd };
 }

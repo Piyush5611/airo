@@ -119,6 +119,15 @@ function ProviderApiForm({ provider, onDone }) {
   );
 }
 
+function Switch({ checked, onChange, label: text, hint }) {
+  return (
+    <label className="switch-row">
+      <span><strong>{text}</strong>{hint ? <em>{hint}</em> : null}</span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+    </label>
+  );
+}
+
 function money(value, currency) {
   if (value == null || value === '') return '—';
   const amount = Number(value);
@@ -154,6 +163,24 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [link, setLink] = useState('');
   const [imageBase64, setImageBase64] = useState('');
   const [imageName, setImageName] = useState('');
+  const [budgetLevel, setBudgetLevel] = useState('campaign');
+  const [budgetMode, setBudgetMode] = useState('daily');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [advantageAudience, setAdvantageAudience] = useState(true);
+  const [placements, setPlacements] = useState('advantage');
+  const [feeds, setFeeds] = useState(['facebook_feed', 'instagram_feed', 'facebook_story', 'instagram_story']);
+  const [conversion, setConversion] = useState('instant_form');
+  const [pixels, setPixels] = useState([]);
+  const [pixelId, setPixelId] = useState('');
+  const [profiles, setProfiles] = useState([]);
+  const [instagramId, setInstagramId] = useState('');
+  const [dynamicCreative, setDynamicCreative] = useState(false);
+  const [abTest, setAbTest] = useState(false);
+  const [creativeTest, setCreativeTest] = useState(false);
+  const [headlineB, setHeadlineB] = useState('');
+  const [messageB, setMessageB] = useState('');
+  const [cta, setCta] = useState('LEARN_MORE');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -172,8 +199,25 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         setPageId(next[0]?.id || '');
       })
       .catch((err) => { if (active) setError(err.message); });
+    api.get(`/api/connections/${id}/meta/pixels`)
+      .then((result) => { if (active) setPixels(result?.pixels || []); })
+      .catch(() => { if (active) setPixels([]); });
     return () => { active = false; };
   }, [id, canManage]);
+
+  useEffect(() => {
+    if (!canManage || !pageId) return undefined;
+    let active = true;
+    api.get(`/api/connections/${id}/meta/instagram?pageId=${pageId}`)
+      .then((result) => {
+        if (!active) return;
+        const next = result?.profiles || [];
+        setProfiles(next);
+        setInstagramId(next[0]?.id || '');
+      })
+      .catch(() => { if (active) { setProfiles([]); setInstagramId(''); } });
+    return () => { active = false; };
+  }, [id, canManage, pageId]);
 
   function onImage(event) {
     const file = event.target.files?.[0];
@@ -202,12 +246,21 @@ function MetaAdsManager({ id, data, canManage, reload }) {
       setError('Enter a daily budget.');
       return;
     }
+    if (step === 1 && budgetMode === 'lifetime' && !endDate) {
+      setError('A lifetime budget needs an end date.');
+      return;
+    }
+    if (step === 1 && placements === 'manual' && !feeds.length) {
+      setError('Choose at least one placement.');
+      return;
+    }
     if (step === 2) {
       if (!pageId) { setError('Choose a Facebook Page.'); return; }
       if (headline.trim().length < 2) { setError('Enter a headline.'); return; }
       if (message.trim().length < 2) { setError('Enter the ad text.'); return; }
       if (!/^https:\/\//i.test(link.trim())) { setError('The website link must start with https.'); return; }
       if (!imageBase64) { setError('Upload a JPG or PNG image.'); return; }
+      if (creativeTest && headlineB.trim().length < 2) { setError('Enter the second headline for the test.'); return; }
     }
     setError('');
     setStep((current) => Math.min(current + 1, steps.length - 1));
@@ -237,7 +290,23 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         link,
         imageBase64,
         country: 'IN',
-        publish: publishMode.current
+        publish: publishMode.current,
+        budgetLevel,
+        budgetMode,
+        startDate,
+        endDate,
+        advantageAudience,
+        placements,
+        placementFeeds: feeds,
+        conversion: objective === 'OUTCOME_LEADS' ? conversion : 'website',
+        pixelId,
+        instagramId,
+        dynamicCreative,
+        abTest,
+        creativeTest,
+        headlineB,
+        messageB,
+        cta
       });
       setName('');
       setHeadline('');
@@ -246,6 +315,8 @@ function MetaAdsManager({ id, data, canManage, reload }) {
       setDailyBudget('');
       setImageBase64('');
       setImageName('');
+      setHeadlineB('');
+      setMessageB('');
       setStep(0);
       setNotice(saved?.notice || (publishMode.current ? 'Ad published on Meta.' : 'Ad saved on Meta as paused.'));
       reload();
@@ -271,6 +342,16 @@ function MetaAdsManager({ id, data, canManage, reload }) {
     }
   }
 
+  const pageName = pages.find((page) => page.id === pageId)?.name || '—';
+  const instagramName = profiles.find((profile) => profile.id === instagramId)?.name || 'Not connected';
+  const setup = [
+    ['Campaign', name.trim().length > 1],
+    ['Budget and schedule', Number(dailyBudget) >= 1],
+    ['Audience', true],
+    ['Identity', Boolean(pageId)],
+    ['Ad creative', Boolean(imageBase64 && headline.trim() && message.trim())],
+    ['Website', /^https:\/\//i.test(link.trim())]
+  ];
   const rows = view === 'Ad sets' ? adsets : view === 'Ads' ? ads : campaigns;
 
   return (
@@ -296,9 +377,9 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           </div>
           {step === 0 ? (
             <>
-              <p className="quiet">Choose the goal. This is created as a housing campaign, the same category Meta uses for real estate.</p>
+              <p className="quiet">This is a housing campaign, the same category Meta uses for real estate.</p>
               <label className="stack-field">Campaign name
-                <input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={180} />
+                <input value={name} onChange={(event) => setName(event.target.value)} maxLength={180} />
               </label>
               <label className="stack-field">Objective
                 <select value={objective} onChange={(event) => setObjective(event.target.value)}>
@@ -308,57 +389,174 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                   <option value="OUTCOME_SALES">Sales</option>
                 </select>
               </label>
+              <Switch checked={abTest} onChange={setAbTest} label="A/B test" hint="Creates two ad sets and splits the budget. One uses Advantage+ audience, the other does not." />
             </>
           ) : null}
           {step === 1 ? (
             <>
-              <p className="quiet">Set the daily budget and location. Housing ads target the country, not age or interests.</p>
-              <label className="stack-field">Daily budget
+              {objective === 'OUTCOME_LEADS' ? (
+                <label className="stack-field">Conversion
+                  <select value={conversion} onChange={(event) => setConversion(event.target.value)}>
+                    <option value="instant_form">Instant form</option>
+                    <option value="messenger">Messenger</option>
+                    <option value="website">Website</option>
+                  </select>
+                </label>
+              ) : <p className="quiet">Conversion location follows the objective. Traffic and sales go to the website. Awareness is for reach.</p>}
+              <h3>Budget and schedule</h3>
+              <label className="stack-field">Budget belongs to
+                <select value={budgetLevel} onChange={(event) => setBudgetLevel(event.target.value)}>
+                  <option value="campaign">Advantage+ campaign budget</option>
+                  <option value="adset">Ad set budget</option>
+                </select>
+              </label>
+              <label className="stack-field">Budget type
+                <select value={budgetMode} onChange={(event) => setBudgetMode(event.target.value)}>
+                  <option value="daily">Daily</option>
+                  <option value="lifetime">Lifetime</option>
+                </select>
+              </label>
+              <label className="stack-field">{budgetMode === 'lifetime' ? 'Lifetime budget' : 'Daily budget'}
                 <input type="number" min="1" step="1" value={dailyBudget} onChange={(event) => setDailyBudget(event.target.value)} />
               </label>
-              <label className="stack-field">Location
-                <input value="India" readOnly />
+              <label className="stack-field">Start
+                <input type="datetime-local" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
               </label>
+              <label className="stack-field">End
+                <input type="datetime-local" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+              </label>
+              <h3>Audience</h3>
+              <Switch checked={advantageAudience} onChange={setAdvantageAudience} label="Advantage+ audience" hint="On uses Meta's suggestions. Off keeps the location control only." />
+              <dl className="review-list">
+                <div><dt>Location</dt><dd>India</dd></div>
+                <div><dt>Age</dt><dd>18–65, locked for housing ads</dd></div>
+                <div><dt>Gender</dt><dd>All genders, locked for housing ads</dd></div>
+                <div><dt>Detailed targeting</dt><dd>Not available for housing ads</dd></div>
+                <div><dt>Languages</dt><dd>All languages</dd></div>
+              </dl>
+              <h3>Placements</h3>
+              <label className="stack-field">Placement
+                <select value={placements} onChange={(event) => setPlacements(event.target.value)}>
+                  <option value="advantage">Advantage+ placements</option>
+                  <option value="manual">Choose placements</option>
+                </select>
+              </label>
+              {placements === 'manual' ? (
+                <div className="choice-grid">
+                  {[
+                    ['facebook_feed', 'Facebook Feed'],
+                    ['facebook_story', 'Facebook Stories'],
+                    ['instagram_feed', 'Instagram Feed'],
+                    ['instagram_story', 'Instagram Stories']
+                  ].map(([key, text]) => (
+                    <label key={key} className="switch-row">
+                      <span>{text}</span>
+                      <input type="checkbox" checked={feeds.includes(key)} onChange={() => setFeeds((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key])} />
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+              <h3>Tracking</h3>
+              <label className="stack-field">Facebook pixel
+                <select value={pixelId} onChange={(event) => setPixelId(event.target.value)}>
+                  <option value="">No pixel</option>
+                  {pixels.map((pixel) => <option key={pixel.id} value={pixel.id}>{pixel.name}</option>)}
+                </select>
+              </label>
+              <p className="quiet">{pixels.length ? 'A selected pixel is sent when the ad goes to the website.' : 'Meta did not return a pixel for this ad account.'}</p>
             </>
           ) : null}
           {step === 2 ? (
-            <>
-              <p className="quiet">Add the Facebook Page, image, and text. For Leads, the website link is the privacy policy on the lead form.</p>
-              <label className="stack-field">Facebook Page
-                <select value={pageId} onChange={(event) => setPageId(event.target.value)}>
-                  {pages.length ? null : <option value="">No page returned</option>}
-                  {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
-                </select>
-              </label>
-              <label className="stack-field">Headline
-                <input value={headline} onChange={(event) => setHeadline(event.target.value)} maxLength={80} />
-              </label>
-              <label className="stack-field">Ad text
-                <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={500} />
-              </label>
-              <label className="stack-field">Website
-                <input type="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="https://" />
-              </label>
-              <label className="stack-field">Image
-                <input type="file" accept="image/jpeg,image/png" onChange={onImage} />
-              </label>
-              {imageName ? <p className="quiet">{imageName}</p> : null}
-            </>
+            <div className="ad-studio">
+              <div className="stack">
+                <h3>Identity</h3>
+                <label className="stack-field">Facebook Page
+                  <select value={pageId} onChange={(event) => setPageId(event.target.value)}>
+                    {pages.length ? null : <option value="">No page returned</option>}
+                    {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
+                  </select>
+                </label>
+                <label className="stack-field">Instagram
+                  <select value={instagramId} onChange={(event) => setInstagramId(event.target.value)}>
+                    <option value="">No Instagram profile</option>
+                    {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                  </select>
+                </label>
+                <h3>Ad setup</h3>
+                <p className="quiet">Single image. Carousel and multi-advertiser units stay in Meta Ads Manager.</p>
+                <h3>Ad creative</h3>
+                <label className="stack-field">Image
+                  <input type="file" accept="image/jpeg,image/png" onChange={onImage} />
+                </label>
+                <label className="stack-field">Headline
+                  <input value={headline} onChange={(event) => setHeadline(event.target.value)} maxLength={80} />
+                </label>
+                <label className="stack-field">Primary text
+                  <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={500} />
+                </label>
+                <label className="stack-field">Website
+                  <input type="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="https://" />
+                </label>
+                <label className="stack-field">Button
+                  <select value={cta} onChange={(event) => setCta(event.target.value)}>
+                    <option value="LEARN_MORE">Learn more</option>
+                    <option value="SIGN_UP">Sign up</option>
+                    <option value="CONTACT_US">Contact us</option>
+                    <option value="SHOP_NOW">Shop now</option>
+                    <option value="MESSAGE_PAGE">Send message</option>
+                  </select>
+                </label>
+                <Switch checked={dynamicCreative} onChange={setDynamicCreative} label="Dynamic creative" hint="Meta mixes the extra headline and text. Instant forms and Messenger use one creative." />
+                {(dynamicCreative || creativeTest) ? (
+                  <>
+                    <label className="stack-field">Second headline
+                      <input value={headlineB} onChange={(event) => setHeadlineB(event.target.value)} maxLength={80} />
+                    </label>
+                    <label className="stack-field">Second text
+                      <input value={messageB} onChange={(event) => setMessageB(event.target.value)} maxLength={500} />
+                    </label>
+                  </>
+                ) : null}
+                <Switch checked={creativeTest} onChange={setCreativeTest} label="Creative testing" hint="Publishes a second ad with the second headline so you can compare them." />
+              </div>
+              <aside className="ad-preview">
+                <p>Preview</p>
+                <strong>{pageName}</strong>
+                <em>{instagramName}</em>
+                {imageBase64 ? <img src={imageBase64} alt="" /> : <div className="ad-preview-empty">Image</div>}
+                <span>{message || 'Primary text'}</span>
+                <b>{headline || 'Headline'}</b>
+                <small>{label(cta.toLowerCase())}</small>
+              </aside>
+            </div>
           ) : null}
           {step === 3 ? (
             <>
-              <p className="quiet">Check the ad, then save it paused or publish it on Meta.</p>
+              <p className="quiet">Setup check is what you filled in. Meta calculates the campaign score in Ads Manager after the ad is published.</p>
+              <ul className="check-list">
+                {setup.map(([item, done]) => <li key={item} className={done ? 'is-done' : ''}>{done ? 'Ready' : 'Missing'} · {item}</li>)}
+              </ul>
+              <p className="quiet">{setup.filter((item) => item[1]).length} of {setup.length} sections ready.</p>
               <dl className="review-list">
                 <div><dt>Campaign</dt><dd>{name}</dd></div>
                 <div><dt>Objective</dt><dd>{label(objective.replace('OUTCOME_', '').toLowerCase())}</dd></div>
-                <div><dt>Daily budget</dt><dd>{money(dailyBudget, currency)}</dd></div>
-                <div><dt>Location</dt><dd>India</dd></div>
-                <div><dt>Page</dt><dd>{pages.find((page) => page.id === pageId)?.name || '—'}</dd></div>
-                <div><dt>Headline</dt><dd>{headline}</dd></div>
-                <div><dt>Text</dt><dd>{message}</dd></div>
-                <div><dt>Website</dt><dd>{link}</dd></div>
-                <div><dt>Image</dt><dd>{imageName || '—'}</dd></div>
+                <div><dt>A/B test</dt><dd>{abTest ? 'Two ad sets' : 'Off'}</dd></div>
+                <div><dt>Conversion</dt><dd>{objective === 'OUTCOME_LEADS' ? label(conversion) : 'Website or reach'}</dd></div>
+                <div><dt>Budget</dt><dd>{money(dailyBudget, currency)} · {budgetLevel === 'campaign' ? 'Campaign' : 'Ad set'} · {budgetMode}</dd></div>
+                <div><dt>Schedule</dt><dd>{startDate || 'Starts when published'}{endDate ? ` to ${endDate}` : ''}</dd></div>
+                <div><dt>Audience</dt><dd>{advantageAudience ? 'Advantage+ on' : 'Advantage+ off'} · India</dd></div>
+                <div><dt>Placements</dt><dd>{placements === 'advantage' ? 'Advantage+ placements' : `${feeds.length} selected`}</dd></div>
+                <div><dt>Pixel</dt><dd>{pixels.find((pixel) => pixel.id === pixelId)?.name || 'Not selected'}</dd></div>
+                <div><dt>Identity</dt><dd>{pageName} · {instagramName}</dd></div>
+                <div><dt>Creative</dt><dd>{headline}{dynamicCreative ? ' · Dynamic creative' : ''}{creativeTest ? ' · Creative test' : ''}</dd></div>
               </dl>
+              <aside className="ad-preview">
+                <p>Preview</p>
+                <strong>{pageName}</strong>
+                {imageBase64 ? <img src={imageBase64} alt="" /> : null}
+                <span>{message}</span>
+                <b>{headline}</b>
+              </aside>
             </>
           ) : null}
           <div className="page-actions">

@@ -82,6 +82,71 @@ function leads(actions) {
   return String(hit.value);
 }
 
+function fragmentValues(fragment) {
+  if (!fragment?.values) return {};
+  if (typeof fragment.values === 'object') return fragment.values;
+  try {
+    return JSON.parse(fragment.values);
+  } catch {
+    return {};
+  }
+}
+
+function isCampaignFragment(fragment) {
+  const type = String(fragment.ad_object_type || '').toLowerCase().replace(/[\s-]+/g, '_');
+  return type === 'campaign' || type.endsWith('_campaign');
+}
+
+async function draftCampaigns(act, token, publishedIds, currency) {
+  let drafts = [];
+  try {
+    drafts = await list(`act_${act}/addrafts`, token, { fields: 'id,name,ad_object_id' });
+  } catch {
+    return [];
+  }
+  const seen = new Set(publishedIds.map(String));
+  const objects = [];
+  for (const draft of drafts) {
+    let fragments = [];
+    try {
+      fragments = await list(`${draft.id}/addraft_fragments`, token, {
+        fields: 'id,name,ad_object_id,ad_object_type,ad_object_name,budget,values'
+      });
+    } catch {
+      fragments = [];
+    }
+    const rows = fragments.filter(isCampaignFragment);
+    const source = rows.length ? rows : (!fragments.length && draft.name ? [draft] : []);
+    for (const fragment of source) {
+      const values = fragmentValues(fragment);
+      const externalId = String(fragment.ad_object_id || fragment.id || '').slice(0, 80);
+      if (!externalId || seen.has(externalId)) continue;
+      seen.add(externalId);
+      objects.push({
+        type: 'campaign',
+        externalId,
+        name: String(fragment.ad_object_name || values.name || fragment.name || draft.name || 'Draft campaign').slice(0, 180),
+        parent: null,
+        payload: {
+          origin: 'api',
+          status: 'DRAFT',
+          delivery: 'IN_DRAFT',
+          objective: values.objective || '',
+          budget: major(values.daily_budget || values.lifetime_budget || fragment.budget, currency),
+          budgetKind: values.daily_budget ? 'daily' : '',
+          currency,
+          spend: null,
+          impressions: null,
+          clicks: null,
+          reach: null,
+          leads: null
+        }
+      });
+    }
+  }
+  return objects;
+}
+
 export async function verifyMetaAccount({ apiKey, accountId }) {
   try {
     await graph(`act_${actId(accountId)}`, apiKey, { fields: 'id,name,currency' });
@@ -119,6 +184,7 @@ export async function pullMetaAds({ apiKey, accountId }) {
     insightNote = error.message;
   }
   const byCampaign = new Map(insights.map((row) => [String(row.campaign_id), row]));
+  const drafts = await draftCampaigns(act, apiKey, campaigns.map((row) => row.id), currency);
   const objects = [
     ...campaigns.map((row) => {
       const insight = byCampaign.get(String(row.id));
@@ -144,6 +210,7 @@ export async function pullMetaAds({ apiKey, accountId }) {
         }
       };
     }),
+    ...drafts,
     ...adsets.map((row) => ({
       type: 'adset',
       externalId: String(row.id),
@@ -171,8 +238,8 @@ export async function pullMetaAds({ apiKey, accountId }) {
     }))
   ];
   const summary = insightNote
-    ? `Meta returned ${campaigns.length} campaigns. Report failed: ${insightNote}`
-    : `Meta returned ${campaigns.length} campaigns for the last 30 days.`;
+    ? `Meta returned ${campaigns.length} campaigns and ${drafts.length} drafts. Report failed: ${insightNote}`
+    : `Meta returned ${campaigns.length} campaigns and ${drafts.length} drafts for the last 30 days.`;
   return {
     mode: 'live',
     providerKey: 'meta_ads',

@@ -358,13 +358,38 @@ async function safeList(path, apiKey, params) {
   }
 }
 
-export async function listMetaPages({ apiKey, accountId }) {
-  const act = actId(accountId);
-  let rows = await safeList(`act_${act}/promote_pages`, apiKey, { fields: 'id,name', limit: '50' });
-  if (!rows.length) rows = await safeList('me/accounts', apiKey, { fields: 'id,name', limit: '50' });
-  return rows
+function pageChoices(rows) {
+  return (rows || [])
     .filter((row) => row.id && row.name)
     .map((row) => ({ id: String(row.id), name: String(row.name).slice(0, 180) }));
+}
+
+export async function listMetaPages({ apiKey, accountId }) {
+  const act = actId(accountId);
+  const found = new Map();
+  function add(rows) {
+    for (const page of pageChoices(rows)) {
+      if (!found.has(page.id)) found.set(page.id, page);
+    }
+  }
+  add(await safeList(`act_${act}/promote_pages`, apiKey, { fields: 'id,name', limit: '50' }));
+  add(await safeList('me/accounts', apiKey, { fields: 'id,name', limit: '50' }));
+  const businessIds = new Set();
+  try {
+    const account = await graph(`act_${act}`, apiKey, { fields: 'business' });
+    if (account?.business?.id) businessIds.add(String(account.business.id));
+  } catch {
+    // The ad account did not name a business.
+  }
+  const businesses = await safeList('me/businesses', apiKey, { fields: 'id,name', limit: '25' });
+  for (const business of businesses) {
+    if (business.id) businessIds.add(String(business.id));
+  }
+  for (const businessId of businessIds) {
+    add(await safeList(`${businessId}/owned_pages`, apiKey, { fields: 'id,name', limit: '50' }));
+    add(await safeList(`${businessId}/client_pages`, apiKey, { fields: 'id,name', limit: '50' }));
+  }
+  return [...found.values()];
 }
 
 export async function searchPublicAds({ apiKey, query }) {
@@ -557,12 +582,16 @@ function imageBytes(raw) {
 }
 
 async function pageAccessToken(apiKey, pageId) {
-  const rows = await list('me/accounts', apiKey, { fields: 'id,access_token', limit: '50' });
+  const rows = await safeList('me/accounts', apiKey, { fields: 'id,access_token', limit: '50' });
   const page = rows.find((row) => String(row.id) === String(pageId));
-  if (!page?.access_token) {
-    throw new ApiError(422, 'This token cannot advertise for that Facebook Page.', 'validation_error');
+  if (page?.access_token) return page.access_token;
+  try {
+    const direct = await graph(String(pageId), apiKey, { fields: 'access_token' });
+    if (direct?.access_token) return direct.access_token;
+  } catch {
+    // This token cannot act as the Page.
   }
-  return page.access_token;
+  throw new ApiError(422, 'This token cannot advertise for that Facebook Page. Assign the Page to this ad account in Meta, then refresh.', 'validation_error');
 }
 
 async function uploadImage(act, apiKey, bytes) {

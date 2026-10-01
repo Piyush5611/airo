@@ -1,6 +1,6 @@
 import { CATEGORIES } from '../domain/providers.js';
-import { NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall } from '../integrations/nexcall.js';
-import { createMetaAd, createMetaCampaign as createOnMeta, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
+import { createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -212,9 +212,12 @@ export async function saveProviderApi(auth, req) {
   if (provider.providerKey === 'nexcall') {
     const url = baseUrl || NEXCALL_BASE;
     try {
-      await pullNexcall({ apiKey, baseUrl: url });
+      await verifyNexcall({ apiKey, baseUrl: url });
     } catch (error) {
-      if (error.code === 'nexcall_unreachable') throw new ApiError(422, 'The API did not respond.', 'validation_error');
+      if (error.code === 'nexcall_unreachable') {
+        const detail = error.cause?.code || error.cause?.message || '';
+        throw new ApiError(422, detail ? `The API did not respond. ${detail}` : 'The API did not respond.', 'validation_error');
+      }
       throw new ApiError(422, 'Wrong API.', 'validation_error');
     }
   } else if (provider.providerKey === 'meta_ads') {
@@ -422,7 +425,7 @@ export async function createMetaCampaign(auth, req, id) {
 
 export async function metaPages(auth, id) {
   const secret = await metaSecret(auth, id);
-  const pages = await listMetaPages({ apiKey: secret.apiKey });
+  const pages = await listMetaPages({ apiKey: secret.apiKey, accountId: secret.accountId });
   return { pages };
 }
 
@@ -437,12 +440,29 @@ export async function metaPixels(auth, id) {
 
 export async function metaInstagram(auth, id, pageId) {
   const secret = await metaSecret(auth, id);
-  if (!/^\d{5,20}$/.test(String(pageId || ''))) return { profiles: [] };
-  try {
-    return { profiles: await listPageInstagram({ apiKey: secret.apiKey, pageId }) };
-  } catch (error) {
-    return { profiles: [], note: error.message };
+  const fromAccount = await listAdInstagram({ apiKey: secret.apiKey, accountId: secret.accountId });
+  let fromPage = [];
+  if (/^\d{5,20}$/.test(String(pageId || ''))) {
+    try { fromPage = await listPageInstagram({ apiKey: secret.apiKey, pageId }); } catch { fromPage = []; }
   }
+  const profiles = [...fromAccount, ...fromPage].filter((profile, index, all) => all.findIndex((item) => item.id === profile.id) === index);
+  return { profiles };
+}
+
+export async function editMetaAdCampaign(auth, req, id) {
+  const secret = await metaSecret(auth, id);
+  await editMetaCampaign({
+    apiKey: secret.apiKey,
+    accountId: secret.accountId,
+    campaignId: req.body.campaignId,
+    name: req.body.name,
+    dailyBudget: req.body.dailyBudget,
+    status: req.body.status
+  });
+  await recordAudit(req, { action: 'connection.meta_campaign_edited', resource: 'connection', resourceId: id });
+  const synced = await sync(auth, req, id);
+  synced.notice = 'Campaign updated in Meta.';
+  return synced;
 }
 
 export async function publishMetaAd(auth, req, id) {

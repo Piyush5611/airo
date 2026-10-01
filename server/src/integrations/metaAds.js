@@ -350,11 +350,28 @@ export async function setMetaCampaignStatus({ apiKey, campaignId, status }) {
   }
 }
 
-export async function listMetaPages({ apiKey }) {
-  const rows = await list('me/accounts', apiKey, { fields: 'id,name', limit: '50' });
+async function safeList(path, apiKey, params) {
+  try {
+    return await list(path, apiKey, params);
+  } catch {
+    return [];
+  }
+}
+
+export async function listMetaPages({ apiKey, accountId }) {
+  const act = actId(accountId);
+  let rows = await safeList(`act_${act}/promote_pages`, apiKey, { fields: 'id,name', limit: '50' });
+  if (!rows.length) rows = await safeList('me/accounts', apiKey, { fields: 'id,name', limit: '50' });
   return rows
     .filter((row) => row.id && row.name)
     .map((row) => ({ id: String(row.id), name: String(row.name).slice(0, 180) }));
+}
+
+export async function listAdInstagram({ apiKey, accountId }) {
+  const rows = await safeList(`act_${actId(accountId)}/instagram_accounts`, apiKey, { fields: 'id,username', limit: '50' });
+  return rows
+    .filter((row) => row.id)
+    .map((row) => ({ id: String(row.id), name: row.username ? `@${row.username}` : 'Instagram' }));
 }
 
 export async function listMetaPixels({ apiKey, accountId }) {
@@ -378,6 +395,12 @@ function deliveryPlan(objective, conversion, pixelId) {
   }
   if (conversion === 'messenger') {
     return { goal: 'CONVERSATIONS', destination: 'MESSENGER', cta: 'MESSAGE_PAGE', lead: false, messenger: true };
+  }
+  if (conversion === 'instant_messenger' || conversion === 'website_forms') {
+    return { goal: 'LEAD_GENERATION', destination: 'ON_AD', cta: 'SIGN_UP', lead: true, messenger: false };
+  }
+  if (conversion === 'calls' || conversion === 'website_calls') {
+    return { goal: 'QUALITY_CALL', destination: 'PHONE_CALL', cta: 'CALL_NOW', lead: false, messenger: false, call: true };
   }
   if (conversion === 'website' || objective === 'OUTCOME_TRAFFIC' || objective === 'OUTCOME_SALES') {
     return {
@@ -472,7 +495,7 @@ async function makeCreative(act, apiKey, input, imageHash, formId, plan, variant
   const headline = String(variant?.headline || input.headline).slice(0, 80);
   const text = String(variant?.message || input.message).slice(0, 500);
   const website = input.website.toString();
-  const cta = plan.messenger ? 'MESSAGE_PAGE' : plan.lead ? 'SIGN_UP' : (input.cta || plan.cta);
+  const cta = plan.messenger ? 'MESSAGE_PAGE' : plan.lead ? 'SIGN_UP' : plan.call ? 'CALL_NOW' : (input.cta || plan.cta);
   const useDynamic = input.dynamicCreative && !plan.lead && !plan.messenger;
   if (useDynamic) {
     const titles = [{ text: headline }];
@@ -521,6 +544,23 @@ async function makeAd(act, apiKey, name, adsetId, creativeId) {
   }, 'POST');
   if (!created.id) throw new ApiError(422, 'Meta Ads did not return an ad.', 'validation_error');
   return String(created.id);
+}
+
+export async function editMetaCampaign({ apiKey, accountId, campaignId, name, dailyBudget, status }) {
+  if (!/^\d{5,20}$/.test(String(campaignId || ''))) {
+    throw new ApiError(422, 'Unknown Meta campaign.', 'validation_error');
+  }
+  const params = {};
+  if (name) params.name = String(name).slice(0, 180);
+  if (status === 'ACTIVE' || status === 'PAUSED') params.status = status;
+  if (dailyBudget) {
+    const account = await graph(`act_${actId(accountId)}`, apiKey, { fields: 'currency' });
+    const budget = Math.round(Number(dailyBudget) * (OFFSET[account.currency] || 100));
+    if (!Number.isFinite(budget) || budget < 1) throw new ApiError(422, 'Enter a daily budget.', 'validation_error');
+    params.daily_budget = String(budget);
+  }
+  if (!Object.keys(params).length) throw new ApiError(422, 'Nothing to update.', 'validation_error');
+  await graph(String(campaignId), apiKey, params, 'POST');
 }
 
 export async function createMetaAd(input) {

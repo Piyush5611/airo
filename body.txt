@@ -1,0 +1,1 @@
+{"success":false,"message":"Access denied. Provide Authorization Bearer token or x-api-key."}

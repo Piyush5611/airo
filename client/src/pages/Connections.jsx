@@ -121,10 +121,10 @@ function ProviderApiForm({ provider, onDone }) {
 
 function Switch({ checked, onChange, label: text, hint }) {
   return (
-    <label className="switch-row">
+    <div className="switch-row">
       <span><strong>{text}</strong>{hint ? <em>{hint}</em> : null}</span>
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-    </label>
+      <button type="button" className={checked ? 'toggle is-on' : 'toggle'} aria-pressed={checked} onClick={() => onChange(!checked)}>{checked ? 'On' : 'Off'}</button>
+    </div>
   );
 }
 
@@ -185,24 +185,34 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
+  const [editing, setEditing] = useState(null);
   const publishMode = useRef(false);
   const steps = ['Campaign', 'Ad set', 'Ad', 'Review'];
 
-  useEffect(() => {
-    if (!canManage) return undefined;
-    let active = true;
+  function loadIdentity() {
     api.get(`/api/connections/${id}/meta/pages`)
       .then((result) => {
-        if (!active) return;
         const next = result?.pages || [];
         setPages(next);
-        setPageId(next[0]?.id || '');
+        setPageId((current) => current || next[0]?.id || '');
       })
-      .catch((err) => { if (active) setError(err.message); });
+      .catch((err) => setError(err.message));
+    api.get(`/api/connections/${id}/meta/instagram`)
+      .then((result) => {
+        const next = result?.profiles || [];
+        setProfiles(next);
+        setInstagramId((current) => current || next[0]?.id || '');
+      })
+      .catch(() => setProfiles([]));
     api.get(`/api/connections/${id}/meta/pixels`)
-      .then((result) => { if (active) setPixels(result?.pixels || []); })
-      .catch(() => { if (active) setPixels([]); });
-    return () => { active = false; };
+      .then((result) => setPixels(result?.pixels || []))
+      .catch(() => setPixels([]));
+  }
+
+  useEffect(() => {
+    if (!canManage) return undefined;
+    loadIdentity();
+    return undefined;
   }, [id, canManage]);
 
   useEffect(() => {
@@ -212,10 +222,11 @@ function MetaAdsManager({ id, data, canManage, reload }) {
       .then((result) => {
         if (!active) return;
         const next = result?.profiles || [];
+        if (!next.length) return;
         setProfiles(next);
-        setInstagramId(next[0]?.id || '');
+        setInstagramId((current) => current || next[0].id);
       })
-      .catch(() => { if (active) { setProfiles([]); setInstagramId(''); } });
+      .catch(() => {});
     return () => { active = false; };
   }, [id, canManage, pageId]);
 
@@ -327,6 +338,28 @@ function MetaAdsManager({ id, data, canManage, reload }) {
     }
   }
 
+  async function saveEdit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const saved = await api.post(`/api/connections/${id}/meta/edit`, {
+        campaignId: editing.id,
+        name: editing.name,
+        dailyBudget: Number(editing.budget) >= 1 ? Number(editing.budget) : undefined,
+        status: editing.status
+      });
+      setEditing(null);
+      setNotice(saved?.notice || 'Campaign updated in Meta.');
+      reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function setCampaignStatus(campaignId, next) {
     setBusy(true);
     setError('');
@@ -397,9 +430,13 @@ function MetaAdsManager({ id, data, canManage, reload }) {
               {objective === 'OUTCOME_LEADS' ? (
                 <label className="stack-field">Conversion
                   <select value={conversion} onChange={(event) => setConversion(event.target.value)}>
+                    <option value="instant_messenger">Instant forms and Messenger</option>
+                    <option value="website_forms">Website and instant forms</option>
+                    <option value="website_calls">Website and calls</option>
                     <option value="instant_form">Instant form</option>
-                    <option value="messenger">Messenger</option>
                     <option value="website">Website</option>
+                    <option value="messenger">Messenger</option>
+                    <option value="calls">Calls</option>
                   </select>
                 </label>
               ) : <p className="quiet">Conversion location follows the objective. Traffic and sales go to the website. Awareness is for reach.</p>}
@@ -470,18 +507,38 @@ function MetaAdsManager({ id, data, canManage, reload }) {
             <div className="ad-studio">
               <div className="stack">
                 <h3>Identity</h3>
-                <label className="stack-field">Facebook Page
-                  <select value={pageId} onChange={(event) => setPageId(event.target.value)}>
-                    {pages.length ? null : <option value="">No page returned</option>}
-                    {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
-                  </select>
-                </label>
-                <label className="stack-field">Instagram
-                  <select value={instagramId} onChange={(event) => setInstagramId(event.target.value)}>
-                    <option value="">No Instagram profile</option>
-                    {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-                  </select>
-                </label>
+                {pages.length ? (
+                  <label className="stack-field">Facebook Page
+                    <select value={pageId} onChange={(event) => setPageId(event.target.value)}>
+                      {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="connect-missing">
+                    <strong>Facebook Page is not connected</strong>
+                    <p className="quiet">Connect the Page to this ad account in Meta, then refresh. The Page name will show here.</p>
+                    <div className="page-actions">
+                      <a className="btn" href="https://business.facebook.com/latest/settings/pages" target="_blank" rel="noreferrer">Connect Page</a>
+                      <button className="btn" type="button" onClick={loadIdentity}>Refresh</button>
+                    </div>
+                  </div>
+                )}
+                {profiles.length ? (
+                  <label className="stack-field">Instagram
+                    <select value={instagramId} onChange={(event) => setInstagramId(event.target.value)}>
+                      {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="connect-missing">
+                    <strong>Instagram is not connected</strong>
+                    <p className="quiet">Connect the Instagram profile to the Facebook Page in Meta, then refresh.</p>
+                    <div className="page-actions">
+                      <a className="btn" href="https://business.facebook.com/latest/settings/instagram_accounts" target="_blank" rel="noreferrer">Connect Instagram</a>
+                      <button className="btn" type="button" onClick={loadIdentity}>Refresh</button>
+                    </div>
+                  </div>
+                )}
                 <h3>Ad setup</h3>
                 <p className="quiet">Single image. Carousel and multi-advertiser units stay in Meta Ads Manager.</p>
                 <h3>Ad creative</h3>
@@ -571,6 +628,27 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           </div>
         </form>
       ) : null}
+      {editing ? (
+        <form className="form-grid panel" onSubmit={saveEdit}>
+          <h2>Edit campaign</h2>
+          <label className="stack-field">Name
+            <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} required minLength={2} />
+          </label>
+          <label className="stack-field">Daily budget
+            <input type="number" min="1" step="1" value={editing.budget} onChange={(event) => setEditing({ ...editing, budget: event.target.value })} />
+          </label>
+          <label className="stack-field">Status
+            <select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })}>
+              <option value="PAUSED">Paused</option>
+              <option value="ACTIVE">Active</option>
+            </select>
+          </label>
+          <div className="page-actions">
+            <button className="btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
+            <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving' : 'Save'}</button>
+          </div>
+        </form>
+      ) : null}
       <div className="tabs" role="tablist">
         {['Campaigns', 'Ad sets', 'Ads'].map((item) => (
           <button key={item} type="button" className={view === item ? 'is-on' : ''} onClick={() => setView(item)}>{item}</button>
@@ -586,9 +664,12 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           { key: 'clicks', label: 'Clicks', render: (row) => row.fields?.clicks == null || row.fields?.clicks === '' ? '—' : num(row.fields.clicks) },
           { key: 'leads', label: 'Leads', render: (row) => row.fields?.leads == null || row.fields?.leads === '' ? '—' : num(row.fields.leads) },
           { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ACTIVE' || row.fields?.status === 'PAUSED') ? (
-            <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE')}>
-              {row.fields.status === 'ACTIVE' ? 'Pause' : 'Turn on'}
-            </button>
+            <span className="page-actions">
+              <button className="btn" type="button" disabled={busy} onClick={() => setEditing({ id: row.externalId, name: row.name, budget: row.fields?.budget || '', status: row.fields?.status || 'PAUSED' })}>Edit</button>
+              <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE')}>
+                {row.fields.status === 'ACTIVE' ? 'Pause' : 'Turn on'}
+              </button>
+            </span>
           ) : null }
         ] : [
           { key: 'name', label: 'Name' },

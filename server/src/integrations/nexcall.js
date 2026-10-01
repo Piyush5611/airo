@@ -36,9 +36,10 @@ async function pull(baseUrl, path, apiKey) {
       headers: { 'x-api-key': apiKey, Accept: 'application/json' },
       signal: AbortSignal.timeout(20000)
     });
-  } catch {
+  } catch (cause) {
     const error = new Error('Nexcall did not respond.');
     error.code = 'nexcall_unreachable';
+    error.cause = cause;
     throw error;
   }
   const body = await response.json().catch(() => ({}));
@@ -48,6 +49,11 @@ async function pull(baseUrl, path, apiKey) {
     throw error;
   }
   return body;
+}
+
+export async function verifyNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {
+  const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
+  await pull(base, '/leads?page=1&limit=1', apiKey);
 }
 
 export async function pullNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {

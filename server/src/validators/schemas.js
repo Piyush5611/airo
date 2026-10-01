@@ -80,6 +80,13 @@ export const metaCampaignSchema = body({
   status: z.enum(['PAUSED', 'ACTIVE'])
 });
 
+export const metaEditSchema = body({
+  campaignId: z.string().regex(/^\d{5,20}$/),
+  name: z.string().min(2).max(180),
+  dailyBudget: z.number().positive().max(100000000).optional(),
+  status: z.enum(['PAUSED', 'ACTIVE'])
+});
+
 export const metaStatusSchema = body({
   campaignId: z.string().regex(/^\d{5,20}$/),
   status: z.enum(['PAUSED', 'ACTIVE'])
@@ -105,7 +112,7 @@ export const metaAdSchema = body({
   advantageAudience: z.boolean().optional(),
   placements: z.enum(['advantage', 'manual']).optional(),
   placementFeeds: z.array(z.enum(['facebook_feed', 'facebook_story', 'instagram_feed', 'instagram_story'])).max(4).optional(),
-  conversion: z.enum(['instant_form', 'messenger', 'website']).optional(),
+  conversion: z.enum(['instant_form', 'messenger', 'website', 'instant_messenger', 'website_forms', 'website_calls', 'calls']).optional(),
   pixelId: optionalId,
   instagramId: optionalId,
   dynamicCreative: z.boolean().optional(),

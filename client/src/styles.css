@@ -284,7 +284,9 @@ label.stack-field { display: flex; flex-direction: column; gap: 6px; font-size: 
 .switch-row span { display: grid; gap: 2px; }
 .switch-row strong { font-size: 14px; color: var(--ink); }
 .switch-row em { font-style: normal; color: var(--muted); font-size: 12px; }
-.switch-row input { width: 18px; height: 18px; }
+.toggle { min-width: 64px; min-height: 32px; border-radius: 999px; border: 1px solid var(--line-strong); background: #eef0f6; color: var(--muted); font-weight: 700; }
+.toggle.is-on { background: var(--ink); color: white; border-color: var(--ink); }
+.connect-missing { display: grid; gap: 8px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: 14px; background: var(--surface-2); }
 .choice-grid { display: grid; gap: 0; }
 .ad-studio { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
 .ad-preview { border: 1px solid var(--line); border-radius: 16px; padding: 14px; background: white; display: grid; gap: 8px; }

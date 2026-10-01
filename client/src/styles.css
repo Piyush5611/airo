@@ -274,6 +274,15 @@ textarea { min-height: 96px; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); background: white; box-shadow: 0 0 0 4px rgba(91, 77, 255, 0.12); }
 label.stack-field { display: flex; flex-direction: column; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
 .form-grid { display: grid; gap: 14px; }
+.ad-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.ad-steps span { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 700; }
+.ad-steps b { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); font-size: 12px; }
+.ad-steps .is-on { color: var(--ink); border-color: var(--ink); background: white; }
+.ad-steps .is-on b, .ad-steps .is-done b { background: var(--ink); color: white; }
+.ad-steps .is-done { color: var(--ink); }
+.review-list { display: grid; gap: 8px; margin: 0; }
+.review-list div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; }
+.review-list dt { color: var(--muted); font-size: 12px; font-weight: 700; }
 .connect-card { display: grid; grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr); gap: 22px; align-items: start; padding: 22px; }
 .connect-card h2 { font-size: 22px; letter-spacing: -0.03em; }
 .connect-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -362,7 +371,8 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
   .scrim { display: block; position: fixed; inset: 0; background: rgba(13, 18, 32, 0.5); z-index: 25; border: 0; }
   .menu-btn { display: grid; }
   .content { padding: 16px; }
-  .kpi-grid, .metric-strip { grid-template-columns: 1fr 1fr; }
+  .kpi-grid, .metric-strip, .ad-steps { grid-template-columns: 1fr 1fr; }
+  .review-list div { grid-template-columns: 1fr; }
   .connect-fields { grid-template-columns: 1fr; }
   .hello-row h1, h1, .login-story h1 { font-size: 28px; }
   .login { grid-template-columns: 1fr; }

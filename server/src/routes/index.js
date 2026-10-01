@@ -143,8 +143,14 @@ client.post('/connections/:id/nexcall-key', requirePermission('connections.manag
 client.post('/connections/:id/sync', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.sync(req.auth, req, req.params.id));
 }));
+client.get('/connections/:id/meta/pages', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.metaPages(req.auth, req.params.id));
+}));
 client.post('/connections/:id/meta/campaigns', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaCampaignSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.createMetaCampaign(req.auth, req, req.params.id), 201);
+}));
+client.post('/connections/:id/meta/ads', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaAdSchema)), asyncHandler(async (req, res) => {
+  ok(res, await connections.publishMetaAd(req.auth, req, req.params.id), 201);
 }));
 client.post('/connections/:id/meta/status', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaStatusSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.updateMetaCampaignStatus(req.auth, req, req.params.id));

@@ -1,6 +1,6 @@
 import { CATEGORIES } from '../domain/providers.js';
 import { NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall } from '../integrations/nexcall.js';
-import { createMetaCampaign as createOnMeta, pullMetaAds, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { createMetaAd, createMetaCampaign as createOnMeta, listMetaPages, pullMetaAds, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -417,6 +417,32 @@ export async function createMetaCampaign(auth, req, id) {
   synced.notice = failed
     ? `Campaign was created in Meta. Sync failed: ${failed}`
     : 'Campaign created in Meta Ads.';
+  return synced;
+}
+
+export async function metaPages(auth, id) {
+  const secret = await metaSecret(auth, id);
+  const pages = await listMetaPages({ apiKey: secret.apiKey });
+  return { pages };
+}
+
+export async function publishMetaAd(auth, req, id) {
+  const secret = await metaSecret(auth, id);
+  await createMetaAd({
+    apiKey: secret.apiKey,
+    accountId: secret.accountId,
+    ...req.body
+  });
+  await recordAudit(req, {
+    action: req.body.publish ? 'connection.meta_ad_published' : 'connection.meta_ad_created',
+    resource: 'connection',
+    resourceId: id
+  });
+  const synced = await sync(auth, req, id);
+  const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
+  synced.notice = failed
+    ? `The ad was created in Meta. Sync failed: ${failed}`
+    : (req.body.publish ? 'Ad published on Meta.' : 'Ad saved on Meta as paused.');
   return synced;
 }
 

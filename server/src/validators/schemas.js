@@ -85,6 +85,19 @@ export const metaStatusSchema = body({
   status: z.enum(['PAUSED', 'ACTIVE'])
 });
 
+export const metaAdSchema = body({
+  name: z.string().min(2).max(180),
+  objective: z.enum(['OUTCOME_LEADS', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_SALES']),
+  dailyBudget: z.number().positive().max(100000000),
+  pageId: z.string().regex(/^\d{5,20}$/),
+  headline: z.string().min(2).max(80),
+  message: z.string().min(2).max(500),
+  link: z.string().url().max(500),
+  imageBase64: z.string().min(100).max(4000000),
+  country: z.string().regex(/^[A-Z]{2}$/).optional(),
+  publish: z.boolean()
+});
+
 export const configSchema = body({
   mapping: z.record(z.string(), z.any()).optional(),
   sync: z.record(z.string(), z.any()).optional()

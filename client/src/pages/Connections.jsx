@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -147,27 +147,107 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [name, setName] = useState('');
   const [objective, setObjective] = useState('OUTCOME_LEADS');
   const [dailyBudget, setDailyBudget] = useState('');
-  const [status, setStatus] = useState('PAUSED');
+  const [pageId, setPageId] = useState('');
+  const [pages, setPages] = useState([]);
+  const [headline, setHeadline] = useState('');
+  const [message, setMessage] = useState('');
+  const [link, setLink] = useState('');
+  const [imageBase64, setImageBase64] = useState('');
+  const [imageName, setImageName] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState(0);
+  const publishMode = useRef(false);
+  const steps = ['Campaign', 'Ad set', 'Ad', 'Review'];
 
-  async function createCampaign(event) {
+  useEffect(() => {
+    if (!canManage) return undefined;
+    let active = true;
+    api.get(`/api/connections/${id}/meta/pages`)
+      .then((result) => {
+        if (!active) return;
+        const next = result?.pages || [];
+        setPages(next);
+        setPageId(next[0]?.id || '');
+      })
+      .catch((err) => { if (active) setError(err.message); });
+    return () => { active = false; };
+  }, [id, canManage]);
+
+  function onImage(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!['image/jpeg', 'image/png'].includes(file.type) || file.size > 2000000) {
+      setError('Upload a JPG or PNG under 2 MB.');
+      setImageBase64('');
+      setImageName('');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImageBase64(String(reader.result || ''));
+      setImageName(file.name);
+      setError('');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function nextStep() {
+    if (step === 0 && name.trim().length < 2) {
+      setError('Enter a campaign name.');
+      return;
+    }
+    if (step === 1 && !(Number(dailyBudget) >= 1)) {
+      setError('Enter a daily budget.');
+      return;
+    }
+    if (step === 2) {
+      if (!pageId) { setError('Choose a Facebook Page.'); return; }
+      if (headline.trim().length < 2) { setError('Enter a headline.'); return; }
+      if (message.trim().length < 2) { setError('Enter the ad text.'); return; }
+      if (!/^https:\/\//i.test(link.trim())) { setError('The website link must start with https.'); return; }
+      if (!imageBase64) { setError('Upload a JPG or PNG image.'); return; }
+    }
+    setError('');
+    setStep((current) => Math.min(current + 1, steps.length - 1));
+  }
+
+  async function createAd(event) {
     event.preventDefault();
+    if (step < steps.length - 1) {
+      nextStep();
+      return;
+    }
+    if (!imageBase64) {
+      setError('Upload a JPG or PNG image.');
+      return;
+    }
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      const saved = await api.post(`/api/connections/${id}/meta/campaigns`, {
+      const saved = await api.post(`/api/connections/${id}/meta/ads`, {
         name,
         objective,
         dailyBudget: Number(dailyBudget),
-        status
+        pageId,
+        headline,
+        message,
+        link,
+        imageBase64,
+        country: 'IN',
+        publish: publishMode.current
       });
       setName('');
+      setHeadline('');
+      setMessage('');
+      setLink('');
       setDailyBudget('');
-      setStatus('PAUSED');
-      setNotice(saved?.notice || 'Campaign created in Meta Ads.');
+      setImageBase64('');
+      setImageName('');
+      setStep(0);
+      setNotice(saved?.notice || (publishMode.current ? 'Ad published on Meta.' : 'Ad saved on Meta as paused.'));
       reload();
     } catch (err) {
       setError(err.message);
@@ -195,7 +275,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
 
   return (
     <div className="stack">
-      {failed ? <p className="delta-down">{failed}</p> : null}
+      {failed ? <p className="delta-down">{failed}</p> : data.jobs?.[0]?.summary ? <p className="quiet">{data.jobs[0].summary}</p> : null}
       {notice ? <p>{notice}</p> : null}
       {error ? <p className="delta-down">{error}</p> : null}
       <div className="metric-strip">
@@ -205,30 +285,92 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         <div className="metric"><span>Leads</span><strong>{total(campaigns, 'leads') == null ? '—' : num(total(campaigns, 'leads'))}</strong></div>
       </div>
       {canManage ? (
-        <form className="form-grid panel" onSubmit={createCampaign}>
-          <h2>Create campaign</h2>
-          <p className="quiet">This creates a housing campaign in the connected Meta ad account. The report above is the last 30 days returned by Meta.</p>
-          <label className="stack-field">Name
-            <input value={name} onChange={(event) => setName(event.target.value)} required minLength={2} maxLength={180} />
-          </label>
-          <label className="stack-field">Objective
-            <select value={objective} onChange={(event) => setObjective(event.target.value)}>
-              <option value="OUTCOME_LEADS">Leads</option>
-              <option value="OUTCOME_TRAFFIC">Traffic</option>
-              <option value="OUTCOME_AWARENESS">Awareness</option>
-              <option value="OUTCOME_SALES">Sales</option>
-            </select>
-          </label>
-          <label className="stack-field">Daily budget
-            <input type="number" min="1" step="1" value={dailyBudget} onChange={(event) => setDailyBudget(event.target.value)} required />
-          </label>
-          <label className="stack-field">Status
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              <option value="PAUSED">Paused</option>
-              <option value="ACTIVE">Active</option>
-            </select>
-          </label>
-          <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving' : 'Create campaign'}</button>
+        <form className="form-grid panel" onSubmit={createAd}>
+          <h2>Create ad</h2>
+          <div className="ad-steps" aria-label="Ad steps">
+            {steps.map((item, index) => (
+              <span key={item} className={index === step ? 'is-on' : index < step ? 'is-done' : ''}>
+                <b>{index + 1}</b>{item}
+              </span>
+            ))}
+          </div>
+          {step === 0 ? (
+            <>
+              <p className="quiet">Choose the goal. This is created as a housing campaign, the same category Meta uses for real estate.</p>
+              <label className="stack-field">Campaign name
+                <input value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={180} />
+              </label>
+              <label className="stack-field">Objective
+                <select value={objective} onChange={(event) => setObjective(event.target.value)}>
+                  <option value="OUTCOME_LEADS">Leads</option>
+                  <option value="OUTCOME_TRAFFIC">Traffic</option>
+                  <option value="OUTCOME_AWARENESS">Awareness</option>
+                  <option value="OUTCOME_SALES">Sales</option>
+                </select>
+              </label>
+            </>
+          ) : null}
+          {step === 1 ? (
+            <>
+              <p className="quiet">Set the daily budget and location. Housing ads target the country, not age or interests.</p>
+              <label className="stack-field">Daily budget
+                <input type="number" min="1" step="1" value={dailyBudget} onChange={(event) => setDailyBudget(event.target.value)} />
+              </label>
+              <label className="stack-field">Location
+                <input value="India" readOnly />
+              </label>
+            </>
+          ) : null}
+          {step === 2 ? (
+            <>
+              <p className="quiet">Add the Facebook Page, image, and text. For Leads, the website link is the privacy policy on the lead form.</p>
+              <label className="stack-field">Facebook Page
+                <select value={pageId} onChange={(event) => setPageId(event.target.value)}>
+                  {pages.length ? null : <option value="">No page returned</option>}
+                  {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
+                </select>
+              </label>
+              <label className="stack-field">Headline
+                <input value={headline} onChange={(event) => setHeadline(event.target.value)} maxLength={80} />
+              </label>
+              <label className="stack-field">Ad text
+                <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={500} />
+              </label>
+              <label className="stack-field">Website
+                <input type="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="https://" />
+              </label>
+              <label className="stack-field">Image
+                <input type="file" accept="image/jpeg,image/png" onChange={onImage} />
+              </label>
+              {imageName ? <p className="quiet">{imageName}</p> : null}
+            </>
+          ) : null}
+          {step === 3 ? (
+            <>
+              <p className="quiet">Check the ad, then save it paused or publish it on Meta.</p>
+              <dl className="review-list">
+                <div><dt>Campaign</dt><dd>{name}</dd></div>
+                <div><dt>Objective</dt><dd>{label(objective.replace('OUTCOME_', '').toLowerCase())}</dd></div>
+                <div><dt>Daily budget</dt><dd>{money(dailyBudget, currency)}</dd></div>
+                <div><dt>Location</dt><dd>India</dd></div>
+                <div><dt>Page</dt><dd>{pages.find((page) => page.id === pageId)?.name || '—'}</dd></div>
+                <div><dt>Headline</dt><dd>{headline}</dd></div>
+                <div><dt>Text</dt><dd>{message}</dd></div>
+                <div><dt>Website</dt><dd>{link}</dd></div>
+                <div><dt>Image</dt><dd>{imageName || '—'}</dd></div>
+              </dl>
+            </>
+          ) : null}
+          <div className="page-actions">
+            {step > 0 ? <button className="btn" type="button" disabled={busy} onClick={() => { setError(''); setStep((current) => current - 1); }}>Back</button> : null}
+            {step < steps.length - 1 ? <button className="btn-primary" type="button" onClick={nextStep}>Next</button> : null}
+            {step === steps.length - 1 ? (
+              <>
+                <button className="btn" type="submit" disabled={busy || !pageId} onClick={() => { publishMode.current = false; }}>Save paused</button>
+                <button className="btn-primary" type="submit" disabled={busy || !pageId} onClick={() => { publishMode.current = true; }}>{busy ? 'Saving' : 'Publish'}</button>
+              </>
+            ) : null}
+          </div>
         </form>
       ) : null}
       <div className="tabs" role="tablist">
@@ -289,7 +431,7 @@ export function ConnectionDetail() {
     <Page
       eyebrow={data ? `Connections / ${label(data.category)}` : 'Connections'}
       title={data?.name || 'Connection'}
-      lede={meta ? 'Campaigns, ads, and the last 30 days come from the connected Meta ad account.' : 'Only records returned by this tool\'s API or posted to its webhook.'}
+      lede={meta ? 'Create the campaign, ad set, and ad here, then publish them to the connected Meta account.' : 'Only records returned by this tool\'s API or posted to its webhook.'}
       actions={can('connections.manage') && data ? (
         <>
           <button className="btn" disabled={busy} onClick={() => act(`/api/connections/${id}/sync`)}>Sync</button>

@@ -916,6 +916,13 @@ export function ConnectionDetail() {
         {data?.linked ? (
           <div className="stack">
             <p><Badge value={data.status} /> <span className="quiet">Last sync {when(data.lastSyncAt)}.</span></p>
+            {data.providerKey === 'nexcall' ? (
+              <section className="panel">
+                <h2>Connected</h2>
+                <p>W-Caller verified this key. It is saved for this business.</p>
+                <p className="quiet">{data.credentialPreview}</p>
+              </section>
+            ) : null}
             {meta ? <MetaAdsManager id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
             {!meta && data.webhookPath ? (
               <section className="panel">
@@ -934,8 +941,8 @@ export function ConnectionDetail() {
             ) : null}
             {!meta && !records.length ? (
               <div className="empty">
-                <strong>No API or webhook records.</strong>
-                <p className="quiet">This page stays empty until {data.name} returns data. Sample campaigns, leads, and spend are not listed here.</p>
+                <strong>{data.providerKey === 'nexcall' ? 'No call records yet.' : 'No API or webhook records.'}</strong>
+                <p className="quiet">{data.providerKey === 'nexcall' ? 'The API key is already saved. Press Sync when you want the calls from W-Caller.' : `This page stays empty until ${data.name} returns data. Sample campaigns, leads, and spend are not listed here.`}</p>
               </div>
             ) : null}
           </div>

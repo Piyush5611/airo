@@ -42,9 +42,8 @@ function keyPreview(secret) {
   return `••••${String(secret.apiKey).slice(-4)}`;
 }
 
-function isLinked(connection, secret, lastJobStatus) {
+function isLinked(connection, secret) {
   if (!secret?.apiKey || connection.status !== 'connected' || connection.mode !== 'live') return false;
-  if (connection.providerKey === 'nexcall') return lastJobStatus === 'succeeded';
   return secret.verified === true;
 }
 
@@ -53,7 +52,7 @@ function publicConnection(row) {
   const secret = readSecret(ciphertext);
   const preview = keyPreview(secret);
   const live = connection.mode === 'live' && Boolean(preview);
-  const linked = isLinked(connection, secret, connection.lastJobStatus);
+  const linked = isLinked(connection, secret);
   return {
     ...connection,
     apiKeyStored: Boolean(preview),
@@ -111,7 +110,7 @@ export async function detail(auth, id) {
     logs,
     errors,
     records: objects.map(liveRecord).filter(Boolean),
-    linked: isLinked(connection, storedSecret, jobs[0]?.status),
+    linked: isLinked(connection, storedSecret),
     webhookPath: canManage && token ? `/api/hooks/${token}` : null,
     tool: connection.providerKey === 'nexcall' ? await nexcallTool(id, connection.mode) : null
   };
@@ -273,7 +272,9 @@ export async function saveProviderApi(auth, req) {
     return synced;
   }
   const saved = await detail(auth, id);
-  saved.notice = `${provider.name} is connected.`;
+  saved.notice = provider.providerKey === 'nexcall'
+    ? 'Nexcall is connected. The API key is saved for this business.'
+    : `${provider.name} is connected.`;
   saved.linked = true;
   return saved;
 }

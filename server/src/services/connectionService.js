@@ -1,5 +1,5 @@
 import { CATEGORIES } from '../domain/providers.js';
-import { NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
+import { cleanNexcallKey, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
 import { createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
@@ -206,10 +206,11 @@ export async function saveProviderApi(auth, req) {
   if (provider.providerKey === 'whatsapp') {
     throw new ApiError(422, 'WhatsApp uses the shared AIRO chatbot. Super Admin and Developer/Admin connect that API on the platform.', 'validation_error');
   }
-  const apiKey = req.body.apiKey.trim();
+  const apiKey = provider.providerKey === 'nexcall' ? cleanNexcallKey(req.body.apiKey) : req.body.apiKey.trim();
   const accountId = (req.body.accountId || '').trim();
   const baseUrl = (req.body.baseUrl || '').trim().replace(/\/$/, '');
   if (provider.providerKey === 'nexcall') {
+    if (!apiKey) throw new ApiError(422, 'Wrong API.', 'validation_error');
     const url = baseUrl || NEXCALL_BASE;
     try {
       await verifyNexcall({ apiKey, baseUrl: url });
@@ -219,7 +220,13 @@ export async function saveProviderApi(auth, req) {
         const timedOut = cause?.name === 'TimeoutError' || cause?.code === 23 || cause?.code === 'ABORT_ERR';
         throw new ApiError(422, timedOut ? 'The API did not respond. The AIRO server timed out reaching W-Caller.' : 'The API did not respond.', 'validation_error');
       }
-      throw new ApiError(422, 'Wrong API.', 'validation_error');
+      const reason = String(error.message || '')
+        .replace(/x-api-key[=:]\s*\S+/gi, '')
+        .replace(/wext_[A-Za-z0-9_-]+/gi, '')
+        .trim()
+        .slice(0, 160);
+      const rejected = Number(error.status) === 401 || Number(error.status) === 403 || /access denied|invalid (api )?key|unauthorized/i.test(reason);
+      throw new ApiError(422, rejected && reason ? `Wrong API. ${reason}` : (reason || 'Wrong API.'), 'validation_error');
     }
   } else if (provider.providerKey === 'meta_ads') {
     if (!accountId) throw new ApiError(422, 'Account id is required for Meta Ads.', 'validation_error');

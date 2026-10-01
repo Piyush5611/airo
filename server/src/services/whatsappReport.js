@@ -1,5 +1,5 @@
 import { decryptJson } from '../utils/cryptoBox.js';
-import { nexcallCallReport } from '../integrations/nexcall.js';
+import { nexcallCallReport, nexcallCalls, nexcallFollowups, nexcallLeads } from '../integrations/nexcall.js';
 import { many, one } from '../db/sql.js';
 
 const IST = 5.5 * 60 * 60 * 1000;
@@ -24,6 +24,12 @@ const LEAD_STATUSES = [
 
 function sqlStamp(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function istStamp(date) {
+  const ist = new Date(date.getTime() + IST);
+  const part = (value) => String(value).padStart(2, '0');
+  return `${ist.getUTCFullYear()}-${part(ist.getUTCMonth() + 1)}-${part(ist.getUTCDate())} ${part(ist.getUTCHours())}:${part(ist.getUTCMinutes())}:${part(ist.getUTCSeconds())}`;
 }
 
 function istParts(date) {
@@ -173,40 +179,49 @@ export function matchScope(text, people, teams) {
       return {
         userIds: theirs[0].userIds,
         label: `team head ${person.fullName}, team ${theirs[0].name}`,
-        kind: 'team'
+        kind: 'team',
+        personName: ''
       };
     }
     if (!theirs.length) {
       return {
         userIds: [person.id],
         label: `${person.fullName} is not on a team, so this is only their records`,
-        kind: 'person'
+        kind: 'person',
+        personName: person.fullName
       };
     }
     return {
       userIds: [person.id],
       label: `${person.fullName} is on more than one team, so this is only their records`,
-      kind: 'person'
+      kind: 'person',
+      personName: person.fullName
     };
   }
   if (asksHead && !person) {
     const named = text.match(/\bteam\s*heads?\s+([A-Za-z][A-Za-z]{2,})/i);
     const who = named && !NOT_NAMES.has(named[1].toLowerCase()) ? ` "${named[1]}"` : '';
-    return { missing: `Filter: team head${who} was not found in this business. No report numbers were loaded.` };
+    return {
+      missing: `Filter: team head${who} was not found in this business. No report numbers were loaded.`,
+      askedName: named && !NOT_NAMES.has(named[1].toLowerCase()) ? named[1] : ''
+    };
   }
   if (person) {
     const teamNote = team ? ` in team ${team.name}` : '';
-    return { userIds: [person.id], label: `employee ${person.fullName}${teamNote}`, kind: 'person' };
+    return { userIds: [person.id], label: `employee ${person.fullName}${teamNote}`, kind: 'person', personName: person.fullName };
   }
   if (team) {
-    return { userIds: team.userIds, label: `team ${team.name}`, kind: 'team' };
+    return { userIds: team.userIds, label: `team ${team.name}`, kind: 'team', personName: '' };
   }
 
   const named = text.match(/\b([A-Za-z][A-Za-z]{2,})\s+(?:ka|ke|ki)\s+(?:report|data|leads|calls|performance)\b/);
   if (named && !NOT_NAMES.has(named[1].toLowerCase())) {
-    return { missing: `Filter: employee "${named[1]}" was not found in this business. No report numbers were loaded.` };
+    return {
+      missing: `Filter: employee "${named[1]}" was not found in this business. No report numbers were loaded.`,
+      askedName: named[1]
+    };
   }
-  return { userIds: null, label: 'all employees', kind: 'all' };
+  return { userIds: null, label: 'all employees', kind: 'all', personName: '' };
 }
 
 function matchExtras(text, catalog) {
@@ -318,7 +333,7 @@ async function airoCounts(organizationId, window, scope, extra) {
     callParams
   );
   const lines = [
-    `AIRO records: leads ${Number(leads?.total || 0)}, qualified ${Number(leads?.qualified || 0)}, booked ${Number(leads?.booked || 0)}, high intent ${Number(leads?.highIntent || 0)}, calls ${Number(calls?.total || 0)}, missed ${Number(calls?.missed || 0)}, completed ${Number(calls?.completed || 0)}.`
+    `AIRO workspace records, separate from Nexcall: leads ${Number(leads?.total || 0)}, qualified ${Number(leads?.qualified || 0)}, booked ${Number(leads?.booked || 0)}, high intent ${Number(leads?.highIntent || 0)}, calls ${Number(calls?.total || 0)}, missed ${Number(calls?.missed || 0)}, completed ${Number(calls?.completed || 0)}.`
   ];
   if (scope.kind !== 'person') {
     const groupedIds = peopleClause('l.assigned_user_id', scope.userIds);
@@ -340,10 +355,121 @@ async function airoCounts(organizationId, window, scope, extra) {
   return lines.join(' ');
 }
 
-async function nexcallLine(organizationId, window, scope, extra) {
-  if (scope.kind === 'person' || scope.kind === 'team') {
-    return 'Nexcall is not split by employee or team. This call report filter applies to AIRO records only.';
+function asObject(value) {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try { return JSON.parse(value); } catch { return {}; }
   }
+  if (Buffer.isBuffer(value)) {
+    try { return JSON.parse(value.toString('utf8')); } catch { return {}; }
+  }
+  return typeof value === 'object' ? value : {};
+}
+
+function employeeOf(row) {
+  return String(row?.employee_name || row?.employee || row?.user_name || row?.agent_name || '').trim();
+}
+
+function nameHits(row, name) {
+  const employee = employeeOf(row);
+  const wanted = String(name || '').trim();
+  if (!wanted) return true;
+  if (!employee) return false;
+  return hasWord(employee, wanted) || hasWord(wanted, employee);
+}
+
+function nexcallKind(text) {
+  const raw = String(text || '');
+  if (/\bfollow[- ]?ups?\b|\bcall[- ]?backs?\b|\bcallbacks?\b/i.test(raw)) return 'followups';
+  if (/\bleads?\b/i.test(raw) && !/\bcalls?\b/i.test(raw)) return 'leads';
+  if (/\b\d{10,13}\b/.test(raw) || /\bcall list\b|\blist of calls\b/i.test(raw)) return 'calls';
+  return 'report';
+}
+
+function callTypeOf(text) {
+  const incoming = /\bincoming\b|\binbound\b/i.test(text);
+  const outgoing = /\boutgoing\b|\boutbound\b/i.test(text);
+  if (incoming && !outgoing) return 'INCOMING';
+  if (outgoing && !incoming) return 'OUTGOING';
+  return '';
+}
+
+function reportParts(body) {
+  const data = body?.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data : {};
+  const summary = data.summary && typeof data.summary === 'object' && !Array.isArray(data.summary) ? data.summary : data;
+  return {
+    totals: summary.totals || summary.by_type?.TOTAL || null,
+    byType: summary.by_type || null,
+    byUser: summary.by_user || summary.users || null
+  };
+}
+
+function figureText(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'number' || typeof value === 'string') return String(value);
+  if (typeof value !== 'object' || Array.isArray(value)) return '';
+  return Object.entries(value)
+    .filter(([key, item]) => !/phone|sim|mobile|email|name/i.test(key) && (
+      typeof item === 'number' || (typeof item === 'string' && /^-?\d+(\.\d+)?$/.test(item))
+    ))
+    .map(([key, item]) => `${key} ${item}`)
+    .join(', ');
+}
+
+function userRows(byUser) {
+  if (!byUser) return [];
+  if (Array.isArray(byUser)) return byUser.filter((row) => row && typeof row === 'object');
+  return Object.entries(byUser).map(([id, value]) => (
+    value && typeof value === 'object' ? { user_id: value.user_id ?? id, ...value } : { user_id: id, total: value }
+  ));
+}
+
+function userLabel(row) {
+  return String(row.employee_name || row.name || row.user_name || row.full_name || (row.user_id != null ? `user ${row.user_id}` : 'Unknown')).trim();
+}
+
+function formatReport(window, parts, employeeName, alreadyFiltered) {
+  const rows = userRows(parts.byUser);
+  const chosen = employeeName ? rows.filter((row) => hasWord(userLabel(row), employeeName) || hasWord(employeeName, userLabel(row))) : rows;
+  const who = employeeName ? `${employeeName}, ` : '';
+  const lines = [`Nexcall call report for ${who}${window.label}.`];
+  const totals = figureText(parts.totals);
+  const types = figureText(parts.byType);
+  if ((!employeeName || alreadyFiltered) && totals) lines.push(`Totals: ${totals}.`);
+  if ((!employeeName || alreadyFiltered) && types) lines.push(`By type: ${types}.`);
+  if (employeeName && !chosen.length && !(alreadyFiltered && (totals || types))) {
+    const names = rows.map(userLabel).filter(Boolean).slice(0, 12);
+    return {
+      matched: false,
+      names,
+      text: `Nexcall call report has no employee named ${employeeName}.${names.length ? ` Employees in this report: ${names.join(', ')}.` : ''}`
+    };
+  }
+  const shown = (employeeName ? chosen : rows).slice(0, 8);
+  if (shown.length) {
+    lines.push(`By employee: ${shown.map((row) => `${userLabel(row)} (${figureText(row) || 'listed'})`).join('; ')}.`);
+  }
+  if (!totals && !types && !shown.length) {
+    return { matched: !employeeName, names: [], text: `Nexcall call report for ${window.label}: the report API returned no totals.` };
+  }
+  return { matched: true, names: rows.map(userLabel).filter(Boolean).slice(0, 12), text: lines.join(' ') };
+}
+
+async function storedCalls(organizationId) {
+  const rows = await many(
+    `SELECT o.payload
+     FROM integration_objects o
+     JOIN integration_connections c ON c.id = o.connection_id
+     JOIN integration_providers p ON p.id = c.provider_id
+     WHERE o.organization_id = ? AND p.provider_key = 'nexcall' AND o.object_type = 'call'
+     ORDER BY o.id DESC
+     LIMIT 200`,
+    [organizationId]
+  );
+  return rows.map((row) => asObject(row.payload));
+}
+
+async function readNexcallSecret(organizationId) {
   const row = await one(
     `SELECT c.mode, c.status, cred.ciphertext
      FROM integration_connections c
@@ -354,27 +480,74 @@ async function nexcallLine(organizationId, window, scope, extra) {
     [organizationId]
   );
   if (!row?.ciphertext || row.status !== 'connected' || row.mode !== 'live') {
-    return 'Nexcall report: not connected, so no call report was loaded.';
+    return { error: 'Nexcall report: not connected, so the live call API was not called.' };
   }
-  let secret;
-  try { secret = decryptJson(row.ciphertext); } catch {
-    return 'Nexcall report: the saved key could not be read.';
-  }
-  if (!secret?.apiKey) return 'Nexcall report: no API key is saved.';
   try {
-    const report = await nexcallCallReport({
-      apiKey: secret.apiKey,
-      baseUrl: secret.baseUrl,
-      from: sqlStamp(window.from),
-      to: sqlStamp(window.to),
-      callType: extra.callType
-    });
-    const summary = report?.data?.summary;
-    if (!summary) return `Nexcall call report for ${window.label}: the API returned no totals.`;
-    return `Nexcall call report for ${window.label}, whole account: ${JSON.stringify(summary).slice(0, 900)}`;
-  } catch (error) {
-    return `Nexcall report could not be loaded: ${String(error.message || 'the API did not respond.').replace(/x-api-key[=:]\s*\S+/gi, '').slice(0, 180)}`;
+    const secret = decryptJson(row.ciphertext);
+    if (!secret?.apiKey) return { error: 'Nexcall report: no API key is saved.' };
+    return { secret };
+  } catch {
+    return { error: 'Nexcall report: the saved key could not be read.' };
   }
+}
+
+function cleanError(error) {
+  return String(error?.message || 'the API did not respond.').replace(/x-api-key[=:]\s*\S+/gi, '').slice(0, 160);
+}
+
+async function nexcallSummary(organizationId, window, employeeName, text) {
+  const loaded = await readNexcallSecret(organizationId);
+  if (!loaded.secret) return { matched: false, names: [], text: loaded.error || 'Nexcall report: not connected.' };
+  const from = istStamp(window.from);
+  const to = istStamp(window.to);
+  const kind = nexcallKind(text);
+  const stored = employeeName ? await storedCalls(organizationId) : [];
+  const knownUser = stored.find((row) => nameHits(row, employeeName) && row.user_id != null);
+  try {
+    if (kind === 'followups') {
+      const body = await nexcallFollowups({ apiKey: loaded.secret.apiKey, baseUrl: loaded.secret.baseUrl, from, to });
+      const count = body?.count ?? (Array.isArray(body?.data) ? body.data.length : 0);
+      return { matched: true, names: [], text: `Nexcall follow-ups for ${window.label}: ${Number(count || 0)}.` };
+    }
+    if (kind === 'leads') {
+      const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
+      const body = await nexcallLeads({ apiKey: loaded.secret.apiKey, baseUrl: loaded.secret.baseUrl, from, to, phone });
+      const count = body?.count ?? (Array.isArray(body?.data) ? body.data.length : 0);
+      return { matched: true, names: [], text: `Nexcall leads for ${window.label}: ${Number(count || 0)}.` };
+    }
+    if (kind === 'calls') {
+      const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
+      const body = await nexcallCalls({
+        apiKey: loaded.secret.apiKey,
+        baseUrl: loaded.secret.baseUrl,
+        from,
+        to,
+        phone,
+        userId: knownUser?.user_id
+      });
+      const count = body?.count ?? (Array.isArray(body?.data) ? body.data.length : 0);
+      return { matched: true, names: [], text: `Nexcall call list for ${window.label}: ${Number(count || 0)} calls. This is the call list, not the call report.` };
+    }
+    const body = await nexcallCallReport({
+      apiKey: loaded.secret.apiKey,
+      baseUrl: loaded.secret.baseUrl,
+      from,
+      to,
+      userId: knownUser?.user_id,
+      callType: callTypeOf(text)
+    });
+    return formatReport(window, reportParts(body), employeeName, Boolean(knownUser));
+  } catch (error) {
+    return { matched: false, names: [], text: `Nexcall report could not be loaded: ${cleanError(error)}` };
+  }
+}
+
+async function nexcallLine(organizationId, window, scope, text) {
+  const summary = await nexcallSummary(organizationId, window, scope.personName || '', text);
+  if (scope.kind === 'team') {
+    return `${summary.text}\nThe Nexcall call report is for the connected account. It is not limited to that AIRO team unless an employee name matches the report.`;
+  }
+  return summary.text;
 }
 
 async function roster(organizationId) {
@@ -419,8 +592,20 @@ export async function reportFacts(organizationId, messages) {
   const text = String(last?.content || '');
   const { people, teams } = await roster(organizationId);
   const scope = matchScope(text, people, teams);
-  if (scope.missing) return scope.missing;
   const window = reportWindow(text);
+  if (scope.missing) {
+    const nex = await nexcallSummary(organizationId, window, scope.askedName || '', text);
+    if (scope.askedName && nex.matched) {
+      return `Report filter: ${window.label}, Nexcall employee ${scope.askedName}.\n${nex.text}`;
+    }
+    if (nex.names?.length) {
+      return scope.missing.replace(
+        'No report numbers were loaded.',
+        `Nexcall employees on the connection page: ${nex.names.join(', ')}. No report numbers were loaded.`
+      );
+    }
+    return scope.missing;
+  }
   const [projects, cities, sources, campaigns] = await Promise.all([
     many(`SELECT DISTINCT project AS name FROM leads WHERE organization_id = ? AND project <> '' LIMIT 80`, [organizationId]),
     many(`SELECT DISTINCT city AS name FROM leads WHERE organization_id = ? AND city IS NOT NULL AND city <> '' LIMIT 80`, [organizationId]),
@@ -429,12 +614,12 @@ export async function reportFacts(organizationId, messages) {
   ]);
   const extra = matchExtras(text, { projects, cities, sources, campaigns });
   const lines = [filterSentence(window, scope, extra)];
+  lines.push(await nexcallLine(organizationId, window, scope, text));
   if (!scope.userIds || scope.userIds.length) {
     lines.push(await airoCounts(organizationId, window, scope, extra));
   } else {
-    lines.push('AIRO records: this team has no members, so the count is 0.');
+    lines.push('AIRO workspace records: this team has no members, so the count is 0.');
   }
-  lines.push(await nexcallLine(organizationId, window, scope, extra));
   lines.push(...extra.notes);
   return lines.join('\n');
 }

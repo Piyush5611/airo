@@ -21,6 +21,14 @@ export const NEXCALL_MAPPING = {
   followups: 'activities'
 };
 
+export function cleanNexcallKey(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^(?:bearer|x-api-key)\s*[:=]\s*/i, '')
+    .replace(/^["']+|["']+$/g, '')
+    .trim();
+}
+
 function stamp(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
@@ -44,11 +52,41 @@ async function pull(baseUrl, path, apiKey) {
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.success === false) {
-    const error = new Error(body.message || body.error || 'Nexcall rejected the API key.');
+    const error = new Error(body.message || body.error || 'Nexcall rejected the request.');
     error.code = 'nexcall_rejected';
+    error.status = response.status;
     throw error;
   }
   return body;
+}
+
+export async function nexcallLeads({ apiKey, baseUrl = NEXCALL_BASE, from, to, phone, search, page = 1, limit = 50 }) {
+  const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (phone) params.set('phone', phone);
+  if (search) params.set('search', search);
+  return pull(base, `/leads?${params}`, apiKey);
+}
+
+export async function nexcallFollowups({ apiKey, baseUrl = NEXCALL_BASE, from, to, page = 1, limit = 50 }) {
+  const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  return pull(base, `/followups?${params}`, apiKey);
+}
+
+export async function nexcallCalls({ apiKey, baseUrl = NEXCALL_BASE, from, to, userId, callStatus, phone, page = 1, limit = 50 }) {
+  const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (userId) params.set('user_id', String(userId));
+  if (callStatus) params.set('call_status', callStatus);
+  if (phone) params.set('phone', phone);
+  return pull(base, `/calls?${params}`, apiKey);
 }
 
 export async function nexcallCallReport({ apiKey, baseUrl = NEXCALL_BASE, from, to, userId, callType }) {
@@ -61,7 +99,7 @@ export async function nexcallCallReport({ apiKey, baseUrl = NEXCALL_BASE, from, 
 
 export async function verifyNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {
   const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
-  await pull(base, '/leads?page=1&limit=1', apiKey);
+  await pull(base, '/leads?page=1&limit=1', cleanNexcallKey(apiKey));
 }
 
 export async function pullNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {

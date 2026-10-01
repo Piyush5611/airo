@@ -2,6 +2,7 @@
  * Nexcall is the W-Caller external CRM pull API.
  * Read-only. Auth is x-api-key. Data stays scoped to that key's business.
  */
+import dns from 'node:dns';
 import https from 'node:https';
 
 export const NEXCALL_BASE = 'https://w-caller.workians.com/api/external';
@@ -75,7 +76,8 @@ function pull(baseUrl, path, apiKey) {
       },
       ALPNProtocols: ['http/1.1'],
       servername: url.hostname,
-      timeout: 20000
+      timeout: 15000,
+      lookup: (hostname, options, callback) => dns.lookup(hostname, { family: 4 }, callback)
     }, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
@@ -97,7 +99,7 @@ function pull(baseUrl, path, apiKey) {
     req.on('timeout', () => {
       timedOut = true;
       req.destroy();
-      const error = new Error('Nexcall did not respond.');
+      const error = new Error(`Nexcall did not respond on ${url.pathname}.`);
       error.code = 'nexcall_unreachable';
       const cause = new Error('timeout');
       cause.name = 'TimeoutError';
@@ -154,9 +156,17 @@ export async function nexcallCallReport({ apiKey, baseUrl = NEXCALL_BASE, from, 
   return pull(base, `/reports/calls?${params}`, apiKey);
 }
 
+function istDay() {
+  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const month = String(ist.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(ist.getUTCDate()).padStart(2, '0');
+  return `${ist.getUTCFullYear()}-${month}-${day}`;
+}
+
 export async function verifyNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {
   const base = nexcallBase(baseUrl);
-  await pull(base, '/leads?page=1&limit=1', cleanNexcallKey(apiKey));
+  const day = istDay();
+  await pull(base, `/calls?${qs({ from: `${day} 00:00:00`, to: `${day} 23:59:59`, page: 1, limit: 1 })}`, cleanNexcallKey(apiKey));
 }
 
 export async function pullNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {

@@ -218,7 +218,7 @@ export async function saveProviderApi(auth, req) {
       if (error.code === 'nexcall_unreachable') {
         const cause = error.cause;
         const timedOut = cause?.name === 'TimeoutError' || cause?.code === 23 || cause?.code === 'ABORT_ERR';
-        throw new ApiError(422, timedOut ? 'The API did not respond. The AIRO server timed out reaching W-Caller.' : 'The API did not respond.', 'validation_error');
+        throw new ApiError(422, timedOut ? `The API did not respond. ${error.message}` : 'The API did not respond.', 'validation_error');
       }
       const reason = String(error.message || '')
         .replace(/x-api-key[=:]\s*\S+/gi, '')

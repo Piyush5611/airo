@@ -451,24 +451,40 @@ function showPhone(phone) {
   return digits ? `+${digits}` : phone;
 }
 
+function splitPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  const codes = COUNTRY_CODES.map(([value]) => value).sort((left, right) => right.length - left.length);
+  const code = codes.find((value) => digits.startsWith(value) && digits.length > value.length) || '91';
+  return { code, local: digits.startsWith(code) ? digits.slice(code.length) : digits };
+}
+
 function BusinessNumbers({ numbers, reload }) {
   const { can } = useAuth();
   const manage = can('settings.manage');
   const [code, setCode] = useState('91');
   const [phone, setPhone] = useState('');
   const [label, setLabel] = useState('');
+  const [editingId, setEditingId] = useState(null);
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const localDigits = phone.replace(/\D/g, '').replace(/^0+/, '');
-  async function add(event) {
+  function resetForm() {
+    setEditingId(null);
+    setCode('91');
+    setPhone('');
+    setLabel('');
+  }
+  async function save(event) {
     event.preventDefault();
     setSaving(true);
     setMessage('');
+    const body = { phone: withCountryCode(code, phone), label: label.trim() };
+    const updating = Boolean(editingId);
     try {
-      await api.post('/api/whatsapp/numbers', { phone: withCountryCode(code, phone), label: label.trim() });
-      setPhone('');
-      setLabel('');
-      setMessage('Number added. A chat from this number is this business.');
+      if (editingId) await api.patch(`/api/whatsapp/numbers/${editingId}`, body);
+      else await api.post('/api/whatsapp/numbers', body);
+      resetForm();
+      setMessage(updating ? 'Number updated.' : 'Number added.');
       reload();
     } catch (err) {
       setMessage(err.message);
@@ -476,11 +492,20 @@ function BusinessNumbers({ numbers, reload }) {
       setSaving(false);
     }
   }
+  function edit(number) {
+    const parts = splitPhone(number.phone);
+    setEditingId(number.id);
+    setCode(parts.code);
+    setPhone(parts.local);
+    setLabel(number.label || '');
+    setMessage('');
+  }
   async function remove(id) {
     setMessage('');
     try {
       await api.del(`/api/whatsapp/numbers/${id}`);
-      setMessage('Number removed.');
+      if (editingId === id) resetForm();
+      setMessage('Number deleted.');
       reload();
     } catch (err) {
       setMessage(err.message);
@@ -488,20 +513,31 @@ function BusinessNumbers({ numbers, reload }) {
   }
   return (
     <section className="panel">
-      <header><h2>Business numbers</h2></header>
-      <p className="quiet">Add more than one. When that WhatsApp messages the chatbot, AIRO marks it as this business.</p>
+      <header>
+        <h2>Business numbers</h2>
+        <p>{numbers.length} added</p>
+      </header>
+      <p className="quiet">These WhatsApp numbers belong to this business. A chat from one of them is recognized here.</p>
       {numbers.length ? (
         <ul className="wa-numbers">
-          {numbers.map((number) => (
-            <li key={number.id}>
-              <span><strong>{number.label || 'WhatsApp'}</strong><em>{showPhone(number.phone)}</em></span>
-              {manage ? <button type="button" className="btn" onClick={() => remove(number.id)}>Remove</button> : null}
+          {numbers.map((number, index) => (
+            <li key={number.id} className={number.id === editingId ? 'is-on' : ''}>
+              <span>
+                <strong>{index + 1}. {number.label || 'WhatsApp'}</strong>
+                <em>{showPhone(number.phone)}</em>
+              </span>
+              {manage ? (
+                <span className="wa-number-actions">
+                  <button type="button" className="btn" onClick={() => edit(number)}>Edit</button>
+                  <button type="button" className="btn" onClick={() => remove(number.id)}>Delete</button>
+                </span>
+              ) : null}
             </li>
           ))}
         </ul>
       ) : <p>No number added yet.</p>}
       {manage ? (
-        <form className="filters" onSubmit={add}>
+        <form className="filters" onSubmit={save}>
           <div className="phone-row">
             <select value={code} onChange={(event) => setCode(event.target.value)} aria-label="Country code">
               {COUNTRY_CODES.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
@@ -509,7 +545,8 @@ function BusinessNumbers({ numbers, reload }) {
             <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="98765 43210" inputMode="tel" aria-label="WhatsApp number" required />
           </div>
           <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Label, optional" aria-label="Number label" maxLength={80} />
-          <button className="btn-primary" type="submit" disabled={saving || localDigits.length < 6}>{saving ? 'Adding…' : 'Add number'}</button>
+          <button className="btn-primary" type="submit" disabled={saving || localDigits.length < 6}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Add number'}</button>
+          {editingId ? <button type="button" className="btn" onClick={resetForm}>Cancel</button> : null}
         </form>
       ) : <p className="quiet">An Owner or Admin adds the numbers.</p>}
       {message ? <p>{message}</p> : null}

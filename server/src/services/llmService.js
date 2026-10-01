@@ -1,9 +1,9 @@
 import { ApiError } from '../utils/errors.js';
 import { decryptJson, encryptJson } from '../utils/cryptoBox.js';
 import { recordAudit } from './auditService.js';
-import { listLlmModels, llmProviderName, replyLlm, verifyLlm } from '../integrations/llm.js';
+import { listLlmModels, llmProviderName, replyLlm, verifyLlm, WHATSAPP_BRIEF } from '../integrations/llm.js';
 import { LLM_PURPOSES, purposeLabel } from '../domain/llmPurposes.js';
-import { many } from '../db/sql.js';
+import { many, one } from '../db/sql.js';
 import * as whatsappRepo from '../repositories/whatsappRepo.js';
 import * as repo from '../repositories/llmRepo.js';
 
@@ -177,6 +177,79 @@ function withoutPermissionNote(reply) {
     .join('\n')
     .trim();
   return kept || reply;
+}
+
+async function whatsappFacts({ organizationId, recognized, businessLabel }) {
+  if (!recognized || !organizationId) {
+    return 'This WhatsApp number is not registered to a business in AIRO. Do not name a business or share connection status.';
+  }
+  const lines = [];
+  const org = await one(
+    `SELECT name FROM organizations WHERE id = ?`,
+    [organizationId]
+  ).catch(() => null);
+  const name = org?.name || 'this business';
+  lines.push(businessLabel
+    ? `This WhatsApp number is registered to ${name} (${businessLabel}).`
+    : `This WhatsApp number is registered to ${name}.`);
+  try {
+    const links = await many(
+      `SELECT p.name AS providerName, c.status, c.mode,
+              CASE WHEN cred.ciphertext IS NULL OR cred.ciphertext = '' THEN 0 ELSE 1 END AS hasSecret
+       FROM integration_connections c
+       JOIN integration_providers p ON p.id = c.provider_id
+       LEFT JOIN integration_credentials cred ON cred.connection_id = c.id
+       WHERE c.organization_id = ?
+       ORDER BY p.name`,
+      [organizationId]
+    );
+    if (!links.length) lines.push('Connections: none saved');
+    for (const row of links) {
+      const on = row.status === 'connected' && row.mode === 'live' && Number(row.hasSecret) === 1;
+      lines.push(`${row.providerName}: ${on ? 'connected' : 'not connected'}`);
+    }
+  } catch {
+    lines.push('Connections: status could not be read');
+  }
+  return lines.join('\n');
+}
+
+export async function replyWhatsapp({ organizationId, recognized, businessLabel, messages }) {
+  let row;
+  let purpose = 'whatsapp';
+  try {
+    row = await repo.connectionByPurpose('whatsapp');
+    if (!row?.credentialCiphertext) {
+      purpose = 'assistant';
+      row = await repo.connectionByPurpose('assistant');
+    }
+  } catch (error) {
+    if (schemaMissing(error)) return null;
+    throw error;
+  }
+  if (!row?.credentialCiphertext) return null;
+  const text = await replyLlm({
+    provider: row.provider,
+    model: row.modelName,
+    apiKey: await readKey(row),
+    baseUrl: row.baseUrl || '',
+    messages,
+    facts: await whatsappFacts({ organizationId, recognized, businessLabel }),
+    system: WHATSAPP_BRIEF
+  });
+  await recordAudit({ auth: null, ip: null }, {
+    action: 'llm.chat',
+    resource: 'llm_connection',
+    resourceId: row.id,
+    organizationId: organizationId || null,
+    metadata: { purpose, provider: row.provider, model: row.modelName, channel: 'whatsapp' }
+  });
+  return {
+    text: String(text || '').slice(0, 4000),
+    purpose,
+    providerName: llmProviderName(row.provider),
+    model: row.modelName
+  };
 }
 
 export async function chatLlm(req) {

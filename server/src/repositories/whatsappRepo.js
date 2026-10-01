@@ -109,6 +109,13 @@ export function insertNumber({ organizationId, phone, phoneKey, label }) {
   );
 }
 
+export function updateNumber({ id, organizationId, phone, phoneKey, label }) {
+  return run(
+    `UPDATE whatsapp_business_numbers SET phone = ?, phone_key = ?, label = ? WHERE id = ? AND organization_id = ?`,
+    [phone, phoneKey, label, id, organizationId]
+  );
+}
+
 export function deleteNumber(id, organizationId) {
   return run(`DELETE FROM whatsapp_business_numbers WHERE id = ? AND organization_id = ?`, [id, organizationId]);
 }
@@ -125,6 +132,16 @@ export function insertConversation({ organizationId, contactName, contactPhone, 
     `INSERT INTO whatsapp_conversations (organization_id, contact_name, contact_phone, topic, status, last_message_at)
      VALUES (?, ?, ?, ?, 'open', UTC_TIMESTAMP())`,
     [organizationId, contactName, contactPhone, topic]
+  );
+}
+
+export function recentSameInbound(conversationId, body) {
+  return one(
+    `SELECT id FROM whatsapp_messages
+     WHERE conversation_id = ? AND direction = 'inbound' AND body = ?
+       AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 MINUTE)
+     LIMIT 1`,
+    [conversationId, body]
   );
 }
 

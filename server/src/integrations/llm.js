@@ -148,6 +148,14 @@ Platform steps, only if this person is a platform user:
 - A model is connected on Platform AI, then AI Models. Choose a purpose, a provider, paste the API key, choose a model, then Connect model.
 - Only Super Admin, Operations Admin, and Developer/Admin can save that key.`;
 
+export const WHATSAPP_BRIEF = `You are the AIRO assistant replying on WhatsApp. Keep each reply short, like a chat message.
+Write in Hinglish: Hindi words in English letters, mixed with normal English. Example: "Haan, Meta Ads is business pe connected hai."
+Never use Hindi script (Devanagari).
+If the person writes only in English, answer in English.
+If the person only greets you, start with "I am the AIRO assistant." Then one short line. Do not say "How can I help you today."
+Use only the status in this message. Do not invent leads, money, pages, or whether something is connected.
+If the status does not name a business, do not guess the business and do not share any connection status.`;
+
 function hasDevanagari(text) {
   return /[\u0900-\u097F]/.test(String(text || ''));
 }
@@ -192,9 +200,9 @@ async function completeLlm({ provider, model, apiKey, baseUrl, system, turns }) 
   return parts.map((part) => part.text || '').join('');
 }
 
-export async function replyLlm({ provider, model, apiKey, baseUrl, messages, facts }) {
+export async function replyLlm({ provider, model, apiKey, baseUrl, messages, facts, system }) {
   if (!PROVIDERS[provider]) throw new ApiError(422, 'Choose a model provider.', 'validation_error');
-  const brief = `${ASSISTANT_BRIEF}\n\nStatus from AIRO just now:\n${facts || 'No status was loaded.'}`;
+  const brief = `${system || ASSISTANT_BRIEF}\n\nStatus from AIRO just now:\n${facts || 'No status was loaded.'}`;
   const turns = messages
     .map((row) => ({ role: row.role === 'assistant' ? 'assistant' : 'user', content: String(row.content || '').trim() }))
     .filter((row) => row.content)

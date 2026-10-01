@@ -7,6 +7,7 @@ import { leadScope } from '../utils/scope.js';
 import * as growthRepo from '../repositories/growthRepo.js';
 import * as repo from '../repositories/whatsappRepo.js';
 import { notifyWhatsappMessage, streamWhatsapp } from './whatsappLive.js';
+import { replyWhatsapp } from './llmService.js';
 
 function publicBot(row) {
   if (!row) return null;
@@ -144,25 +145,39 @@ export async function receiveWebhook(body) {
         const phone = String(message.from || '');
         const text = message.text?.body || message.type || '';
         if (!phone || !text) continue;
-        await storeInbound({
+        const saved = await storeInbound({
           phone,
           name: contact?.profile?.name || phone,
-          body: String(text).slice(0, 2000)
+          body: String(text).slice(0, 2000),
+          reply: Boolean(message.text?.body)
         });
+        if (saved?.reply) {
+          answerWithModel(saved).catch((error) => {
+            console.error('WhatsApp model reply skipped:', error?.message || error);
+          });
+        }
       }
     }
   }
 }
 
-async function storeInbound({ phone, name, body }) {
+async function storeInbound({ phone, name, body, reply }) {
   const key = phoneKey(phone);
-  const owner = key ? await repo.findNumberByKey(key) : null;
+  let owner = null;
+  if (key) {
+    try {
+      owner = await repo.findNumberByKey(key);
+    } catch (error) {
+      if (!missingNumbersTable(error)) throw error;
+    }
+  }
   const existing = key ? await repo.findConversationByKey(key) : await repo.findConversationByPhone(phone);
   let conversationId = existing?.id;
+  let organizationId = owner?.organizationId || existing?.organizationId;
   if (!conversationId) {
     const fallback = owner ? null : await repo.firstEnabledBusiness();
-    const organizationId = owner?.organizationId || fallback?.organizationId;
-    if (!organizationId) return;
+    organizationId = owner?.organizationId || fallback?.organizationId;
+    if (!organizationId) return null;
     conversationId = await repo.insertConversation({
       organizationId,
       contactName: name,
@@ -172,7 +187,10 @@ async function storeInbound({ phone, name, body }) {
   } else {
     if (owner && Number(existing.organizationId) !== Number(owner.organizationId)) {
       await repo.assignConversationOrganization(conversationId, owner.organizationId);
+      organizationId = owner.organizationId;
     }
+    const duplicate = reply ? await repo.recentSameInbound(conversationId, body) : null;
+    if (duplicate) return null;
     await repo.touchConversation(conversationId);
   }
   await repo.insertMessage({
@@ -182,6 +200,33 @@ async function storeInbound({ phone, name, body }) {
     actionTaken: owner ? `Business number · ${owner.label || owner.phone}` : 'Received from WhatsApp'
   });
   notifyWhatsappMessage(conversationId);
+  return {
+    conversationId,
+    organizationId,
+    recognized: Boolean(owner),
+    businessLabel: owner?.label || '',
+    reply: Boolean(reply)
+  };
+}
+
+async function answerWithModel(saved) {
+  const history = await repo.messages(saved.conversationId);
+  const messages = history.slice(-12).map((row) => ({
+    role: row.direction === 'outbound' ? 'assistant' : 'user',
+    content: row.body
+  }));
+  const answer = await replyWhatsapp({
+    organizationId: saved.organizationId,
+    recognized: saved.recognized,
+    businessLabel: saved.businessLabel,
+    messages
+  });
+  if (!answer?.text) return;
+  await deliverWhatsapp({
+    conversationId: saved.conversationId,
+    text: answer.text,
+    actionTaken: `Model · ${answer.model}`
+  });
 }
 
 export function streamLive(req, res) {
@@ -319,6 +364,44 @@ export async function addBusinessNumber(req) {
   return clientInbox(req.auth);
 }
 
+export async function updateBusinessNumber(req, id) {
+  const current = await repo.findNumber(id, req.auth.organizationId);
+  if (!current) throw new ApiError(404, 'That number is not on this workspace.', 'not_found');
+  const digits = String(req.body.phone || '').replace(/\D/g, '');
+  if (digits.length < 10 || digits.length > 15) {
+    throw new ApiError(422, 'Enter a 10-digit mobile number, or include the country code.', 'validation_error');
+  }
+  const key = phoneKey(digits);
+  const label = String(req.body.label || '').trim().slice(0, 80) || null;
+  const existing = await repo.findNumberByKey(key);
+  if (existing && Number(existing.id) !== Number(id)) {
+    throw new ApiError(422, Number(existing.organizationId) === Number(req.auth.organizationId)
+      ? 'This number is already added.'
+      : 'This number is already linked to a business.', 'validation_error');
+  }
+  try {
+    await repo.updateNumber({ id, organizationId: req.auth.organizationId, phone: digits, phoneKey: key, label });
+  } catch (error) {
+    if (error?.cause?.code === 'ER_DUP_ENTRY') {
+      throw new ApiError(422, 'This number is already linked to a business.', 'validation_error');
+    }
+    if (missingNumbersTable(error)) throw new ApiError(422, NUMBERS_SETUP, 'schema_missing');
+    throw error;
+  }
+  const open = await repo.findConversationByKey(key);
+  if (open && Number(open.organizationId) !== Number(req.auth.organizationId)) {
+    await repo.assignConversationOrganization(open.id, req.auth.organizationId);
+  }
+  await recordAudit(req, {
+    action: 'whatsapp_number.updated',
+    resource: 'whatsapp_business_number',
+    resourceId: id,
+    organizationId: req.auth.organizationId,
+    metadata: { phoneKey: key, label }
+  });
+  return clientInbox(req.auth);
+}
+
 export async function removeBusinessNumber(req, id) {
   const row = await repo.findNumber(id, req.auth.organizationId);
   if (!row) throw new ApiError(404, 'That number is not on this workspace.', 'not_found');
@@ -361,7 +444,7 @@ export async function clientLeadChats(auth, leadId) {
   return { phone: lead.phone, threads };
 }
 
-export async function sendMessage(req, conversationId) {
+async function deliverWhatsapp({ conversationId, text, actionTaken }) {
   const row = await repo.conversation(conversationId);
   if (!row) throw new ApiError(404, 'Conversation not found.', 'not_found');
   const bot = await repo.bot();
@@ -377,7 +460,6 @@ export async function sendMessage(req, conversationId) {
   }
   const to = String(row.contactPhone || '').replace(/\D/g, '');
   if (to.length < 8 || to.length > 15) throw new ApiError(422, 'This chat has no WhatsApp number.', 'validation_error');
-  const text = req.body.body.trim();
   let response;
   try {
     response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
@@ -406,10 +488,16 @@ export async function sendMessage(req, conversationId) {
     conversationId,
     direction: 'outbound',
     body: text,
-    actionTaken: 'Sent from AIRO'
+    actionTaken
   });
   await repo.touchConversation(conversationId);
   notifyWhatsappMessage(conversationId);
+  return row;
+}
+
+export async function sendMessage(req, conversationId) {
+  const text = req.body.body.trim();
+  const row = await deliverWhatsapp({ conversationId, text, actionTaken: 'Sent from AIRO' });
   await recordAudit(req, {
     action: 'whatsapp_message.sent',
     resource: 'whatsapp_conversation',

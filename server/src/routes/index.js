@@ -212,6 +212,9 @@ client.get('/whatsapp', requirePermission('leads.view'), asyncHandler(async (req
 client.post('/whatsapp/numbers', requirePermission('settings.manage'), validate(schemas.whatsappNumberSchema), asyncHandler(async (req, res) => {
   ok(res, await whatsapp.addBusinessNumber(req), 201);
 }));
+client.patch('/whatsapp/numbers/:id', requirePermission('settings.manage'), validate(schemas.idParams.merge(schemas.whatsappNumberSchema)), asyncHandler(async (req, res) => {
+  ok(res, await whatsapp.updateBusinessNumber(req, req.params.id));
+}));
 client.delete('/whatsapp/numbers/:id', requirePermission('settings.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await whatsapp.removeBusinessNumber(req, req.params.id));
 }));

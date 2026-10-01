@@ -107,6 +107,35 @@ export function setBusiness(organizationId, enabled) {
   return run(`UPDATE whatsapp_businesses SET enabled = ? WHERE organization_id = ?`, [enabled ? 1 : 0, organizationId]);
 }
 
+function phoneKeySql(column) {
+  return `RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${column}, '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), 10)`;
+}
+
+export function leadPhones(organizationId, scopeSql, scopeParams) {
+  return many(
+    `SELECT l.id, l.full_name AS fullName, l.phone
+     FROM leads l
+     WHERE l.organization_id = ? ${scopeSql}`,
+    [organizationId, ...scopeParams]
+  );
+}
+
+export function conversationsByPhoneKeys(keys) {
+  if (!keys.length) return [];
+  const marks = keys.map(() => '?').join(', ');
+  const key = phoneKeySql('c.contact_phone');
+  return many(
+    `SELECT c.id, c.contact_name AS contactName, c.contact_phone AS contactPhone, c.topic, c.status,
+            c.last_message_at AS lastMessageAt,
+            (SELECT m.body FROM whatsapp_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS lastMessage,
+            (SELECT m.direction FROM whatsapp_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS lastDirection
+     FROM whatsapp_conversations c
+     WHERE CHAR_LENGTH(${key}) = 10 AND ${key} IN (${marks})
+     ORDER BY c.last_message_at DESC`,
+    keys
+  );
+}
+
 export function conversations() {
   return many(
     `SELECT c.id, c.organization_id AS organizationId, o.name AS organizationName, c.contact_name AS contactName,

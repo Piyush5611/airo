@@ -8,13 +8,14 @@ import { Activities, CallDetail, Calls, Opportunity, Pipeline } from './pages/Sa
 import { Analytics, Reports, ReportView } from './pages/Intel.jsx';
 import { ConnectionDetail, Connections } from './pages/Connections.jsx';
 import { Assistant, Monitoring, Recommendations } from './pages/Ai.jsx';
+import { AssistantPage } from './pages/AssistantChat.jsx';
 import { Settings, Team } from './pages/Workspace.jsx';
 import {
   OrganizationDetail, Organizations, PlatformAi, PlatformAnalytics, PlatformFinance, PlatformHome,
   PlatformIntegrations, PlatformModeration, PlatformSales, PlatformSecurity, PlatformSettings,
   PlatformSupport, PlatformUsers
 } from './pages/Platform.jsx';
-import { PlatformWhatsapp } from './pages/Whatsapp.jsx';
+import { PlatformWhatsapp, WorkspaceWhatsapp } from './pages/Whatsapp.jsx';
 
 function Loading() {
   return <div className="content"><div className="skeleton-block" aria-label="Loading AIRO" /></div>;
@@ -48,6 +49,7 @@ export function App() {
         <Route path="growth/sources" element={<Sources />} />
         <Route path="growth/leads" element={<Leads />} />
         <Route path="growth/leads/:id" element={<LeadDetail />} />
+        <Route path="whatsapp" element={<WorkspaceWhatsapp />} />
         <Route path="sales/pipeline" element={<Pipeline />} />
         <Route path="sales/pipeline/:id" element={<Opportunity />} />
         <Route path="sales/calls" element={<Calls />} />
@@ -58,6 +60,7 @@ export function App() {
         <Route path="intelligence/analytics" element={<Analytics />} />
         <Route path="connections" element={<Connections />} />
         <Route path="connections/:id" element={<ConnectionDetail />} />
+        <Route path="assistant" element={<AssistantPage />} />
         <Route path="ai" element={<Assistant />} />
         <Route path="ai/recommendations" element={<Recommendations />} />
         <Route path="ai/monitoring" element={<Monitoring />} />
@@ -76,6 +79,7 @@ export function App() {
         <Route path="analytics" element={<PlatformAnalytics />} />
         <Route path="integrations" element={<PlatformIntegrations />} />
         <Route path="whatsapp" element={<PlatformWhatsapp />} />
+        <Route path="assistant" element={<AssistantPage />} />
         <Route path="ai" element={<PlatformAi />} />
         <Route path="security" element={<PlatformSecurity />} />
         <Route path="settings" element={<PlatformSettings />} />

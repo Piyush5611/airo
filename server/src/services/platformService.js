@@ -7,6 +7,7 @@ import { ApiError } from '../utils/errors.js';
 import * as authRepo from '../repositories/authRepo.js';
 import * as repo from '../repositories/platformRepo.js';
 import { recordAudit } from './auditService.js';
+import { llmStatus } from './llmService.js';
 
 function parseValue(value) {
   if (value == null) return null;
@@ -203,9 +204,15 @@ export async function createApiKey(req) {
 }
 
 export async function ai() {
+  const status = await llmStatus();
+  const summary = status.models.length
+    ? status.models.map((row) => `${row.purposeLabel}: ${row.providerName} · ${row.model}`).join('. ')
+    : 'No model is connected yet.';
   return {
     usage: await repo.aiUsage(),
-    policy: 'Workspace answers are computed from that organization\'s MySQL records. External model providers are not connected.'
+    models: status.models,
+    purposes: status.purposes,
+    policy: status.note || `${summary} Each purpose keeps its own model. Workspace answers still come from each organization's own records.`
   };
 }
 

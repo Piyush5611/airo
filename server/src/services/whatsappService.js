@@ -3,6 +3,8 @@ import { env } from '../config/env.js';
 import { ApiError } from '../utils/errors.js';
 import { decryptJson, encryptJson } from '../utils/cryptoBox.js';
 import { recordAudit } from './auditService.js';
+import { leadScope } from '../utils/scope.js';
+import * as growthRepo from '../repositories/growthRepo.js';
 import * as repo from '../repositories/whatsappRepo.js';
 import { notifyWhatsappMessage, streamWhatsapp } from './whatsappLive.js';
 
@@ -178,6 +180,77 @@ async function storeInbound({ phone, name, body }) {
 
 export function streamLive(req, res) {
   streamWhatsapp(req, res);
+}
+
+export function streamClientLive(req, res) {
+  streamWhatsapp(req, res, { includeId: false });
+}
+
+function phoneKey(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : '';
+}
+
+async function customerPhones(auth) {
+  const scope = leadScope(auth);
+  const leads = await repo.leadPhones(auth.organizationId, scope.sql, scope.params);
+  const byKey = new Map();
+  for (const lead of leads) {
+    const key = phoneKey(lead.phone);
+    if (!key || byKey.has(key)) continue;
+    byKey.set(key, { leadId: lead.id, leadName: lead.fullName });
+  }
+  return byKey;
+}
+
+function customerConversation(row, byKey) {
+  const match = byKey.get(phoneKey(row.contactPhone)) || {};
+  return {
+    id: row.id,
+    contactName: row.contactName,
+    contactPhone: row.contactPhone,
+    topic: row.topic,
+    status: row.status,
+    lastMessageAt: row.lastMessageAt,
+    lastMessage: row.lastMessage,
+    lastDirection: row.lastDirection,
+    leadId: match.leadId || null,
+    leadName: match.leadName || null
+  };
+}
+
+export async function clientInbox(auth) {
+  const byKey = await customerPhones(auth);
+  const rows = await repo.conversationsByPhoneKeys([...byKey.keys()]);
+  return { conversations: rows.map((row) => customerConversation(row, byKey)) };
+}
+
+export async function clientConversation(auth, id) {
+  const byKey = await customerPhones(auth);
+  const row = await repo.conversation(id);
+  if (!row || !byKey.has(phoneKey(row.contactPhone))) {
+    throw new ApiError(404, 'Conversation not found.', 'not_found');
+  }
+  return {
+    conversation: customerConversation(row, byKey),
+    messages: await repo.messages(id)
+  };
+}
+
+export async function clientLeadChats(auth, leadId) {
+  const scope = leadScope(auth);
+  const lead = await growthRepo.getLead(auth.organizationId, leadId, scope.sql, scope.params);
+  if (!lead) throw new ApiError(404, 'Lead not found.', 'not_found');
+  const key = phoneKey(lead.phone);
+  const rows = key ? await repo.conversationsByPhoneKeys([key]) : [];
+  const threads = [];
+  for (const row of rows) {
+    threads.push({
+      conversation: customerConversation(row, new Map([[key, { leadId: lead.id, leadName: lead.fullName }]])),
+      messages: await repo.messages(row.id)
+    });
+  }
+  return { phone: lead.phone, threads };
 }
 
 export async function sendMessage(req, conversationId) {

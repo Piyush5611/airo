@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, currentToken } from '../api.js';
 import { useResource } from '../data.js';
 import { label, num, when } from '../format.js';
@@ -299,6 +300,162 @@ function ConnectPanel({ data, reload }) {
         {error ? <p className="delta-down wide">{error}</p> : null}
       </div>
     </form>
+  );
+}
+
+function useWhatsappLive(onMessage, streamPath) {
+  useEffect(() => {
+    let stopped = false;
+    let controller = new AbortController();
+    async function listen() {
+      while (!stopped) {
+        controller = new AbortController();
+        try {
+          const headers = { Accept: 'text/event-stream' };
+          const token = currentToken();
+          if (token) headers.Authorization = `Bearer ${token}`;
+          const response = await fetch(streamPath, { headers, credentials: 'include', signal: controller.signal });
+          if (!response.ok || !response.body) throw new Error('closed');
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (!stopped) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || '';
+            for (const part of parts) {
+              const line = part.split('\n').find((row) => row.startsWith('data: '));
+              if (!line) continue;
+              const payload = JSON.parse(line.slice(6));
+              if (payload.type === 'message') onMessage({ silent: true });
+            }
+          }
+        } catch {
+          if (stopped) return;
+        }
+        if (!stopped) await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+    listen();
+    return () => {
+      stopped = true;
+      controller.abort();
+    };
+  }, [onMessage, streamPath]);
+}
+
+export function WorkspaceWhatsapp() {
+  const { data, loading, error, reload } = useResource('/api/whatsapp');
+  const [open, setOpen] = useState(null);
+  const detail = useResource(open ? `/api/whatsapp/conversations/${open}` : null);
+  const refresh = useCallback(() => {
+    reload({ silent: true });
+    detail.reload({ silent: true });
+  }, [reload, detail.reload]);
+  useEffect(() => {
+    const first = data?.conversations?.[0]?.id;
+    if (first) setOpen((current) => current || first);
+  }, [data]);
+  useWhatsappLive(refresh, '/api/whatsapp/live');
+  const people = data?.conversations || [];
+  const active = detail.data?.conversation?.id === open ? detail.data.conversation : null;
+  const messages = active ? detail.data.messages || [] : [];
+  return (
+    <Page eyebrow="Workspace" title="WhatsApp" lede="Chats on the shared chatbot that match a lead number in this workspace.">
+      <State loading={loading} error={error} onRetry={reload}>
+        {data ? (
+          <section className="wa-inbox" aria-label="Customer WhatsApp chats">
+            <div className="wa-people">
+              <header>
+                <h2>Chats</h2>
+                <p className="quiet">Only numbers saved on your leads</p>
+              </header>
+              {people.length ? people.map((person) => (
+                <button key={person.id} type="button" className={person.id === open ? 'wa-person is-on' : 'wa-person'} onClick={() => setOpen(person.id)}>
+                  <span className="wa-avatar" aria-hidden="true">{initials(person.leadName || person.contactName)}</span>
+                  <span>
+                    <strong>{person.leadName || person.contactName}</strong>
+                    <em>{person.contactPhone}</em>
+                    <p>{person.lastDirection === 'outbound' ? 'AIRO: ' : ''}{person.lastMessage || 'No message yet'}</p>
+                  </span>
+                </button>
+              )) : <p className="quiet wa-empty">No WhatsApp chat matches a lead number yet.</p>}
+            </div>
+            <CustomerThread active={active} messages={messages} loading={detail.loading && Boolean(open)} />
+          </section>
+        ) : null}
+      </State>
+    </Page>
+  );
+}
+
+function CustomerThread({ active, messages, loading }) {
+  const endRef = useRef(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages.length, active?.id]);
+  return (
+    <div className="wa-thread">
+      {active ? (
+        <>
+          <header>
+            <span className="wa-avatar" aria-hidden="true">{initials(active.leadName || active.contactName)}</span>
+            <div>
+              <strong>{active.leadName || active.contactName}</strong>
+              <p className="quiet">{active.contactPhone}{active.contactName && active.leadName && active.contactName !== active.leadName ? ` · WhatsApp name ${active.contactName}` : ''}</p>
+            </div>
+            {active.leadId ? <Link className="btn" to={`/app/growth/leads/${active.leadId}`}>Open lead</Link> : <Badge value={active.status} />}
+          </header>
+          <MessageList messages={messages} name={active.contactName} endRef={endRef} />
+        </>
+      ) : (
+        <p className="quiet wa-empty">{loading ? 'Opening chat…' : 'Select a person to read the chat.'}</p>
+      )}
+    </div>
+  );
+}
+
+function MessageList({ messages, name, endRef }) {
+  return (
+    <div className="wa-bubbles">
+      {messages.map((message) => (
+        <article key={message.id} className={message.direction === 'outbound' ? 'wa-bubble out' : 'wa-bubble in'}>
+          <b>{message.direction === 'outbound' ? 'AIRO' : name}</b>
+          <span>{message.body}</span>
+          <small>{when(message.createdAt)}</small>
+        </article>
+      ))}
+      <div ref={endRef} />
+    </div>
+  );
+}
+
+export function LeadWhatsapp({ leadId }) {
+  const { data, loading, error, reload } = useResource(leadId ? `/api/whatsapp/leads/${leadId}` : null);
+  useWhatsappLive(reload, '/api/whatsapp/live');
+  const threads = data?.threads || [];
+  return (
+    <section className="panel wa-span">
+      <header><h2>WhatsApp</h2></header>
+      <State loading={loading} error={error} onRetry={reload}>
+        {data ? (
+          threads.length ? (
+            <div className="stack">
+              {threads.map((thread) => (
+                <div key={thread.conversation.id}>
+                  <p className="quiet">{thread.conversation.contactPhone} · {thread.conversation.contactName}</p>
+                  <div className="wa-embed">
+                    <MessageList messages={thread.messages} name={thread.conversation.contactName} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="quiet">No WhatsApp conversation on {data.phone} yet.</p>
+        ) : null}
+      </State>
+    </section>
   );
 }
 

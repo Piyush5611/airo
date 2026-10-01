@@ -4,6 +4,7 @@ import { api, download } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { inr, label, num, when } from '../format.js';
+import { LeadWhatsapp } from './Whatsapp.jsx';
 import { Badge, LineChart, Page, State, Subnav, Table, useSection } from '../ui.jsx';
 
 const CAMPAIGN_SECTIONS = ['All Campaigns', 'Campaign Overview', 'Campaign Performance', 'Spend', 'Leads', 'Qualified Leads', 'CPL', 'Conversion', 'Attribution', 'AI Analysis'];
@@ -297,6 +298,7 @@ export function LeadDetail() {
               <p>Campaign: {data.campaignName ? <Link to={`/app/growth/campaigns/${data.campaignId}`}>{data.campaignName}</Link> : '—'}</p>
               <p>Tags: {data.tags.length ? data.tags.join(', ') : 'None'}</p>
             </aside>
+            <LeadWhatsapp leadId={id} />
           </div>
         ) : null}
       </State>

@@ -13,6 +13,7 @@ import * as intel from '../services/intelligenceService.js';
 import * as workspace from '../services/workspaceService.js';
 import * as platform from '../services/platformService.js';
 import * as whatsapp from '../services/whatsappService.js';
+import * as llm from '../services/llmService.js';
 import * as metaWebhook from '../services/metaWebhookService.js';
 import { pingDatabase } from '../config/db.js';
 
@@ -68,6 +69,13 @@ authRouter.post('/switch', authenticate, requireRealm('client'), validate(schema
   ok(res, await auth.switchOrganization(req, res));
 }));
 router.use('/auth', authRouter);
+
+router.get('/assistant', authenticate, asyncHandler(async (req, res) => {
+  ok(res, await llm.assistantPublic());
+}));
+router.post('/assistant/chat', authenticate, validate(schemas.llmChatSchema), asyncHandler(async (req, res) => {
+  ok(res, await llm.chatLlm(req));
+}));
 
 const client = Router();
 client.use((req, _res, next) => {
@@ -197,6 +205,16 @@ client.patch('/settings', requirePermission('settings.manage'), validate(schemas
   ok(res, await workspace.updateSettings(req.auth, req));
 }));
 client.get('/audit', requirePermission('audit.view'), asyncHandler(async (req, res) => ok(res, await intel.clientAudit(req.auth))));
+client.get('/whatsapp/live', requirePermission('leads.view'), (req, res) => {
+  whatsapp.streamClientLive(req, res);
+});
+client.get('/whatsapp', requirePermission('leads.view'), asyncHandler(async (req, res) => ok(res, await whatsapp.clientInbox(req.auth))));
+client.get('/whatsapp/leads/:id', requirePermission('leads.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await whatsapp.clientLeadChats(req.auth, req.params.id));
+}));
+client.get('/whatsapp/conversations/:id', requirePermission('leads.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await whatsapp.clientConversation(req.auth, req.params.id));
+}));
 router.use(client);
 
 const admin = Router();
@@ -237,7 +255,18 @@ admin.get('/integrations', requirePermission('platform_integrations.view'), asyn
 admin.post('/integrations/api-keys', requirePermission('platform_integrations.manage'), validate(schemas.apiKeySchema), asyncHandler(async (req, res) => {
   ok(res, await platform.createApiKey(req), 201);
 }));
-admin.get('/ai', requirePermission('platform_ai.view'), asyncHandler(async (req, res) => ok(res, await platform.ai())));
+admin.get('/ai', requirePermission('platform_ai.view'), asyncHandler(async (req, res) => {
+  ok(res, { ...(await platform.ai()), canManage: req.auth.permissions.includes('platform_ai.manage') });
+}));
+admin.post('/ai/models', requirePermission('platform_ai.manage'), validate(schemas.llmModelsSchema), asyncHandler(async (req, res) => {
+  ok(res, await llm.llmModels(req));
+}));
+admin.post('/ai/connect', requirePermission('platform_ai.manage'), validate(schemas.llmConnectSchema), asyncHandler(async (req, res) => {
+  ok(res, await llm.connectLlm(req));
+}));
+admin.post('/ai/disconnect', requirePermission('platform_ai.manage'), validate(schemas.llmDisconnectSchema), asyncHandler(async (req, res) => {
+  ok(res, await llm.disconnectLlm(req));
+}));
 admin.get('/security', requirePermission('security.view'), asyncHandler(async (req, res) => ok(res, await platform.security())));
 admin.get('/settings', requirePermission('platform_settings.view'), asyncHandler(async (req, res) => ok(res, await platform.settings())));
 admin.patch('/settings', requirePermission('platform_settings.manage'), validate(schemas.settingSchema), asyncHandler(async (req, res) => {

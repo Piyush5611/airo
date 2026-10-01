@@ -7,7 +7,7 @@ export function notifyWhatsappMessage(conversationId) {
   bus.emit('message', { conversationId });
 }
 
-export function streamWhatsapp(req, res) {
+export function streamWhatsapp(req, res, { includeId = true } = {}) {
   res.status(200);
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -16,7 +16,10 @@ export function streamWhatsapp(req, res) {
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
   res.write('data: {"type":"ready"}\n\n');
   const onMessage = (payload) => {
-    res.write(`data: ${JSON.stringify({ type: 'message', conversationId: payload.conversationId })}\n\n`);
+    const body = includeId
+      ? { type: 'message', conversationId: payload.conversationId }
+      : { type: 'message' };
+    res.write(`data: ${JSON.stringify(body)}\n\n`);
   };
   bus.on('message', onMessage);
   const ping = setInterval(() => res.write(': ping\n\n'), 25000);

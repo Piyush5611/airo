@@ -207,6 +207,35 @@ export const whatsappBotSchema = body({
   note: z.string().max(400).optional()
 });
 
+const llmKey = z.union([z.string().trim().min(20).max(500), z.literal('')]).optional();
+const llmBase = z.union([z.string().url().max(300), z.literal('')]).optional();
+
+export const llmModelsSchema = body({
+  provider: z.enum(['openai', 'anthropic', 'gemini']),
+  apiKey: llmKey,
+  baseUrl: llmBase
+});
+
+export const llmConnectSchema = body({
+  purpose: z.enum(['assistant', 'whatsapp', 'leads', 'ads', 'calls']),
+  provider: z.enum(['openai', 'anthropic', 'gemini']),
+  model: z.string().trim().min(2).max(120),
+  apiKey: llmKey,
+  baseUrl: llmBase,
+  manual: z.boolean().optional()
+});
+
+export const llmDisconnectSchema = body({
+  id: z.number().int().positive()
+});
+
+export const llmChatSchema = body({
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().trim().min(1).max(4000)
+  })).min(1).max(20)
+});
+
 export const whatsappSendSchema = body({
   body: z.string().trim().min(1).max(4096)
 });

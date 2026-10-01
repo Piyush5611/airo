@@ -41,6 +41,7 @@ function NavIcon({ name }) {
     'Content & Moderation': 'M12 3 5 6v5c0 4.5 3 7 7 8 4-1 7-3.5 7-8V6z',
     'Platform Analytics': 'M5 19V10M10 19V5M15 19v-6M20 19V8',
     'Integrations & Technical': 'M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M16 12h2a4 4 0 1 1 0 8h-2',
+    WhatsApp: 'M5 16.5V7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16H9l-4 3z',
     'WhatsApp Chatbot': 'M5 16.5V7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16H9l-4 3z',
     'Platform AI': 'M12 3.5 13.8 8.2 18.5 10 13.8 11.8 12 16.5 10.2 11.8 5.5 10 10.2 8.2z',
     'Security & Audit': 'M12 3 5 6v5c0 4.5 3 7 7 8 4-1 7-3.5 7-8V6z',
@@ -229,7 +230,7 @@ export function Shell({ kicker, nav, home }) {
             <kbd>Ctrl K</kbd>
           </button>
           <div className="top-actions">
-            <button className="btn-primary ask" aria-label="Ask AIRO" onClick={() => navigate(user?.realm === 'platform' ? '/platform/ai' : '/app/ai')}>Ask AI</button>
+            <button className="btn-primary ask" aria-label="Ask AIRO" onClick={() => navigate(user?.realm === 'platform' ? '/platform/assistant' : '/app/assistant')}>Ask AI</button>
             {user?.realm === 'client' ? (
               <button className="icon-btn" aria-label="Notifications" onClick={loadNotes}>
                 {unread ? <span className="dot" /> : null}
@@ -274,7 +275,7 @@ export function Shell({ kicker, nav, home }) {
                   {item.label} <span className="quiet">{item.detail}</span>
                 </button>
               ))}
-              <button onClick={() => { setPalette(false); navigate(home === '/platform' ? '/platform/ai' : '/app/ai'); }}>Ask AIRO</button>
+              <button onClick={() => { setPalette(false); navigate(home === '/platform' ? '/platform/assistant' : '/app/assistant'); }}>Ask AIRO</button>
               {results.map((group) => (
                 <div key={group.label}>
                   <p>{group.label}</p>
@@ -301,7 +302,8 @@ export const clientNav = [
   { label: 'Growth', items: [
     { to: '/app/growth/campaigns', label: 'Campaigns', permission: 'campaigns.view' },
     { to: '/app/growth/sources', label: 'Lead sources', permission: 'sources.view' },
-    { to: '/app/growth/leads', label: 'Leads', permission: 'leads.view' }
+    { to: '/app/growth/leads', label: 'Leads', permission: 'leads.view' },
+    { to: '/app/whatsapp', label: 'WhatsApp', permission: 'leads.view' }
   ]},
   { label: 'Sales', items: [
     { to: '/app/sales/pipeline', label: 'Pipeline', permission: 'pipeline.view' },
@@ -316,6 +318,7 @@ export const clientNav = [
     { to: '/app/connections', label: 'Connections', permission: 'connections.view' }
   ]},
   { label: 'AI Workspace', items: [
+    { to: '/app/assistant', label: 'Assistant', end: true },
     { to: '/app/ai', label: 'AI Assistant', end: true, permission: 'ai.use' },
     { to: '/app/ai/recommendations', label: 'AI Recommendations', permission: 'ai.use' },
     { to: '/app/ai/monitoring', label: 'AI Monitoring', permission: 'ai.use' }
@@ -328,6 +331,7 @@ export const clientNav = [
 
 export const platformNav = [
   { label: 'Platform', items: [
+    { to: '/platform/assistant', label: 'Assistant', end: true },
     { to: '/platform', label: 'Platform Overview', end: true, permission: 'platform.overview.view' },
     { to: '/platform/organizations', label: 'Organizations', permission: 'organizations.view' },
     { to: '/platform/users', label: 'Platform Users & Access', permission: 'platform_users.view' }

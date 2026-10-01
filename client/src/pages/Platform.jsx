@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { happened, inr, label, num, when } from '../format.js';
 import { Badge, Page, State, Subnav, Table, useSection } from '../ui.jsx';
+import { AssistantChat } from './AssistantChat.jsx';
 
 const HOME = ['Dashboard', 'Platform KPIs', 'Organization Overview', 'System Health', 'AIRO Alerts', 'Recent Activity'];
 const ORGS = ['All Organizations', 'Organization Details', 'Onboarding', 'Organization Status', 'Subscription', 'Usage', 'Client Activity', 'Client Health', 'Impersonation / Support Access'];
@@ -15,7 +16,7 @@ const FINANCE = ['Billing Dashboard', 'Subscriptions', 'Plans', 'Invoices', 'Pay
 const MODERATION = ['Content Review', 'User Reports', 'Violations', 'Flagged Content', 'Moderation Queue', 'Actions / Restrictions', 'Appeals', 'Moderation History'];
 const ANALYTICS = ['Overview', 'User Analytics', 'Organization Analytics', 'Usage Analytics', 'Revenue Analytics', 'Feature Usage', 'Engagement', 'Retention', 'Performance'];
 const TECH = ['Integration Registry', 'API Configuration', 'API Keys', 'Webhooks', 'OAuth', 'Integration Health', 'Sync Jobs', 'Data Pipelines', 'Logs', 'System Configuration', 'Developer Tools'];
-const PAI = ['AI Overview', 'AI Usage', 'AI Models', 'AI Configuration', 'AI Costs', 'AI Monitoring', 'AI Evaluations', 'AI Logs', 'AI Policies'];
+const PAI = ['Assistant', 'AI Overview', 'AI Usage', 'AI Models', 'AI Configuration', 'AI Costs', 'AI Monitoring', 'AI Evaluations', 'AI Logs', 'AI Policies'];
 const SECURITY = ['Audit Logs', 'Security Events', 'Login Activity', 'Access Logs', 'API Activity', 'Admin Actions', 'System Events'];
 const SETTINGS = ['General', 'Platform Configuration', 'Notifications', 'Email', 'Security', 'Feature Flags', 'Localization', 'System Preferences'];
 
@@ -523,18 +524,170 @@ function IntegrationRail({ data, onOpen }) {
   );
 }
 
+function ModelConnect({ data, reload }) {
+  const connections = data.models || [];
+  const purposes = data.purposes || [];
+  const [purpose, setPurpose] = useState('');
+  const [provider, setProvider] = useState(connections[0]?.provider || 'openai');
+  const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [models, setModels] = useState([]);
+  const [picked, setPicked] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const savedForProvider = connections.find((row) => row.provider === provider);
+  const taken = connections.find((row) => row.purpose === purpose);
+
+  useEffect(() => {
+    if (!data.canManage) return undefined;
+    const key = apiKey.trim();
+    const usingSaved = Boolean(savedForProvider && !key);
+    if (!usingSaved && key.length < 20) {
+      if (!savedForProvider) setModels([]);
+      return undefined;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      setBusy(true);
+      setError('');
+      api.post('/api/admin/ai/models', {
+        provider,
+        apiKey: usingSaved ? '' : key,
+        baseUrl: provider === 'openai' ? (baseUrl.trim() || (usingSaved ? savedForProvider.baseUrl || '' : '')) : ''
+      }).then((result) => {
+        if (live) setModels(result?.models || []);
+      }).catch((err) => {
+        if (!live) return;
+        setModels([]);
+        setError(err.message);
+      }).finally(() => { if (live) setBusy(false); });
+    }, usingSaved ? 0 : 400);
+    return () => { live = false; clearTimeout(timer); };
+  }, [data.canManage, provider, apiKey, baseUrl, savedForProvider]);
+
+  function changeProvider(next) {
+    setProvider(next);
+    setModels([]);
+    setPicked('');
+  }
+
+  async function connect(event) {
+    event.preventDefault();
+    if (!purpose) {
+      setError('Choose a purpose.');
+      return;
+    }
+    if (!picked) {
+      setError('Choose a model from the list.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api.post('/api/admin/ai/connect', { purpose, provider, model: picked, apiKey, baseUrl });
+      const name = purposes.find((row) => row.key === purpose)?.label || purpose;
+      setApiKey('');
+      setPicked('');
+      setPurpose('');
+      setNotice(`${name} is connected.`);
+      reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect(id) {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api.post('/api/admin/ai/disconnect', { id });
+      setNotice('That model is disconnected.');
+      reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const list = connections.length ? (
+    <ul className="model-rows">
+      {connections.map((row) => (
+        <li key={row.id}>
+          <div>
+            <strong>{row.purposeLabel}</strong>
+            <span>{row.providerName} · {row.model} · key {row.keyPreview}</span>
+          </div>
+          {data.canManage ? <button className="btn" type="button" disabled={busy} onClick={() => disconnect(row.id)}>Disconnect</button> : null}
+        </li>
+      ))}
+    </ul>
+  ) : <p>No model is connected.</p>;
+
+  if (!data.canManage) return list;
+  return (
+    <>
+      {list}
+      <form className="form-grid" onSubmit={connect}>
+        <p className="quiet">Add a model for each purpose. Nothing is selected until you choose it. The same provider key can be reused. Connecting a purpose again replaces only that purpose.</p>
+        <label className="stack-field">Purpose
+          <select value={purpose} onChange={(event) => setPurpose(event.target.value)}>
+            <option value="">Choose a purpose</option>
+            {purposes.map((row) => {
+              const current = connections.find((item) => item.purpose === row.key);
+              return <option key={row.key} value={row.key}>{row.label}{current ? ' · replace connected model' : ''}</option>;
+            })}
+          </select>
+        </label>
+        {taken ? <p className="quiet">This purpose already uses {taken.providerName} · {taken.model}. Connecting again replaces it.</p> : null}
+        <label className="stack-field">Provider
+          <select value={provider} onChange={(event) => changeProvider(event.target.value)}>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="gemini">Google Gemini</option>
+          </select>
+        </label>
+        <label className="stack-field">API key
+          <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" required={!savedForProvider} placeholder={savedForProvider ? 'Leave blank to reuse the saved key' : ''} />
+        </label>
+        {provider === 'openai' ? (
+          <label className="stack-field">Base URL
+            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="Leave blank for https://api.openai.com" />
+          </label>
+        ) : null}
+        <label className="stack-field">Model
+          <select value={picked} onChange={(event) => setPicked(event.target.value)}>
+            <option value="">{models.length ? `Choose one of ${models.length} models` : (busy ? 'Loading models…' : 'Models appear here after the key is checked')}</option>
+            {models.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </label>
+        <button className="btn-primary" type="submit" disabled={busy || !purpose || !picked}>{busy ? 'Checking with the provider…' : 'Connect model'}</button>
+        {notice ? <p>{notice}</p> : null}
+        {error ? <p className="delta-down">{error}</p> : null}
+      </form>
+    </>
+  );
+}
+
 export function PlatformAi() {
   const [section, setSection] = useSection(PAI);
   return (
-    <Gate path="/api/admin/ai" eyebrow="Platform" title="Platform AI" lede="Usage, configuration, cost, monitoring, evaluations, logs, and policy. Answers stay inside the tenant that asked.">
-      {(data) => (
+    <Gate path="/api/admin/ai" eyebrow="Platform" title="Platform AI" lede="Talk to the platform assistant, or connect a model for each purpose.">
+      {(data, reload) => (
         <>
         <Subnav items={PAI} value={section} onChange={setSection} />
         <section className="panel">
           <h2>{section}</h2>
+          {section === 'Assistant' ? <AssistantChat manageModels={data.canManage} onOpenModels={() => setSection('AI Models')} /> : null}
           {section === 'AI Policies' || section === 'AI Configuration' || section === 'AI Overview' ? <p>{data.policy}</p> : null}
-          {section === 'AI Models' || section === 'AI Costs' ? <p>No external model is connected, so there is no model bill. Answers are computed from workspace records.</p> : null}
-          {section !== 'AI Models' && section !== 'AI Costs' && section !== 'AI Policies' ? (
+          {section === 'AI Models' || section === 'AI Configuration' ? <ModelConnect data={data} reload={reload} /> : null}
+          {section === 'AI Costs' ? <p>{data.models?.length ? 'Connected models have no spend figure from the provider yet.' : 'No model is connected, so there is no model bill.'}</p> : null}
+          {section !== 'Assistant' && section !== 'AI Models' && section !== 'AI Costs' && section !== 'AI Policies' && section !== 'AI Configuration' ? (
             data.usage.length ? data.usage.map((row) => <p key={row.surface}>{label(row.surface)}: {num(row.total)} logged answers</p>) : <p className="quiet">No AI usage is logged yet.</p>
           ) : null}
         </section>

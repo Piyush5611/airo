@@ -112,7 +112,9 @@ export const PLATFORM_ROLES = {
       'platform_users.view',
       'support.view',
       'platform_analytics.view',
-      'security.view'
+      'security.view',
+      'platform_ai.view',
+      'platform_ai.manage'
     ]
   },
   support_admin: {
@@ -161,6 +163,7 @@ export const PLATFORM_ROLES = {
       'platform_settings.view',
       'security.view',
       'platform_ai.view',
+      'platform_ai.manage',
       'whatsapp_bot.manage'
     ]
   }

@@ -1,7 +1,7 @@
 {
   "name": "airo",
   "private": true,
-  "workspaces": [
+  "workspaces":  [
     "server",
     "client"
   ],

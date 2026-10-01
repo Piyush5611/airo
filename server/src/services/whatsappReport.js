@@ -500,43 +500,18 @@ function tally(rows, pick) {
   }
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
     .map(([name, total]) => `${name} ${total}`)
     .join(', ');
 }
 
-async function eachPage(load) {
-  const rows = [];
-  const seen = new Set();
-  const pageSize = 100;
-  const maxPages = 40;
-  for (let page = 1; page <= maxPages; page += 1) {
-    const body = await load(page, pageSize);
-    const batch = Array.isArray(body?.data) ? body.data : [];
-    let added = 0;
-    for (const row of batch) {
-      const id = row?.id ?? row?.followup_id;
-      if (id != null) {
-        const key = String(id);
-        if (seen.has(key)) continue;
-        seen.add(key);
-      }
-      rows.push(row);
-      added += 1;
-    }
-    if (added === 0 || batch.length < pageSize) return { rows, capped: false };
-  }
-  return { rows, capped: true };
-}
-
-function summarizeCallList(window, body, employeeName, direction, capped) {
+function summarizeCallList(window, body, employeeName, direction) {
   const rows = Array.isArray(body?.data) ? body.data : [];
   const wanted = String(direction || '').toLowerCase();
   const directed = wanted ? rows.filter((row) => String(row.call_direction || '').toLowerCase() === wanted) : rows;
   const chosen = employeeName
     ? directed.filter((row) => hasWord(employeeOf(row), employeeName) || hasWord(employeeName, employeeOf(row)))
     : directed;
-  const names = [...new Set(directed.map(employeeOf).filter(Boolean))].slice(0, 12);
+  const names = [...new Set(directed.map(employeeOf).filter(Boolean))];
   if (employeeName && !chosen.length) {
     return {
       matched: false,
@@ -553,7 +528,6 @@ function summarizeCallList(window, body, employeeName, direction, capped) {
   if (status) lines.push(`By status: ${status}.`);
   if (way) lines.push(`By direction: ${way}.`);
   if (!employeeName && people) lines.push(`By employee: ${people}.`);
-  if (capped) lines.push('More calls exist after the pages that were read.');
   return { matched: true, names, text: lines.join(' ') };
 }
 
@@ -572,25 +546,23 @@ async function nexcallSummary(organizationId, window, employeeName, text) {
   try {
     const auth = { apiKey: loaded.secret.apiKey, baseUrl: loaded.secret.baseUrl, from, to };
     if (kind === 'followups') {
-      const { rows, capped } = await eachPage((page, limit) => nexcallFollowups({ ...auth, page, limit }));
-      const extra = capped ? ' More follow-ups exist after the pages that were read.' : '';
-      return { matched: true, names: [], text: `Nexcall follow-ups for ${window.label}: ${rows.length}.${extra}` };
+      const body = await nexcallFollowups(auth);
+      const rows = Array.isArray(body?.data) ? body.data : [];
+      return { matched: true, names: [], text: `Nexcall follow-ups for ${window.label}: ${rows.length}.` };
     }
     if (kind === 'leads') {
       const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
-      const { rows, capped } = await eachPage((page, limit) => nexcallLeads({ ...auth, phone, page, limit }));
-      const extra = capped ? ' More leads exist after the pages that were read.' : '';
-      return { matched: true, names: [], text: `Nexcall leads for ${window.label}: ${rows.length}.${extra}` };
+      const body = await nexcallLeads({ ...auth, phone });
+      const rows = Array.isArray(body?.data) ? body.data : [];
+      return { matched: true, names: [], text: `Nexcall leads for ${window.label}: ${rows.length}.` };
     }
-    const phone = kind === 'calls' ? (String(text || '').match(/\b\d{10,13}\b/)?.[0] || '') : '';
-    const { rows, capped } = await eachPage((page, limit) => nexcallCalls({
+    const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
+    const body = await nexcallCalls({
       ...auth,
       phone,
-      userId: knownUser?.user_id,
-      page,
-      limit
-    }));
-    return summarizeCallList(window, { data: rows }, knownUser ? '' : employeeName, callTypeOf(text), capped);
+      userId: knownUser?.user_id
+    });
+    return summarizeCallList(window, body, knownUser ? '' : employeeName, callTypeOf(text));
   } catch (error) {
     return { matched: false, names: [], text: `Nexcall report could not be loaded: ${cleanError(error)}` };
   }

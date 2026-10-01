@@ -8,6 +8,7 @@ import * as growthRepo from '../repositories/growthRepo.js';
 import * as repo from '../repositories/whatsappRepo.js';
 import { notifyWhatsappMessage, streamWhatsapp } from './whatsappLive.js';
 import { replyWhatsapp } from './llmService.js';
+import { handleMetaAdChat } from './metaAdChat.js';
 
 function publicBot(row) {
   if (!row) return null;
@@ -241,6 +242,20 @@ async function answerWithModel(saved) {
       content: row.body
     }));
   while (messages[0]?.role === 'assistant') messages.shift();
+  const meta = await handleMetaAdChat({
+    organizationId: saved.organizationId,
+    conversationId: saved.conversationId,
+    recognized: saved.recognized,
+    messages
+  });
+  if (meta?.text) {
+    await deliverWhatsapp({
+      conversationId: saved.conversationId,
+      text: String(meta.text).slice(0, 4000),
+      actionTaken: 'Meta ad'
+    });
+    return;
+  }
   const answer = await replyWhatsapp({
     organizationId: saved.organizationId,
     recognized: saved.recognized,

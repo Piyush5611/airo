@@ -367,6 +367,31 @@ export async function listMetaPages({ apiKey, accountId }) {
     .map((row) => ({ id: String(row.id), name: String(row.name).slice(0, 180) }));
 }
 
+export async function searchPublicAds({ apiKey, query }) {
+  const term = String(query || '').trim().slice(0, 80);
+  if (term.length < 2) return { ads: [], note: 'Public competitor ads were not searched.' };
+  try {
+    const data = await graph('ads_archive', apiKey, {
+      search_terms: term,
+      ad_reached_countries: JSON.stringify(['IN']),
+      ad_active_status: 'ACTIVE',
+      fields: 'page_name,ad_creative_bodies,ad_creative_link_titles',
+      limit: '5'
+    });
+    const ads = (data.data || []).slice(0, 5).map((row) => ({
+      page: String(row.page_name || '').slice(0, 80),
+      title: String((row.ad_creative_link_titles || [])[0] || '').slice(0, 80),
+      text: String((row.ad_creative_bodies || [])[0] || '').slice(0, 180)
+    })).filter((row) => row.page || row.title || row.text);
+    return {
+      ads,
+      note: ads.length ? '' : 'The public ad library returned no active ads for this search.'
+    };
+  } catch {
+    return { ads: [], note: 'Public competitor ads could not be read.' };
+  }
+}
+
 export async function listAdInstagram({ apiKey, accountId }) {
   const rows = await safeList(`act_${actId(accountId)}/instagram_accounts`, apiKey, { fields: 'id,username', limit: '50' });
   return rows

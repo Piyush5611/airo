@@ -235,6 +235,76 @@ async function whatsappModels() {
   return attempts;
 }
 
+const AD_PLAN_BRIEF = `You plan one Meta ad for AIRO.
+Write with English letters only. Never use Hindi script.
+If the intake says Language: English, write STRATEGY, HEADLINE, and TEXT in English.
+If the intake says Language: Hinglish, write those three lines in Hinglish.
+Use only the intake and the public ads in this message. If no public ads are listed, say public competitor ads were not available. Do not invent competitor names, ad spend, audiences, or ads.
+Do not add a special ad category. Do not mention housing unless the intake already says HOUSING.
+Return exactly four lines and nothing else:
+STRATEGY: one or two sentences
+HEADLINE: under 40 characters
+TEXT: under 200 characters
+CTA: LEARN_MORE or SIGN_UP or SHOP_NOW or BOOK_NOW`;
+
+export async function writeAdPlan({ intake, publicAds, english }) {
+  const attempts = [];
+  for (const purpose of ['ads', 'whatsapp', 'assistant']) {
+    let row;
+    try { row = await repo.connectionByPurpose(purpose); } catch (error) {
+      if (schemaMissing(error)) return null;
+      throw error;
+    }
+    if (row?.credentialCiphertext && !attempts.some((item) => Number(item.row.id) === Number(row.id))) {
+      attempts.push({ purpose, row });
+    }
+  }
+  if (!attempts.length) return null;
+  const facts = [
+    `Language: ${english ? 'English' : 'Hinglish'}.`,
+    `Category: ${intake.category}`,
+    `Product: ${intake.product}`,
+    `Website: ${intake.website}`,
+    `Region: ${intake.region}`,
+    `Daily budget: ${intake.dailyBudget}`,
+    `Objective: ${intake.objectiveLabel}`,
+    `Special category: ${intake.specialCategory || 'none'}`,
+    publicAds.length
+      ? `Public ads:\n${publicAds.map((ad) => `- ${[ad.page, ad.title, ad.text].filter(Boolean).join(' · ')}`).join('\n')}`
+      : 'Public ads: none returned.'
+  ].join('\n');
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      const text = await replyLlm({
+        provider: attempt.row.provider,
+        model: attempt.row.modelName,
+        apiKey: await readKey(attempt.row),
+        baseUrl: attempt.row.baseUrl || '',
+        messages: [{ role: 'user', content: 'Write the Meta ad plan from the intake.' }],
+        facts,
+        system: AD_PLAN_BRIEF
+      });
+      await recordAudit({ auth: null, ip: null }, {
+        action: 'llm.chat',
+        resource: 'llm_connection',
+        resourceId: attempt.row.id,
+        organizationId: intake.organizationId || null,
+        metadata: { purpose: attempt.purpose, provider: attempt.row.provider, model: attempt.row.modelName, channel: 'whatsapp' }
+      });
+      return {
+        text: String(text || '').slice(0, 2000),
+        purpose: attempt.purpose,
+        providerName: llmProviderName(attempt.row.provider),
+        model: attempt.row.modelName
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 export async function replyWhatsapp({ organizationId, recognized, businessLabel, messages }) {
   let attempts;
   try {

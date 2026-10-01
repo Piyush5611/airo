@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, currentToken } from '../api.js';
+import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { label, num, when } from '../format.js';
 import { Badge, Page, State, Subnav, Table, useSection } from '../ui.jsx';
@@ -363,31 +364,156 @@ export function WorkspaceWhatsapp() {
   const active = detail.data?.conversation?.id === open ? detail.data.conversation : null;
   const messages = active ? detail.data.messages || [] : [];
   return (
-    <Page eyebrow="Workspace" title="WhatsApp" lede="Chats on the shared chatbot that match a lead number in this workspace.">
+    <Page eyebrow="Workspace" title="WhatsApp" lede="Add this business's WhatsApp numbers. A chat from one of those numbers is recognized as this workspace.">
       <State loading={loading} error={error} onRetry={reload}>
         {data ? (
-          <section className="wa-inbox" aria-label="Customer WhatsApp chats">
-            <div className="wa-people">
-              <header>
-                <h2>Chats</h2>
-                <p className="quiet">Only numbers saved on your leads</p>
-              </header>
-              {people.length ? people.map((person) => (
-                <button key={person.id} type="button" className={person.id === open ? 'wa-person is-on' : 'wa-person'} onClick={() => setOpen(person.id)}>
-                  <span className="wa-avatar" aria-hidden="true">{initials(person.leadName || person.contactName)}</span>
-                  <span>
-                    <strong>{person.leadName || person.contactName}</strong>
-                    <em>{person.contactPhone}</em>
-                    <p>{person.lastDirection === 'outbound' ? 'AIRO: ' : ''}{person.lastMessage || 'No message yet'}</p>
-                  </span>
-                </button>
-              )) : <p className="quiet wa-empty">No WhatsApp chat matches a lead number yet.</p>}
-            </div>
-            <CustomerThread active={active} messages={messages} loading={detail.loading && Boolean(open)} />
-          </section>
+          <div className="stack">
+            <BusinessNumbers numbers={data.numbers || []} reload={reload} />
+            <section className="wa-inbox" aria-label="Customer WhatsApp chats">
+              <div className="wa-people">
+                <header>
+                  <h2>Chats</h2>
+                  <p className="quiet">Business numbers and lead numbers</p>
+                </header>
+                {people.length ? people.map((person) => (
+                  <button key={person.id} type="button" className={person.id === open ? 'wa-person is-on' : 'wa-person'} onClick={() => setOpen(person.id)}>
+                    <span className="wa-avatar" aria-hidden="true">{initials(chatTitle(person))}</span>
+                    <span>
+                      <strong>{chatTitle(person)}</strong>
+                      <em>{person.businessNumber ? `${person.contactPhone} · Business number` : person.contactPhone}</em>
+                      <p>{person.lastDirection === 'outbound' ? 'AIRO: ' : ''}{person.lastMessage || 'No message yet'}</p>
+                    </span>
+                  </button>
+                )) : <p className="quiet wa-empty">No chat yet. Add a number, then message the chatbot from that number.</p>}
+              </div>
+              <CustomerThread active={active} messages={messages} loading={detail.loading && Boolean(open)} />
+            </section>
+          </div>
         ) : null}
       </State>
     </Page>
+  );
+}
+
+function chatTitle(person) {
+  return person.leadName || person.numberLabel || person.contactName;
+}
+
+const COUNTRY_CODES = [
+  ['91', 'India +91'],
+  ['1', 'United States / Canada +1'],
+  ['44', 'United Kingdom +44'],
+  ['971', 'United Arab Emirates +971'],
+  ['966', 'Saudi Arabia +966'],
+  ['974', 'Qatar +974'],
+  ['965', 'Kuwait +965'],
+  ['968', 'Oman +968'],
+  ['973', 'Bahrain +973'],
+  ['65', 'Singapore +65'],
+  ['60', 'Malaysia +60'],
+  ['61', 'Australia +61'],
+  ['64', 'New Zealand +64'],
+  ['27', 'South Africa +27'],
+  ['977', 'Nepal +977'],
+  ['880', 'Bangladesh +880'],
+  ['94', 'Sri Lanka +94'],
+  ['92', 'Pakistan +92'],
+  ['49', 'Germany +49'],
+  ['33', 'France +33'],
+  ['39', 'Italy +39'],
+  ['34', 'Spain +34'],
+  ['31', 'Netherlands +31'],
+  ['353', 'Ireland +353'],
+  ['41', 'Switzerland +41'],
+  ['852', 'Hong Kong +852'],
+  ['86', 'China +86'],
+  ['81', 'Japan +81'],
+  ['82', 'South Korea +82'],
+  ['62', 'Indonesia +62'],
+  ['66', 'Thailand +66'],
+  ['63', 'Philippines +63'],
+  ['84', 'Vietnam +84'],
+  ['234', 'Nigeria +234'],
+  ['254', 'Kenya +254'],
+  ['55', 'Brazil +55'],
+  ['52', 'Mexico +52']
+];
+
+function withCountryCode(code, raw) {
+  let digits = String(raw || '').replace(/\D/g, '').replace(/^0+/, '');
+  const pastedCode = String(raw || '').trim().startsWith('+') || digits.length > 10;
+  if (pastedCode && digits.startsWith(code)) digits = digits.slice(code.length).replace(/^0+/, '');
+  return `${code}${digits}`;
+}
+
+function showPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits ? `+${digits}` : phone;
+}
+
+function BusinessNumbers({ numbers, reload }) {
+  const { can } = useAuth();
+  const manage = can('settings.manage');
+  const [code, setCode] = useState('91');
+  const [phone, setPhone] = useState('');
+  const [label, setLabel] = useState('');
+  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const localDigits = phone.replace(/\D/g, '').replace(/^0+/, '');
+  async function add(event) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage('');
+    try {
+      await api.post('/api/whatsapp/numbers', { phone: withCountryCode(code, phone), label: label.trim() });
+      setPhone('');
+      setLabel('');
+      setMessage('Number added. A chat from this number is this business.');
+      reload();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function remove(id) {
+    setMessage('');
+    try {
+      await api.del(`/api/whatsapp/numbers/${id}`);
+      setMessage('Number removed.');
+      reload();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+  return (
+    <section className="panel">
+      <header><h2>Business numbers</h2></header>
+      <p className="quiet">Add more than one. When that WhatsApp messages the chatbot, AIRO marks it as this business.</p>
+      {numbers.length ? (
+        <ul className="wa-numbers">
+          {numbers.map((number) => (
+            <li key={number.id}>
+              <span><strong>{number.label || 'WhatsApp'}</strong><em>{showPhone(number.phone)}</em></span>
+              {manage ? <button type="button" className="btn" onClick={() => remove(number.id)}>Remove</button> : null}
+            </li>
+          ))}
+        </ul>
+      ) : <p>No number added yet.</p>}
+      {manage ? (
+        <form className="filters" onSubmit={add}>
+          <div className="phone-row">
+            <select value={code} onChange={(event) => setCode(event.target.value)} aria-label="Country code">
+              {COUNTRY_CODES.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+            </select>
+            <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="98765 43210" inputMode="tel" aria-label="WhatsApp number" required />
+          </div>
+          <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Label, optional" aria-label="Number label" maxLength={80} />
+          <button className="btn-primary" type="submit" disabled={saving || localDigits.length < 6}>{saving ? 'Adding…' : 'Add number'}</button>
+        </form>
+      ) : <p className="quiet">An Owner or Admin adds the numbers.</p>}
+      {message ? <p>{message}</p> : null}
+    </section>
   );
 }
 
@@ -401,10 +527,10 @@ function CustomerThread({ active, messages, loading }) {
       {active ? (
         <>
           <header>
-            <span className="wa-avatar" aria-hidden="true">{initials(active.leadName || active.contactName)}</span>
+            <span className="wa-avatar" aria-hidden="true">{initials(chatTitle(active))}</span>
             <div>
-              <strong>{active.leadName || active.contactName}</strong>
-              <p className="quiet">{active.contactPhone}{active.contactName && active.leadName && active.contactName !== active.leadName ? ` · WhatsApp name ${active.contactName}` : ''}</p>
+              <strong>{chatTitle(active)}</strong>
+              <p className="quiet">{active.contactPhone}{active.businessNumber ? ' · Business number' : ''}{active.contactName && chatTitle(active) !== active.contactName ? ` · WhatsApp name ${active.contactName}` : ''}</p>
             </div>
             {active.leadId ? <Link className="btn" to={`/app/growth/leads/${active.leadId}`}>Open lead</Link> : <Badge value={active.status} />}
           </header>

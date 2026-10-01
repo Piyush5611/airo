@@ -155,25 +155,31 @@ export async function receiveWebhook(body) {
 }
 
 async function storeInbound({ phone, name, body }) {
-  const existing = await repo.findConversationByPhone(phone);
+  const key = phoneKey(phone);
+  const owner = key ? await repo.findNumberByKey(key) : null;
+  const existing = key ? await repo.findConversationByKey(key) : await repo.findConversationByPhone(phone);
   let conversationId = existing?.id;
   if (!conversationId) {
-    const business = await repo.firstEnabledBusiness();
-    if (!business) return;
+    const fallback = owner ? null : await repo.firstEnabledBusiness();
+    const organizationId = owner?.organizationId || fallback?.organizationId;
+    if (!organizationId) return;
     conversationId = await repo.insertConversation({
-      organizationId: business.organizationId,
+      organizationId,
       contactName: name,
       contactPhone: phone,
-      topic: 'inbox'
+      topic: owner ? 'business' : 'inbox'
     });
   } else {
+    if (owner && Number(existing.organizationId) !== Number(owner.organizationId)) {
+      await repo.assignConversationOrganization(conversationId, owner.organizationId);
+    }
     await repo.touchConversation(conversationId);
   }
   await repo.insertMessage({
     conversationId,
     direction: 'inbound',
     body,
-    actionTaken: 'Received from WhatsApp'
+    actionTaken: owner ? `Business number · ${owner.label || owner.phone}` : 'Received from WhatsApp'
   });
   notifyWhatsappMessage(conversationId);
 }
@@ -193,12 +199,27 @@ function phoneKey(value) {
 
 async function customerPhones(auth) {
   const scope = leadScope(auth);
-  const leads = await repo.leadPhones(auth.organizationId, scope.sql, scope.params);
+  const [leads, numbers] = await Promise.all([
+    repo.leadPhones(auth.organizationId, scope.sql, scope.params),
+    repo.numbersForOrg(auth.organizationId)
+  ]);
   const byKey = new Map();
   for (const lead of leads) {
     const key = phoneKey(lead.phone);
     if (!key || byKey.has(key)) continue;
     byKey.set(key, { leadId: lead.id, leadName: lead.fullName });
+  }
+  for (const number of numbers) {
+    const key = phoneKey(number.phone);
+    if (!key) continue;
+    const current = byKey.get(key) || {};
+    byKey.set(key, {
+      ...current,
+      businessNumber: true,
+      numberId: number.id,
+      numberLabel: number.label || null,
+      leadName: current.leadName || number.label || null
+    });
   }
   return byKey;
 }
@@ -215,14 +236,86 @@ function customerConversation(row, byKey) {
     lastMessage: row.lastMessage,
     lastDirection: row.lastDirection,
     leadId: match.leadId || null,
-    leadName: match.leadName || null
+    leadName: match.leadName || null,
+    businessNumber: Boolean(match.businessNumber),
+    numberLabel: match.numberLabel || null
   };
 }
 
+function publicNumber(row) {
+  return { id: row.id, phone: row.phone, label: row.label || '', createdAt: row.createdAt };
+}
+
 export async function clientInbox(auth) {
-  const byKey = await customerPhones(auth);
+  const [byKey, numbers] = await Promise.all([
+    customerPhones(auth),
+    repo.numbersForOrg(auth.organizationId)
+  ]);
   const rows = await repo.conversationsByPhoneKeys([...byKey.keys()]);
-  return { conversations: rows.map((row) => customerConversation(row, byKey)) };
+  return {
+    numbers: numbers.map(publicNumber),
+    conversations: rows.map((row) => customerConversation(row, byKey))
+  };
+}
+
+export async function addBusinessNumber(req) {
+  const digits = String(req.body.phone || '').replace(/\D/g, '');
+  if (digits.length < 10 || digits.length > 15) {
+    throw new ApiError(422, 'Enter a 10-digit mobile number, or include the country code.', 'validation_error');
+  }
+  const key = phoneKey(digits);
+  const label = String(req.body.label || '').trim().slice(0, 80) || null;
+  const organizationId = req.auth.organizationId;
+  const [count, existing] = await Promise.all([
+    repo.countNumbers(organizationId),
+    repo.findNumberByKey(key)
+  ]);
+  if (Number(count?.total || 0) >= 20) {
+    throw new ApiError(422, 'This workspace already has 20 WhatsApp numbers.', 'validation_error');
+  }
+  if (existing) {
+    throw new ApiError(422, Number(existing.organizationId) === Number(organizationId)
+      ? 'This number is already added.'
+      : 'This number is already linked to a business.', 'validation_error');
+  }
+  let id;
+  try {
+    id = await repo.insertNumber({ organizationId, phone: digits, phoneKey: key, label });
+  } catch (error) {
+    if (error?.cause?.code === 'ER_DUP_ENTRY') {
+      throw new ApiError(422, 'This number is already linked to a business.', 'validation_error');
+    }
+    if (error?.cause?.code === 'ER_NO_SUCH_TABLE') {
+      throw new ApiError(503, 'Database schema is not ready. Run the latest database update, then add the number.', 'schema_missing');
+    }
+    throw error;
+  }
+  const open = await repo.findConversationByKey(key);
+  if (open && Number(open.organizationId) !== Number(organizationId)) {
+    await repo.assignConversationOrganization(open.id, organizationId);
+  }
+  await recordAudit(req, {
+    action: 'whatsapp_number.added',
+    resource: 'whatsapp_business_number',
+    resourceId: id,
+    organizationId,
+    metadata: { phoneKey: key, label }
+  });
+  return clientInbox(req.auth);
+}
+
+export async function removeBusinessNumber(req, id) {
+  const row = await repo.findNumber(id, req.auth.organizationId);
+  if (!row) throw new ApiError(404, 'That number is not on this workspace.', 'not_found');
+  await repo.deleteNumber(id, req.auth.organizationId);
+  await recordAudit(req, {
+    action: 'whatsapp_number.removed',
+    resource: 'whatsapp_business_number',
+    resourceId: id,
+    organizationId: req.auth.organizationId,
+    metadata: { phoneKey: phoneKey(row.phone) }
+  });
+  return clientInbox(req.auth);
 }
 
 export async function clientConversation(auth, id) {

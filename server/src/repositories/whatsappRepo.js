@@ -55,6 +55,64 @@ export function findConversationByPhone(phone) {
   );
 }
 
+export function findConversationByKey(phoneKey) {
+  const key = phoneKeySql('contact_phone');
+  return one(
+    `SELECT id, organization_id AS organizationId FROM whatsapp_conversations
+     WHERE CHAR_LENGTH(${key}) = 10 AND ${key} = ?
+     ORDER BY last_message_at DESC LIMIT 1`,
+    [phoneKey]
+  );
+}
+
+export function assignConversationOrganization(id, organizationId) {
+  return run(`UPDATE whatsapp_conversations SET organization_id = ? WHERE id = ?`, [organizationId, id]);
+}
+
+export function numbersForOrg(organizationId) {
+  return many(
+    `SELECT id, phone, label, created_at AS createdAt
+     FROM whatsapp_business_numbers
+     WHERE organization_id = ?
+     ORDER BY id`,
+    [organizationId]
+  );
+}
+
+export function countNumbers(organizationId) {
+  return one(
+    `SELECT COUNT(*) AS total FROM whatsapp_business_numbers WHERE organization_id = ?`,
+    [organizationId]
+  );
+}
+
+export function findNumberByKey(phoneKey) {
+  return one(
+    `SELECT id, organization_id AS organizationId, phone, label
+     FROM whatsapp_business_numbers WHERE phone_key = ?`,
+    [phoneKey]
+  );
+}
+
+export function findNumber(id, organizationId) {
+  return one(
+    `SELECT id, phone, label FROM whatsapp_business_numbers WHERE id = ? AND organization_id = ?`,
+    [id, organizationId]
+  );
+}
+
+export function insertNumber({ organizationId, phone, phoneKey, label }) {
+  return insert(
+    `INSERT INTO whatsapp_business_numbers (organization_id, phone, phone_key, label)
+     VALUES (?, ?, ?, ?)`,
+    [organizationId, phone, phoneKey, label]
+  );
+}
+
+export function deleteNumber(id, organizationId) {
+  return run(`DELETE FROM whatsapp_business_numbers WHERE id = ? AND organization_id = ?`, [id, organizationId]);
+}
+
 export function firstEnabledBusiness() {
   return one(
     `SELECT organization_id AS organizationId, business_label AS businessLabel

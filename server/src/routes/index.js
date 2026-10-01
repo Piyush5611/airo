@@ -209,6 +209,12 @@ client.get('/whatsapp/live', requirePermission('leads.view'), (req, res) => {
   whatsapp.streamClientLive(req, res);
 });
 client.get('/whatsapp', requirePermission('leads.view'), asyncHandler(async (req, res) => ok(res, await whatsapp.clientInbox(req.auth))));
+client.post('/whatsapp/numbers', requirePermission('settings.manage'), validate(schemas.whatsappNumberSchema), asyncHandler(async (req, res) => {
+  ok(res, await whatsapp.addBusinessNumber(req), 201);
+}));
+client.delete('/whatsapp/numbers/:id', requirePermission('settings.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await whatsapp.removeBusinessNumber(req, req.params.id));
+}));
 client.get('/whatsapp/leads/:id', requirePermission('leads.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await whatsapp.clientLeadChats(req.auth, req.params.id));
 }));

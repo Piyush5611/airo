@@ -244,3 +244,8 @@ export const whatsappBusinessSchema = body({
   organizationId: z.number().int().positive(),
   enabled: z.boolean()
 });
+
+export const whatsappNumberSchema = body({
+  phone: z.string().trim().min(8).max(20),
+  label: z.string().trim().max(80).optional()
+});

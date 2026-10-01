@@ -267,7 +267,7 @@ tr.is-clickable:hover td { background: #fafafe; }
 .tabs button, .tabs a { border: 0; background: transparent; color: var(--muted); padding: 8px 12px; border-radius: 10px; text-decoration: none; font-weight: 600; white-space: nowrap; }
 .tabs .is-on { color: white; background: var(--ink); }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.field, select, input:not([type="checkbox"]):not([type="radio"]), textarea {
+.field, select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea {
   background: #fbfbfe; border: 1px solid var(--line-strong); border-radius: 12px; min-height: 42px; padding: 8px 12px; width: 100%;
 }
 textarea { min-height: 96px; resize: vertical; }
@@ -292,6 +292,9 @@ label.stack-field { display: flex; flex-direction: column; gap: 6px; font-size: 
 .pick-results .btn, .pick-chip { justify-content: flex-start; }
 .pick-chip { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .pick-chip select { width: auto; min-width: 110px; }
+.city-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; }
+.radius-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px auto; gap: 8px; align-items: center; }
+.radius-slider { width: 100%; accent-color: var(--ink); }
 .ad-studio { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
 .ad-preview { border: 1px solid var(--line); border-radius: 16px; padding: 14px; background: white; display: grid; gap: 8px; }
 .ad-preview img { width: 100%; border-radius: 12px; aspect-ratio: 1.2; object-fit: cover; }

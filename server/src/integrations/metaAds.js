@@ -389,16 +389,35 @@ export async function searchMetaAudience({ apiKey, kind, query }) {
       .map((row) => ({ key: Number(row.key), name: String(row.name || '').slice(0, 80) }))
       .filter((row) => Number.isInteger(row.key) && row.key > 0 && row.name);
   }
-  const data = await graph('search', apiKey, {
-    type: 'adgeolocation',
-    q,
-    location_types: JSON.stringify(['city']),
-    country_code: 'IN',
-    limit: '12'
-  });
+  const types = JSON.stringify(['city']);
+  let data = { data: [] };
+  try {
+    data = await graph('search', apiKey, {
+      type: 'adgeolocation',
+      q,
+      location_types: types,
+      country_code: 'IN',
+      limit: '20'
+    });
+  } catch {
+    data = { data: [] };
+  }
+  if (!(data.data || []).length) {
+    data = await graph('search', apiKey, {
+      type: 'adgeolocation',
+      q,
+      location_types: types,
+      limit: '20'
+    });
+  }
+  const allowed = new Set(['city', 'subcity', 'neighborhood']);
   return (data.data || [])
-    .filter((row) => row.type === 'city' && row.country_code === 'IN' && /^\d{1,20}$/.test(String(row.key)))
-    .map((row) => ({ key: String(row.key), name: String(row.name || '').slice(0, 80), region: String(row.region || '').slice(0, 80) }));
+    .filter((row) => allowed.has(row.type) && /^\d{1,20}$/.test(String(row.key || '')) && (!row.country_code || row.country_code === 'IN'))
+    .map((row) => ({
+      key: String(row.key),
+      name: String(row.name || '').slice(0, 80),
+      region: String(row.region || row.country_name || '').slice(0, 80)
+    }));
 }
 
 export async function listMetaPixels({ apiKey, accountId }) {
@@ -452,11 +471,14 @@ function targetingFor(input) {
   const cities = Array.isArray(input.locations) ? input.locations : [];
   const geo = cities.length
     ? {
-      cities: cities.map((city) => ({
-        key: String(city.key),
-        radius: Math.min(80, Math.max(1, Number(city.radius) || 10)),
-        distance_unit: 'kilometer'
-      }))
+      cities: cities.map((city) => {
+        const item = { key: String(city.key) };
+        if (city.radiusMode !== 'city') {
+          item.radius = Math.min(80, Math.max(17, Number(city.radius) || 25));
+          item.distance_unit = 'kilometer';
+        }
+        return item;
+      })
     }
     : { countries: ['IN'] };
   const targeting = {

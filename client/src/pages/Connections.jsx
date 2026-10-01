@@ -179,6 +179,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [cities, setCities] = useState([]);
   const [cityQuery, setCityQuery] = useState('');
   const [cityHits, setCityHits] = useState([]);
+  const [cityNote, setCityNote] = useState('');
   const [locales, setLocales] = useState([]);
   const [localeQuery, setLocaleQuery] = useState('');
   const [localeHits, setLocaleHits] = useState([]);
@@ -232,12 +233,21 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   useEffect(() => {
     if (!canManage || cityQuery.trim().length < 2) {
       setCityHits([]);
+      setCityNote('');
       return undefined;
     }
     const timer = setTimeout(() => {
+      setCityNote('Searching…');
       api.get(`/api/connections/${id}/meta/audience?kind=city&q=${encodeURIComponent(cityQuery.trim())}`)
-        .then((result) => setCityHits(result?.results || []))
-        .catch(() => setCityHits([]));
+        .then((result) => {
+          const rows = result?.results || [];
+          setCityHits(rows);
+          setCityNote(rows.length ? '' : (result?.note || 'No city found.'));
+        })
+        .catch((err) => {
+          setCityHits([]);
+          setCityNote(err.message);
+        });
     }, 350);
     return () => clearTimeout(timer);
   }, [id, canManage, cityQuery]);
@@ -556,26 +566,35 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                       {cityHits.map((hit) => (
                         <li key={hit.key}>
                           <button type="button" className="btn" onClick={() => {
-                            setCities((current) => current.some((item) => item.key === hit.key) ? current : [...current, { ...hit, radius: 10 }]);
+                            setCities((current) => current.some((item) => item.key === hit.key) ? current : [...current, { ...hit, radiusMode: 'radius', radius: 25 }]);
                             setCityQuery('');
                             setCityHits([]);
+                            setCityNote('');
                           }}>{hit.name}{hit.region ? `, ${hit.region}` : ''}</button>
                         </li>
                       ))}
                     </ul>
                   ) : null}
+                  {cityNote ? <p className="quiet">{cityNote}</p> : null}
                   {cities.map((city) => (
-                    <div key={city.key} className="pick-chip">
-                      <span>{city.name}{city.region ? `, ${city.region}` : ''}</span>
-                      <select value={city.radius} onChange={(event) => setCities((current) => current.map((item) => item.key === city.key ? { ...item, radius: Number(event.target.value) } : item))} aria-label={`${city.name} radius`}>
-                        <option value={1}>1 km</option>
-                        <option value={10}>10 km</option>
-                        <option value={25}>25 km</option>
-                        <option value={40}>40 km</option>
-                        <option value={60}>60 km</option>
-                        <option value={80}>80 km</option>
-                      </select>
-                      <button type="button" className="btn" onClick={() => setCities((current) => current.filter((item) => item.key !== city.key))}>Remove</button>
+                    <div key={city.key} className="city-card">
+                      <div className="pick-chip">
+                        <span>{city.name}{city.region ? `, ${city.region}` : ''}{city.radiusMode === 'city' ? '' : ` + ${city.radius} km`}</span>
+                        <button type="button" className="btn" onClick={() => setCities((current) => current.filter((item) => item.key !== city.key))}>Remove</button>
+                      </div>
+                      <label className="stack-field">Area
+                        <select value={city.radiusMode || 'radius'} onChange={(event) => setCities((current) => current.map((item) => item.key === city.key ? { ...item, radiusMode: event.target.value, radius: item.radius || 25 } : item))}>
+                          <option value="city">Current city only</option>
+                          <option value="radius">Cities within radius</option>
+                        </select>
+                      </label>
+                      {city.radiusMode !== 'city' ? (
+                        <label className="radius-row">
+                          <input className="radius-slider" type="range" min="17" max="80" value={city.radius || 25} onChange={(event) => setCities((current) => current.map((item) => item.key === city.key ? { ...item, radius: Number(event.target.value) } : item))} aria-label={`${city.name} radius`} />
+                          <input type="number" min="17" max="80" value={city.radius || 25} onChange={(event) => setCities((current) => current.map((item) => item.key === city.key ? { ...item, radius: Math.min(80, Math.max(17, Number(event.target.value) || 17)) } : item))} />
+                          <span>km</span>
+                        </label>
+                      ) : null}
                     </div>
                   ))}
                 </>

@@ -121,7 +121,9 @@ export const metaAdSchema = body({
   locations: z.array(z.object({
     key: z.string().regex(/^\d{1,20}$/),
     name: z.string().min(1).max(80),
-    radius: z.number().int().min(1).max(80)
+    region: z.string().max(80).optional(),
+    radiusMode: z.enum(['city', 'radius']).optional(),
+    radius: z.number().int().min(17).max(80).optional()
   })).max(15).optional(),
   locales: z.array(z.object({
     key: z.number().int().positive().max(100000),

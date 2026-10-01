@@ -313,6 +313,9 @@ label.stack-field { display: flex; flex-direction: column; gap: 6px; font-size: 
 .wa-bubble b { font-size: 12px; }
 .wa-bubble small { opacity: 0.75; font-size: 11px; }
 .wa-empty { padding: 24px; }
+.wa-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); background: white; }
+.wa-compose textarea { min-height: 44px; height: 44px; resize: none; }
+.wa-compose .quiet, .wa-compose .delta-down { grid-column: 1 / -1; margin: 0; }
 .city-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; }
 .radius-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px auto; gap: 8px; align-items: center; }
 .radius-slider { width: 100%; accent-color: var(--ink); }

@@ -4,6 +4,7 @@ import { ApiError } from '../utils/errors.js';
 import { decryptJson, encryptJson } from '../utils/cryptoBox.js';
 import { recordAudit } from './auditService.js';
 import * as repo from '../repositories/whatsappRepo.js';
+import { notifyWhatsappMessage, streamWhatsapp } from './whatsappLive.js';
 
 function publicBot(row) {
   if (!row) return null;
@@ -172,6 +173,69 @@ async function storeInbound({ phone, name, body }) {
     body,
     actionTaken: 'Received from WhatsApp'
   });
+  notifyWhatsappMessage(conversationId);
+}
+
+export function streamLive(req, res) {
+  streamWhatsapp(req, res);
+}
+
+export async function sendMessage(req, conversationId) {
+  const row = await repo.conversation(conversationId);
+  if (!row) throw new ApiError(404, 'Conversation not found.', 'not_found');
+  const bot = await repo.bot();
+  const secret = await savedSecret();
+  const version = String(bot?.apiVersion || '');
+  const phoneNumberId = String(bot?.phoneNumberId || '');
+  if (!secret?.accessToken || !/^v\d+\.\d+$/.test(version) || !/^\d{6,32}$/.test(phoneNumberId)) {
+    throw new ApiError(422, 'Connect the WhatsApp chatbot before sending.', 'validation_error');
+  }
+  const windowOpen = await repo.recentInbound(conversationId);
+  if (!windowOpen) {
+    throw new ApiError(422, 'WhatsApp accepts a reply only within 24 hours of this person\'s last message.', 'validation_error');
+  }
+  const to = String(row.contactPhone || '').replace(/\D/g, '');
+  if (to.length < 8 || to.length > 15) throw new ApiError(422, 'This chat has no WhatsApp number.', 'validation_error');
+  const text = req.body.body.trim();
+  let response;
+  try {
+    response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${secret.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'text',
+        text: { preview_url: false, body: text }
+      }),
+      signal: AbortSignal.timeout(15000)
+    });
+  } catch {
+    throw new ApiError(502, 'WhatsApp did not respond. Check the network and try again.', 'whatsapp_unreachable');
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.messages?.[0]?.id) {
+    const message = String(payload?.error?.message || 'WhatsApp did not accept this message.')
+      .replace(/access_token=[^&\s]+/gi, '')
+      .slice(0, 240);
+    throw new ApiError(422, message, 'whatsapp_rejected');
+  }
+  await repo.insertMessage({
+    conversationId,
+    direction: 'outbound',
+    body: text,
+    actionTaken: 'Sent from AIRO'
+  });
+  await repo.touchConversation(conversationId);
+  notifyWhatsappMessage(conversationId);
+  await recordAudit(req, {
+    action: 'whatsapp_message.sent',
+    resource: 'whatsapp_conversation',
+    resourceId: conversationId,
+    organizationId: row.organizationId
+  });
+  return conversation(conversationId);
 }
 
 export async function disconnectBot(req) {

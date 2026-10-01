@@ -70,6 +70,16 @@ export function insertConversation({ organizationId, contactName, contactPhone, 
   );
 }
 
+export function recentInbound(conversationId) {
+  return one(
+    `SELECT id FROM whatsapp_messages
+     WHERE conversation_id = ? AND direction = 'inbound'
+       AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
+     LIMIT 1`,
+    [conversationId]
+  );
+}
+
 export function insertMessage({ conversationId, direction, body, actionTaken }) {
   return insert(
     `INSERT INTO whatsapp_messages (conversation_id, direction, body, action_taken, created_at)

@@ -63,8 +63,7 @@ async function syncPlatformGrants(connection) {
 async function ensureWhatsapp(connection) {
   await connection.query(
     `INSERT INTO whatsapp_bot (id, display_name, phone_label, status, mode, webhook_path, note)
-     VALUES (1, 'AIRO WhatsApp', '+91 11 4000 2026', 'connected', 'development', '/api/whatsapp/webhook',
-             'One chatbot for every business. No live WhatsApp API is called in development.')
+     VALUES (1, 'AIRO WhatsApp', 'Not connected', 'pending', 'development', '/api/whatsapp/webhook', NULL)
      ON DUPLICATE KEY UPDATE id = id`
   );
   const [orgs] = await connection.query(`SELECT id, name FROM organizations`);

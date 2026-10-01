@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api.js';
+import { useEffect, useRef, useState } from 'react';
+import { api, currentToken } from '../api.js';
 import { useResource } from '../data.js';
 import { label, num, when } from '../format.js';
 import { Badge, Page, State, Subnav, Table, useSection } from '../ui.jsx';
@@ -15,13 +15,55 @@ export function PlatformWhatsapp() {
     const first = data?.conversations?.[0]?.id;
     if (first) setOpen((current) => current || first);
   }, [data]);
+  useEffect(() => {
+    let stopped = false;
+    let controller = new AbortController();
+    async function listen() {
+      while (!stopped) {
+        controller = new AbortController();
+        try {
+          const headers = { Accept: 'text/event-stream' };
+          const token = currentToken();
+          if (token) headers.Authorization = `Bearer ${token}`;
+          const response = await fetch('/api/admin/whatsapp/live', { headers, credentials: 'include', signal: controller.signal });
+          if (!response.ok || !response.body) throw new Error('closed');
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (!stopped) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || '';
+            for (const part of parts) {
+              const line = part.split('\n').find((row) => row.startsWith('data: '));
+              if (!line) continue;
+              const payload = JSON.parse(line.slice(6));
+              if (payload.type !== 'message') continue;
+              reload({ silent: true });
+              detail.reload({ silent: true });
+            }
+          }
+        } catch {
+          if (stopped) return;
+        }
+        if (!stopped) await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+    listen();
+    return () => {
+      stopped = true;
+      controller.abort();
+    };
+  }, [reload, detail.reload]);
   return (
     <Page eyebrow="Platform" title="WhatsApp chatbot" lede="One AIRO chatbot for every business. People do the work in the conversation. Only Super Admin and Developer/Admin manage it.">
       <Subnav items={SECTIONS} value={section} onChange={setSection} />
       <State loading={loading} error={error} onRetry={reload}>
         {data ? (
           <div className="stack">
-            {section === 'Overview' || section === 'Conversations' ? <ChatInbox data={data} open={open} setOpen={setOpen} detail={detail} /> : null}
+            {section === 'Overview' || section === 'Conversations' ? <ChatInbox data={data} open={open} setOpen={setOpen} detail={detail} onSent={() => { reload({ silent: true }); detail.reload({ silent: true }); }} /> : null}
             {section === 'Overview' ? <Overview data={data} reload={reload} /> : null}
             {section === 'Connection' ? <ConnectPanel data={data} reload={reload} /> : null}
             {section === 'Businesses' ? <Businesses data={data} reload={reload} /> : null}
@@ -74,10 +116,37 @@ function initials(name) {
   return parts.map((part) => part[0]?.toUpperCase() || '').join('') || '?';
 }
 
-function ChatInbox({ data, open, setOpen, detail }) {
+function ChatInbox({ data, open, setOpen, detail, onSent }) {
   const people = data.conversations || [];
   const active = detail.data?.conversation?.id === open ? detail.data.conversation : null;
   const messages = active ? detail.data.messages || [] : [];
+  const endRef = useRef(null);
+  const [draft, setDraft] = useState('');
+  const [sendError, setSendError] = useState('');
+  const [sending, setSending] = useState(false);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages.length, open]);
+  useEffect(() => {
+    setDraft('');
+    setSendError('');
+  }, [open]);
+  async function send(event) {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!open || !text) return;
+    setSending(true);
+    setSendError('');
+    try {
+      await api.post(`/api/admin/whatsapp/conversations/${open}/messages`, { body: text });
+      setDraft('');
+      onSent();
+    } catch (err) {
+      setSendError(err.message);
+    } finally {
+      setSending(false);
+    }
+  }
   return (
     <section className="wa-inbox" aria-label="WhatsApp chats">
       <div className="wa-people">
@@ -115,7 +184,15 @@ function ChatInbox({ data, open, setOpen, detail }) {
                   <small>{when(message.createdAt)}{message.actionTaken ? ` · ${message.actionTaken}` : ''}</small>
                 </article>
               ))}
+              <div ref={endRef} />
             </div>
+            {data.bot.connected ? (
+              <form className="wa-compose" onSubmit={send}>
+                <textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={4096} placeholder={`Message ${active.contactName}`} rows={1} />
+                <button className="btn-primary" type="submit" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send'}</button>
+                {sendError ? <p className="delta-down">{sendError}</p> : <p className="quiet">WhatsApp delivers this within 24 hours of their last message.</p>}
+              </form>
+            ) : <p className="quiet wa-empty">Connect the chatbot before sending.</p>}
           </>
         ) : (
           <p className="quiet wa-empty">{detail.loading && open ? 'Opening chat…' : 'Select a person to read the chat.'}</p>

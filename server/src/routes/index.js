@@ -243,6 +243,9 @@ admin.get('/settings', requirePermission('platform_settings.view'), asyncHandler
 admin.patch('/settings', requirePermission('platform_settings.manage'), validate(schemas.settingSchema), asyncHandler(async (req, res) => {
   ok(res, await platform.updateSettings(req));
 }));
+admin.get('/whatsapp/live', requirePermission('whatsapp_bot.manage'), (req, res) => {
+  whatsapp.streamLive(req, res);
+});
 admin.get('/whatsapp', requirePermission('whatsapp_bot.manage'), asyncHandler(async (req, res) => ok(res, await whatsapp.overview())));
 admin.post('/whatsapp/connect', requirePermission('whatsapp_bot.manage'), validate(schemas.whatsappConnectSchema), asyncHandler(async (req, res) => {
   ok(res, await whatsapp.connectBot(req));
@@ -258,6 +261,9 @@ admin.patch('/whatsapp/businesses', requirePermission('whatsapp_bot.manage'), va
 }));
 admin.get('/whatsapp/conversations/:id', requirePermission('whatsapp_bot.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await whatsapp.conversation(req.params.id));
+}));
+admin.post('/whatsapp/conversations/:id/messages', requirePermission('whatsapp_bot.manage'), validate(schemas.idParams.merge(schemas.whatsappSendSchema)), asyncHandler(async (req, res) => {
+  ok(res, await whatsapp.sendMessage(req, req.params.id), 201);
 }));
 admin.get('/search', asyncHandler(async (req, res) => ok(res, await platform.search(req.query.q || ''))));
 router.use('/admin', admin);

@@ -578,9 +578,8 @@ async function seed() {
   await insert(conn, 'ai_usage_logs', { organization_id: prestige, user_id: users.rahul, surface: 'assistant', prompt_excerpt: 'Why did qualified leads move?' });
 
   await insert(conn, 'whatsapp_bot', {
-    id: 1, display_name: 'AIRO WhatsApp', phone_label: '+91 11 4000 2026', status: 'connected', mode: 'development',
-    webhook_path: '/api/whatsapp/webhook',
-    note: 'One chatbot for every business. No live WhatsApp API is called in development.'
+    id: 1, display_name: 'AIRO WhatsApp', phone_label: 'Not connected', status: 'pending', mode: 'development',
+    webhook_path: '/api/whatsapp/webhook', note: null
   });
   await insert(conn, 'whatsapp_businesses', { organization_id: prestige, enabled: 1, business_label: 'Prestige Homes' });
   await insert(conn, 'whatsapp_businesses', { organization_id: aurelia, enabled: 1, business_label: 'Aurelia Estates' });

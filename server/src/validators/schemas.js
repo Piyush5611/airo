@@ -207,6 +207,10 @@ export const whatsappBotSchema = body({
   note: z.string().max(400).optional()
 });
 
+export const whatsappSendSchema = body({
+  body: z.string().trim().min(1).max(4096)
+});
+
 export const whatsappBusinessSchema = body({
   organizationId: z.number().int().positive(),
   enabled: z.boolean()

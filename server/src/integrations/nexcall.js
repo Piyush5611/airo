@@ -2,6 +2,8 @@
  * Nexcall is the W-Caller external CRM pull API.
  * Read-only. Auth is x-api-key. Data stays scoped to that key's business.
  */
+import https from 'node:https';
+
 export const NEXCALL_BASE = 'https://w-caller.workians.com/api/external';
 
 export const NEXCALL_DESCRIPTION = 'Read-only pull of W-Caller leads, calls, the call report, and follow-ups. Authenticate with x-api-key.';
@@ -50,27 +52,68 @@ function nameOf(row, fallback) {
   return row.name || row.full_name || row.customer_name || row.lead_name || row.phone || row.mobile || fallback;
 }
 
-async function pull(baseUrl, path, apiKey) {
-  let response;
-  try {
-    response = await fetch(`${baseUrl}${path}`, {
-      headers: { 'x-api-key': apiKey, Accept: 'application/json' },
-      signal: AbortSignal.timeout(20000)
+function pull(baseUrl, path, apiKey) {
+  const url = new URL(`${baseUrl}${path}`);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timedOut = false;
+    const finish = (error, body) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(body);
+    };
+    const req = https.request({
+      hostname: url.hostname,
+      port: url.port || 443,
+      path: `${url.pathname}${url.search}`,
+      method: 'GET',
+      headers: {
+        'x-api-key': apiKey,
+        Accept: 'application/json',
+        Connection: 'close'
+      },
+      ALPNProtocols: ['http/1.1'],
+      servername: url.hostname,
+      timeout: 20000
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let body = {};
+        try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
+        const status = response.statusCode || 0;
+        if (status < 200 || status >= 300 || body.success === false) {
+          const error = new Error(body.message || body.error || 'Nexcall rejected the request.');
+          error.code = 'nexcall_rejected';
+          error.status = status;
+          finish(error);
+          return;
+        }
+        finish(null, body);
+      });
     });
-  } catch (cause) {
-    const error = new Error('Nexcall did not respond.');
-    error.code = 'nexcall_unreachable';
-    error.cause = cause;
-    throw error;
-  }
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.success === false) {
-    const error = new Error(body.message || body.error || 'Nexcall rejected the request.');
-    error.code = 'nexcall_rejected';
-    error.status = response.status;
-    throw error;
-  }
-  return body;
+    req.on('timeout', () => {
+      timedOut = true;
+      req.destroy();
+      const error = new Error('Nexcall did not respond.');
+      error.code = 'nexcall_unreachable';
+      const cause = new Error('timeout');
+      cause.name = 'TimeoutError';
+      cause.code = 23;
+      error.cause = cause;
+      finish(error);
+    });
+    req.on('error', (cause) => {
+      if (timedOut) return;
+      const error = new Error('Nexcall did not respond.');
+      error.code = 'nexcall_unreachable';
+      error.cause = cause;
+      finish(error);
+    });
+    req.end();
+  });
 }
 
 export async function nexcallLeads({ apiKey, baseUrl = NEXCALL_BASE, from, to, phone, search, page = 1, limit = 50 }) {

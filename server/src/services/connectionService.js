@@ -1,5 +1,6 @@
 import { CATEGORIES } from '../domain/providers.js';
 import { NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall } from '../integrations/nexcall.js';
+import { createMetaCampaign as createOnMeta, pullMetaAds, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -175,6 +176,9 @@ async function credentialPreview(connection) {
   if (connection.providerKey === 'nexcall' && connection.mode === 'live' && preview) {
     return `Live key ${preview}. Sync calls the W-Caller pull API.`;
   }
+  if (connection.providerKey === 'meta_ads' && preview) {
+    return `Live token ${preview}. Sync reads campaigns, ads, and the last 30 days from Meta.`;
+  }
   if (preview) {
     return `API key ${preview} is saved encrypted. Sync still uses the development adapter and does not call this provider.`;
   }
@@ -213,6 +217,9 @@ export async function saveProviderApi(auth, req) {
       if (error.code === 'nexcall_unreachable') throw new ApiError(422, 'The API did not respond.', 'validation_error');
       throw new ApiError(422, 'Wrong API.', 'validation_error');
     }
+  } else if (provider.providerKey === 'meta_ads') {
+    if (!accountId) throw new ApiError(422, 'Account id is required for Meta Ads.', 'validation_error');
+    await verifyMetaAccount({ apiKey, accountId });
   } else {
     await verifyProviderKey({ providerKey: provider.providerKey, apiKey, baseUrl });
   }
@@ -239,11 +246,15 @@ export async function saveProviderApi(auth, req) {
     resourceId: id,
     metadata: { provider: provider.providerKey }
   });
-  if (provider.providerKey === 'nexcall') {
+  if (provider.providerKey === 'nexcall' || provider.providerKey === 'meta_ads') {
     const synced = await sync(auth, req, id);
-    synced.notice = synced.records.length
-      ? `${provider.name} is connected. ${synced.records.length} records came back from the API.`
-      : `${provider.name} is connected. The API returned no records.`;
+    const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
+    const campaigns = (synced.records || []).filter((row) => row.type === 'campaign').length;
+    synced.notice = failed
+      ? `${provider.name} is connected. Sync failed: ${failed}`
+      : provider.providerKey === 'meta_ads'
+        ? (campaigns ? `${provider.name} is connected. ${campaigns} campaigns came back from Meta.` : `${provider.name} is connected. Meta returned no campaigns.`)
+        : (synced.records.length ? `${provider.name} is connected. ${synced.records.length} records came back from the API.` : `${provider.name} is connected. The API returned no records.`);
     synced.linked = true;
     return synced;
   }
@@ -351,6 +362,7 @@ export async function sync(auth, req, id) {
     return detail(auth, id);
   }
   if (result.mode === 'live') {
+    if (result.replaceTypes?.length) await repo.deleteObjects(id, result.replaceTypes);
     for (const object of result.objects) {
       await repo.upsertObject({
         organizationId: auth.organizationId,
@@ -375,14 +387,65 @@ export async function sync(auth, req, id) {
   return detail(auth, id);
 }
 
+function storedSecret(id) {
+  return repo.credential(id).then((row) => readSecret(row?.ciphertext));
+}
+
+async function metaSecret(auth, id) {
+  const connection = await repo.getConnection(auth.organizationId, id);
+  if (!connection) throw new ApiError(404, 'Connection not found.', 'not_found');
+  if (connection.providerKey !== 'meta_ads') throw new ApiError(422, 'This action is only for Meta Ads.', 'validation_error');
+  const secret = await storedSecret(id);
+  if (!secret?.apiKey || !secret.verified) throw new ApiError(422, 'Connect Meta Ads before managing campaigns.', 'validation_error');
+  if (!secret.accountId) throw new ApiError(422, 'Account id is required for Meta Ads.', 'validation_error');
+  return secret;
+}
+
+export async function createMetaCampaign(auth, req, id) {
+  const secret = await metaSecret(auth, id);
+  await createOnMeta({
+    apiKey: secret.apiKey,
+    accountId: secret.accountId,
+    name: req.body.name,
+    objective: req.body.objective,
+    dailyBudget: req.body.dailyBudget,
+    status: req.body.status
+  });
+  await recordAudit(req, { action: 'connection.meta_campaign_created', resource: 'connection', resourceId: id });
+  const synced = await sync(auth, req, id);
+  const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
+  synced.notice = failed
+    ? `Campaign was created in Meta. Sync failed: ${failed}`
+    : 'Campaign created in Meta Ads.';
+  return synced;
+}
+
+export async function updateMetaCampaignStatus(auth, req, id) {
+  const secret = await metaSecret(auth, id);
+  await setMetaCampaignStatus({
+    apiKey: secret.apiKey,
+    campaignId: req.body.campaignId,
+    status: req.body.status
+  });
+  await recordAudit(req, { action: 'connection.meta_campaign_updated', resource: 'connection', resourceId: id, metadata: { status: req.body.status } });
+  const synced = await sync(auth, req, id);
+  const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
+  synced.notice = failed
+    ? `Campaign was updated in Meta. Sync failed: ${failed}`
+    : 'Campaign updated in Meta Ads.';
+  return synced;
+}
+
 async function pullConnection(connection, id) {
-  if (connection.providerKey === 'nexcall') {
-    const row = await repo.credential(id);
-    let secret = null;
-    if (row?.ciphertext) {
-      try { secret = decryptJson(row.ciphertext); } catch { secret = null; }
+  const secret = await storedSecret(id);
+  if (connection.providerKey === 'nexcall' && secret?.apiKey) {
+    return pullNexcall({ apiKey: secret.apiKey, baseUrl: secret.baseUrl });
+  }
+  if (connection.providerKey === 'meta_ads') {
+    if (!secret?.apiKey || !secret.accountId) {
+      throw new ApiError(422, 'Account id is required for Meta Ads.', 'validation_error');
     }
-    if (secret?.apiKey) return pullNexcall({ apiKey: secret.apiKey, baseUrl: secret.baseUrl });
+    return pullMetaAds({ apiKey: secret.apiKey, accountId: secret.accountId });
   }
   return {
     mode: 'empty',

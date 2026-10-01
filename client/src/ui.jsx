@@ -75,7 +75,7 @@ export function Badge({ value, tone }) {
   const map = {
     connected: 'good', active: 'good', paid: 'good', succeeded: 'good', won: 'good', booked: 'good', qualified: 'good',
     error: 'bad', failed: 'bad', lost: 'bad', suspended: 'bad', high: 'bad', critical: 'bad',
-    degraded: 'warn', pending: 'warn', waiting: 'warn', open: 'warn', watch: 'warn', past_due: 'warn',
+    degraded: 'warn', pending: 'warn', waiting: 'warn', open: 'warn', watch: 'warn', past_due: 'warn', paused: 'warn',
     new: 'info', info: 'info'
   };
   return <span className={`badge ${tone || map[value] || ''}`}>{label(value)}</span>;

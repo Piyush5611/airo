@@ -89,6 +89,14 @@ export function objects(connectionId) {
   );
 }
 
+export function deleteObjects(connectionId, types) {
+  const marks = types.map(() => '?').join(', ');
+  return run(
+    `DELETE FROM integration_objects WHERE connection_id = ? AND object_type IN (${marks})`,
+    [connectionId, ...types]
+  );
+}
+
 export function upsertObject(row) {
   return run(
     `INSERT INTO integration_objects (organization_id, connection_id, object_type, external_id, name, parent_external_id, payload)

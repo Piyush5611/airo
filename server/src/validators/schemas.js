@@ -73,6 +73,18 @@ export const providerApiSchema = body({
   baseUrl: z.union([z.string().url().max(200), z.literal('')]).optional()
 });
 
+export const metaCampaignSchema = body({
+  name: z.string().min(2).max(180),
+  objective: z.enum(['OUTCOME_LEADS', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_SALES']),
+  dailyBudget: z.number().positive().max(100000000),
+  status: z.enum(['PAUSED', 'ACTIVE'])
+});
+
+export const metaStatusSchema = body({
+  campaignId: z.string().regex(/^\d{5,20}$/),
+  status: z.enum(['PAUSED', 'ACTIVE'])
+});
+
 export const configSchema = body({
   mapping: z.record(z.string(), z.any()).optional(),
   sync: z.record(z.string(), z.any()).optional()

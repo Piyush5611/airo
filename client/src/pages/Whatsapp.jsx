@@ -368,7 +368,7 @@ export function WorkspaceWhatsapp() {
       <State loading={loading} error={error} onRetry={reload}>
         {data ? (
           <div className="stack">
-            <BusinessNumbers numbers={data.numbers || []} reload={reload} />
+            {data.notice ? <p className="error-box">{data.notice}</p> : <BusinessNumbers numbers={data.numbers || []} reload={reload} />}
             <section className="wa-inbox" aria-label="Customer WhatsApp chats">
               <div className="wa-people">
                 <header>

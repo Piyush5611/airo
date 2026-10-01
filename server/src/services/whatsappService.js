@@ -197,11 +197,26 @@ function phoneKey(value) {
   return digits.length >= 10 ? digits.slice(-10) : '';
 }
 
+function missingNumbersTable(error) {
+  return error?.cause?.code === 'ER_NO_SUCH_TABLE' || error?.code === 'ER_NO_SUCH_TABLE';
+}
+
+const NUMBERS_SETUP = 'WhatsApp numbers are not ready on this server yet. Run npm run migrate once, then open this page again.';
+
+async function businessNumbers(organizationId) {
+  try {
+    return await repo.numbersForOrg(organizationId);
+  } catch (error) {
+    if (missingNumbersTable(error)) return null;
+    throw error;
+  }
+}
+
 async function customerPhones(auth) {
   const scope = leadScope(auth);
   const [leads, numbers] = await Promise.all([
     repo.leadPhones(auth.organizationId, scope.sql, scope.params),
-    repo.numbersForOrg(auth.organizationId)
+    businessNumbers(auth.organizationId)
   ]);
   const byKey = new Map();
   for (const lead of leads) {
@@ -209,6 +224,7 @@ async function customerPhones(auth) {
     if (!key || byKey.has(key)) continue;
     byKey.set(key, { leadId: lead.id, leadName: lead.fullName });
   }
+  if (!numbers) return { byKey, ready: false };
   for (const number of numbers) {
     const key = phoneKey(number.phone);
     if (!key) continue;
@@ -221,7 +237,7 @@ async function customerPhones(auth) {
       leadName: current.leadName || number.label || null
     });
   }
-  return byKey;
+  return { byKey, ready: true };
 }
 
 function customerConversation(row, byKey) {
@@ -247,14 +263,13 @@ function publicNumber(row) {
 }
 
 export async function clientInbox(auth) {
-  const [byKey, numbers] = await Promise.all([
-    customerPhones(auth),
-    repo.numbersForOrg(auth.organizationId)
-  ]);
-  const rows = await repo.conversationsByPhoneKeys([...byKey.keys()]);
+  const loaded = await customerPhones(auth);
+  const rows = await repo.conversationsByPhoneKeys([...loaded.byKey.keys()]);
+  const numbers = loaded.ready ? await repo.numbersForOrg(auth.organizationId) : [];
   return {
     numbers: numbers.map(publicNumber),
-    conversations: rows.map((row) => customerConversation(row, byKey))
+    conversations: rows.map((row) => customerConversation(row, loaded.byKey)),
+    notice: loaded.ready ? '' : NUMBERS_SETUP
   };
 }
 
@@ -285,8 +300,8 @@ export async function addBusinessNumber(req) {
     if (error?.cause?.code === 'ER_DUP_ENTRY') {
       throw new ApiError(422, 'This number is already linked to a business.', 'validation_error');
     }
-    if (error?.cause?.code === 'ER_NO_SUCH_TABLE') {
-      throw new ApiError(503, 'Database schema is not ready. Run the latest database update, then add the number.', 'schema_missing');
+    if (missingNumbersTable(error)) {
+      throw new ApiError(422, NUMBERS_SETUP, 'schema_missing');
     }
     throw error;
   }
@@ -319,13 +334,13 @@ export async function removeBusinessNumber(req, id) {
 }
 
 export async function clientConversation(auth, id) {
-  const byKey = await customerPhones(auth);
+  const loaded = await customerPhones(auth);
   const row = await repo.conversation(id);
-  if (!row || !byKey.has(phoneKey(row.contactPhone))) {
+  if (!row || !loaded.byKey.has(phoneKey(row.contactPhone))) {
     throw new ApiError(404, 'Conversation not found.', 'not_found');
   }
   return {
-    conversation: customerConversation(row, byKey),
+    conversation: customerConversation(row, loaded.byKey),
     messages: await repo.messages(id)
   };
 }

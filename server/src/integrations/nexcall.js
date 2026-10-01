@@ -21,6 +21,19 @@ export const NEXCALL_MAPPING = {
   followups: 'activities'
 };
 
+export function nexcallBase(value) {
+  const fallback = NEXCALL_BASE.replace(/\/$/, '');
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+  try {
+    const url = new URL(raw);
+    if (url.hostname.toLowerCase() === 'w-caller.workians.com') return fallback;
+  } catch {
+    return fallback;
+  }
+  return raw.replace(/\/$/, '');
+}
+
 export function cleanNexcallKey(value) {
   return String(value || '')
     .trim()
@@ -86,7 +99,7 @@ function qs(entries) {
 }
 
 export async function nexcallCalls({ apiKey, baseUrl = NEXCALL_BASE, from, to, userId, callStatus, phone, page = 1, limit = 100 }) {
-  const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
+  const base = nexcallBase(baseUrl);
   return pull(base, `/calls?${qs({ from, to, user_id: userId, call_status: callStatus, phone, page, limit })}`, apiKey);
 }
 
@@ -99,11 +112,8 @@ export async function nexcallCallReport({ apiKey, baseUrl = NEXCALL_BASE, from, 
 }
 
 export async function verifyNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {
-  const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
-  const end = new Date();
-  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-  const query = qs({ from: stamp(start), to: stamp(end), page: 1, limit: 1 });
-  await pull(base, `/calls?${query}`, cleanNexcallKey(apiKey));
+  const base = nexcallBase(baseUrl);
+  await pull(base, '/leads?page=1&limit=1', cleanNexcallKey(apiKey));
 }
 
 export async function pullNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {

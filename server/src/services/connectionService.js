@@ -1,5 +1,5 @@
 import { CATEGORIES } from '../domain/providers.js';
-import { cleanNexcallKey, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
+import { cleanNexcallKey, nexcallBase, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
 import { createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
@@ -211,7 +211,7 @@ export async function saveProviderApi(auth, req) {
   const baseUrl = (req.body.baseUrl || '').trim().replace(/\/$/, '');
   if (provider.providerKey === 'nexcall') {
     if (!apiKey) throw new ApiError(422, 'Wrong API.', 'validation_error');
-    const url = baseUrl || NEXCALL_BASE;
+    const url = nexcallBase(baseUrl || NEXCALL_BASE);
     try {
       await verifyNexcall({ apiKey, baseUrl: url });
     } catch (error) {
@@ -225,6 +225,9 @@ export async function saveProviderApi(auth, req) {
         .replace(/wext_[A-Za-z0-9_-]+/gi, '')
         .trim()
         .slice(0, 160);
+      if (Number(error.status) === 404) {
+        throw new ApiError(422, 'Nexcall calls URL was not found. Leave Base URL blank, or use https://w-caller.workians.com/api/external, then save again.', 'validation_error');
+      }
       const rejected = Number(error.status) === 401 || Number(error.status) === 403 || /access denied|invalid (api )?key|unauthorized/i.test(reason);
       throw new ApiError(422, rejected && reason ? `Wrong API. ${reason}` : (reason || 'Wrong API.'), 'validation_error');
     }
@@ -236,7 +239,7 @@ export async function saveProviderApi(auth, req) {
   }
   const id = await ensureConnection(auth, req, provider);
   if (provider.providerKey === 'nexcall') {
-    const url = baseUrl || NEXCALL_BASE;
+    const url = nexcallBase(baseUrl || NEXCALL_BASE);
     await repo.saveCredential(id, encryptJson({ mode: 'live', provider: 'nexcall', apiKey, baseUrl: url, verified: true }));
     await repo.saveConfig(id, NEXCALL_MAPPING, { frequency: 'hourly', objects: ['leads', 'calls', 'callReport', 'followups'] });
   } else {
@@ -257,7 +260,7 @@ export async function saveProviderApi(auth, req) {
     resourceId: id,
     metadata: { provider: provider.providerKey }
   });
-  if (provider.providerKey === 'nexcall' || provider.providerKey === 'meta_ads') {
+  if (provider.providerKey === 'meta_ads') {
     const synced = await sync(auth, req, id);
     const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
     const campaigns = (synced.records || []).filter((row) => row.type === 'campaign').length;

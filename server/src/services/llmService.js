@@ -1,6 +1,6 @@
 import { ApiError } from '../utils/errors.js';
 import { decryptJson, encryptJson } from '../utils/cryptoBox.js';
-import { reportFacts } from './whatsappReport.js';
+import { reportFacts, reportRequest } from './whatsappReport.js';
 import { recordAudit } from './auditService.js';
 import { listLlmModels, llmProviderName, replyLlm, verifyLlm, WHATSAPP_BRIEF } from '../integrations/llm.js';
 import { LLM_PURPOSES, purposeLabel } from '../domain/llmPurposes.js';
@@ -181,8 +181,7 @@ function withoutPermissionNote(reply) {
 }
 
 function wantsReport(messages) {
-  const last = [...(messages || [])].reverse().find((row) => row.role === 'user');
-  return /report|nexcall|aaj|today|lead|call|summary|data|hisab|employee|team|hafte|week|mahine|month|kal\b|yesterday|filter|kitne|performance|booking/i.test(String(last?.content || ''));
+  return Boolean(reportRequest(messages));
 }
 
 async function whatsappFacts({ organizationId, recognized, businessLabel, messages }) {

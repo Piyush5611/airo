@@ -505,7 +505,31 @@ function tally(rows, pick) {
     .join(', ');
 }
 
-function summarizeCallList(window, body, employeeName, direction) {
+async function eachPage(load) {
+  const rows = [];
+  const seen = new Set();
+  const pageSize = 100;
+  const maxPages = 40;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const body = await load(page, pageSize);
+    const batch = Array.isArray(body?.data) ? body.data : [];
+    let added = 0;
+    for (const row of batch) {
+      const id = row?.id ?? row?.followup_id;
+      if (id != null) {
+        const key = String(id);
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      rows.push(row);
+      added += 1;
+    }
+    if (added === 0 || batch.length < pageSize) return { rows, capped: false };
+  }
+  return { rows, capped: true };
+}
+
+function summarizeCallList(window, body, employeeName, direction, capped) {
   const rows = Array.isArray(body?.data) ? body.data : [];
   const wanted = String(direction || '').toLowerCase();
   const directed = wanted ? rows.filter((row) => String(row.call_direction || '').toLowerCase() === wanted) : rows;
@@ -520,7 +544,7 @@ function summarizeCallList(window, body, employeeName, direction) {
       text: `Nexcall calls have no employee named ${employeeName}.${names.length ? ` Employees in this list: ${names.join(', ')}.` : ''}`
     };
   }
-  const total = employeeName || wanted ? chosen.length : Number(body?.count ?? chosen.length);
+  const total = chosen.length;
   const who = employeeName ? `${employeeName}, ` : '';
   const lines = [`Nexcall calls for ${who}${window.label}: ${total}.`];
   const status = tally(chosen, (row) => row.call_status);
@@ -529,7 +553,7 @@ function summarizeCallList(window, body, employeeName, direction) {
   if (status) lines.push(`By status: ${status}.`);
   if (way) lines.push(`By direction: ${way}.`);
   if (!employeeName && people) lines.push(`By employee: ${people}.`);
-  if (!employeeName && !wanted && Number(body?.count) > rows.length) lines.push(`Showing ${rows.length} of ${body.count}.`);
+  if (capped) lines.push('More calls exist after the pages that were read.');
   return { matched: true, names, text: lines.join(' ') };
 }
 
@@ -546,28 +570,27 @@ async function nexcallSummary(organizationId, window, employeeName, text) {
   const stored = employeeName ? await storedCalls(organizationId) : [];
   const knownUser = stored.find((row) => nameHits(row, employeeName) && row.user_id != null);
   try {
+    const auth = { apiKey: loaded.secret.apiKey, baseUrl: loaded.secret.baseUrl, from, to };
     if (kind === 'followups') {
-      const body = await nexcallFollowups({ apiKey: loaded.secret.apiKey, baseUrl: loaded.secret.baseUrl, from, to });
-      const count = body?.count ?? (Array.isArray(body?.data) ? body.data.length : 0);
-      return { matched: true, names: [], text: `Nexcall follow-ups for ${window.label}: ${Number(count || 0)}.` };
+      const { rows, capped } = await eachPage((page, limit) => nexcallFollowups({ ...auth, page, limit }));
+      const extra = capped ? ' More follow-ups exist after the pages that were read.' : '';
+      return { matched: true, names: [], text: `Nexcall follow-ups for ${window.label}: ${rows.length}.${extra}` };
     }
     if (kind === 'leads') {
       const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
-      const body = await nexcallLeads({ apiKey: loaded.secret.apiKey, baseUrl: loaded.secret.baseUrl, from, to, phone });
-      const count = body?.count ?? (Array.isArray(body?.data) ? body.data.length : 0);
-      return { matched: true, names: [], text: `Nexcall leads for ${window.label}: ${Number(count || 0)}.` };
+      const { rows, capped } = await eachPage((page, limit) => nexcallLeads({ ...auth, phone, page, limit }));
+      const extra = capped ? ' More leads exist after the pages that were read.' : '';
+      return { matched: true, names: [], text: `Nexcall leads for ${window.label}: ${rows.length}.${extra}` };
     }
     const phone = kind === 'calls' ? (String(text || '').match(/\b\d{10,13}\b/)?.[0] || '') : '';
-    const body = await nexcallCalls({
-      apiKey: loaded.secret.apiKey,
-      baseUrl: loaded.secret.baseUrl,
-      from,
-      to,
+    const { rows, capped } = await eachPage((page, limit) => nexcallCalls({
+      ...auth,
       phone,
       userId: knownUser?.user_id,
-      limit: 100
-    });
-    return summarizeCallList(window, body, knownUser ? '' : employeeName, callTypeOf(text));
+      page,
+      limit
+    }));
+    return summarizeCallList(window, { data: rows }, knownUser ? '' : employeeName, callTypeOf(text), capped);
   } catch (error) {
     return { matched: false, names: [], text: `Nexcall report could not be loaded: ${cleanError(error)}` };
   }
@@ -618,9 +641,19 @@ async function roster(organizationId) {
   };
 }
 
+const REPORT_ASK = /report|nexcall|aaj|today|lead|call|summary|data|hisab|employee|team|hafte|week|mahine|month|kal\b|yesterday|filter|kitne|performance|booking/i;
+
+export function reportRequest(messages) {
+  const users = [...(messages || [])].filter((row) => row.role === 'user');
+  for (let index = users.length - 1; index >= 0; index -= 1) {
+    const content = String(users[index].content || '').trim();
+    if (REPORT_ASK.test(content)) return content;
+  }
+  return '';
+}
+
 export async function reportFacts(organizationId, messages) {
-  const last = [...(messages || [])].reverse().find((row) => row.role === 'user');
-  const text = String(last?.content || '');
+  const text = reportRequest(messages);
   const { people, teams } = await roster(organizationId);
   const scope = matchScope(text, people, teams);
   const window = reportWindow(text);

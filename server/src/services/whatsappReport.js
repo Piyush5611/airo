@@ -1,5 +1,5 @@
 import { decryptJson } from '../utils/cryptoBox.js';
-import { nexcallCallReport, nexcallCalls, nexcallFollowups, nexcallLeads } from '../integrations/nexcall.js';
+import { nexcallCalls, nexcallFollowups, nexcallLeads } from '../integrations/nexcall.js';
 import { many, one } from '../db/sql.js';
 
 const IST = 5.5 * 60 * 60 * 1000;
@@ -491,6 +491,48 @@ async function readNexcallSecret(organizationId) {
   }
 }
 
+function tally(rows, pick) {
+  const counts = new Map();
+  for (const row of rows) {
+    const key = String(pick(row) || '').trim();
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([name, total]) => `${name} ${total}`)
+    .join(', ');
+}
+
+function summarizeCallList(window, body, employeeName, direction) {
+  const rows = Array.isArray(body?.data) ? body.data : [];
+  const wanted = String(direction || '').toLowerCase();
+  const directed = wanted ? rows.filter((row) => String(row.call_direction || '').toLowerCase() === wanted) : rows;
+  const chosen = employeeName
+    ? directed.filter((row) => hasWord(employeeOf(row), employeeName) || hasWord(employeeName, employeeOf(row)))
+    : directed;
+  const names = [...new Set(directed.map(employeeOf).filter(Boolean))].slice(0, 12);
+  if (employeeName && !chosen.length) {
+    return {
+      matched: false,
+      names,
+      text: `Nexcall calls have no employee named ${employeeName}.${names.length ? ` Employees in this list: ${names.join(', ')}.` : ''}`
+    };
+  }
+  const total = employeeName || wanted ? chosen.length : Number(body?.count ?? chosen.length);
+  const who = employeeName ? `${employeeName}, ` : '';
+  const lines = [`Nexcall calls for ${who}${window.label}: ${total}.`];
+  const status = tally(chosen, (row) => row.call_status);
+  const way = tally(chosen, (row) => row.call_direction);
+  const people = tally(chosen, employeeOf);
+  if (status) lines.push(`By status: ${status}.`);
+  if (way) lines.push(`By direction: ${way}.`);
+  if (!employeeName && people) lines.push(`By employee: ${people}.`);
+  if (!employeeName && !wanted && Number(body?.count) > rows.length) lines.push(`Showing ${rows.length} of ${body.count}.`);
+  return { matched: true, names, text: lines.join(' ') };
+}
+
 function cleanError(error) {
   return String(error?.message || 'the API did not respond.').replace(/x-api-key[=:]\s*\S+/gi, '').slice(0, 160);
 }
@@ -515,28 +557,17 @@ async function nexcallSummary(organizationId, window, employeeName, text) {
       const count = body?.count ?? (Array.isArray(body?.data) ? body.data.length : 0);
       return { matched: true, names: [], text: `Nexcall leads for ${window.label}: ${Number(count || 0)}.` };
     }
-    if (kind === 'calls') {
-      const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
-      const body = await nexcallCalls({
-        apiKey: loaded.secret.apiKey,
-        baseUrl: loaded.secret.baseUrl,
-        from,
-        to,
-        phone,
-        userId: knownUser?.user_id
-      });
-      const count = body?.count ?? (Array.isArray(body?.data) ? body.data.length : 0);
-      return { matched: true, names: [], text: `Nexcall call list for ${window.label}: ${Number(count || 0)} calls. This is the call list, not the call report.` };
-    }
-    const body = await nexcallCallReport({
+    const phone = kind === 'calls' ? (String(text || '').match(/\b\d{10,13}\b/)?.[0] || '') : '';
+    const body = await nexcallCalls({
       apiKey: loaded.secret.apiKey,
       baseUrl: loaded.secret.baseUrl,
       from,
       to,
+      phone,
       userId: knownUser?.user_id,
-      callType: callTypeOf(text)
+      limit: 100
     });
-    return formatReport(window, reportParts(body), employeeName, Boolean(knownUser));
+    return summarizeCallList(window, body, knownUser ? '' : employeeName, callTypeOf(text));
   } catch (error) {
     return { matched: false, names: [], text: `Nexcall report could not be loaded: ${cleanError(error)}` };
   }

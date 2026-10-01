@@ -78,15 +78,16 @@ export async function nexcallFollowups({ apiKey, baseUrl = NEXCALL_BASE, from, t
   return pull(base, `/followups?${params}`, apiKey);
 }
 
-export async function nexcallCalls({ apiKey, baseUrl = NEXCALL_BASE, from, to, userId, callStatus, phone, page = 1, limit = 50 }) {
+function qs(entries) {
+  return Object.entries(entries)
+    .filter(([, value]) => value != null && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join('&');
+}
+
+export async function nexcallCalls({ apiKey, baseUrl = NEXCALL_BASE, from, to, userId, callStatus, phone, page = 1, limit = 100 }) {
   const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
-  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-  if (from) params.set('from', from);
-  if (to) params.set('to', to);
-  if (userId) params.set('user_id', String(userId));
-  if (callStatus) params.set('call_status', callStatus);
-  if (phone) params.set('phone', phone);
-  return pull(base, `/calls?${params}`, apiKey);
+  return pull(base, `/calls?${qs({ from, to, user_id: userId, call_status: callStatus, phone, page, limit })}`, apiKey);
 }
 
 export async function nexcallCallReport({ apiKey, baseUrl = NEXCALL_BASE, from, to, userId, callType }) {
@@ -99,7 +100,10 @@ export async function nexcallCallReport({ apiKey, baseUrl = NEXCALL_BASE, from, 
 
 export async function verifyNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {
   const base = String(baseUrl || NEXCALL_BASE).replace(/\/$/, '');
-  await pull(base, '/leads?page=1&limit=1', cleanNexcallKey(apiKey));
+  const end = new Date();
+  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+  const query = qs({ from: stamp(start), to: stamp(end), page: 1, limit: 1 });
+  await pull(base, `/calls?${query}`, cleanNexcallKey(apiKey));
 }
 
 export async function pullNexcall({ apiKey, baseUrl = NEXCALL_BASE }) {

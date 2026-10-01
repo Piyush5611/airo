@@ -1,5 +1,5 @@
 import { decryptJson } from '../utils/cryptoBox.js';
-import { nexcallCalls, nexcallFollowups, nexcallLeads } from '../integrations/nexcall.js';
+import { nexcallCallReport, nexcallCalls, nexcallFollowups, nexcallLeads } from '../integrations/nexcall.js';
 import { many, one } from '../db/sql.js';
 
 const IST = 5.5 * 60 * 60 * 1000;
@@ -394,13 +394,18 @@ function callTypeOf(text) {
   return '';
 }
 
+function asRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
 function reportParts(body) {
-  const data = body?.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data : {};
-  const summary = data.summary && typeof data.summary === 'object' && !Array.isArray(data.summary) ? data.summary : data;
+  const data = asRecord(body?.data) || {};
+  const summary = asRecord(data.summary) || asRecord(body?.summary) || asRecord(data.report) || data;
+  const byUser = summary.by_user || summary.users || summary.employees || summary.members || data.by_user || data.users || data.employees || (Array.isArray(body?.data) ? body.data : null);
   return {
-    totals: summary.totals || summary.by_type?.TOTAL || null,
-    byType: summary.by_type || null,
-    byUser: summary.by_user || summary.users || null
+    totals: summary.totals || summary.total || body?.totals || data.totals || summary.by_type?.TOTAL || null,
+    byType: summary.by_type || summary.types || data.by_type || null,
+    byUser
   };
 }
 
@@ -425,11 +430,18 @@ function userRows(byUser) {
 }
 
 function userLabel(row) {
-  return String(row.employee_name || row.name || row.user_name || row.full_name || (row.user_id != null ? `user ${row.user_id}` : 'Unknown')).trim();
+  return String(row.employee_name || row.name || row.user_name || row.full_name || row.employee || (row.user_id != null ? `user ${row.user_id}` : 'Unknown')).trim();
+}
+
+function callCount(row) {
+  const value = row.total_calls ?? row.total ?? row.calls ?? row.call_count ?? row.count;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value)) return Number(value);
+  return null;
 }
 
 function formatReport(window, parts, employeeName, alreadyFiltered) {
-  const rows = userRows(parts.byUser);
+  const rows = userRows(parts.byUser).filter((row) => !row.phone && !row.call_start_time && !row.recording_url);
   const chosen = employeeName ? rows.filter((row) => hasWord(userLabel(row), employeeName) || hasWord(employeeName, userLabel(row))) : rows;
   const who = employeeName ? `${employeeName}, ` : '';
   const lines = [`Nexcall call report for ${who}${window.label}.`];
@@ -438,21 +450,24 @@ function formatReport(window, parts, employeeName, alreadyFiltered) {
   if ((!employeeName || alreadyFiltered) && totals) lines.push(`Totals: ${totals}.`);
   if ((!employeeName || alreadyFiltered) && types) lines.push(`By type: ${types}.`);
   if (employeeName && !chosen.length && !(alreadyFiltered && (totals || types))) {
-    const names = rows.map(userLabel).filter(Boolean).slice(0, 12);
+    const names = rows.map(userLabel).filter(Boolean);
     return {
       matched: false,
       names,
       text: `Nexcall call report has no employee named ${employeeName}.${names.length ? ` Employees in this report: ${names.join(', ')}.` : ''}`
     };
   }
-  const shown = (employeeName ? chosen : rows).slice(0, 8);
+  const shown = [...(employeeName ? chosen : rows)].sort((a, b) => (callCount(b) || 0) - (callCount(a) || 0));
   if (shown.length) {
-    lines.push(`By employee: ${shown.map((row) => `${userLabel(row)} (${figureText(row) || 'listed'})`).join('; ')}.`);
+    lines.push(`By employee: ${shown.map((row) => {
+      const count = callCount(row);
+      return count == null ? `${userLabel(row)} (${figureText(row) || 'listed'})` : `${userLabel(row)} ${count}`;
+    }).join(', ')}.`);
   }
   if (!totals && !types && !shown.length) {
     return { matched: !employeeName, names: [], text: `Nexcall call report for ${window.label}: the report API returned no totals.` };
   }
-  return { matched: true, names: rows.map(userLabel).filter(Boolean).slice(0, 12), text: lines.join(' ') };
+  return { matched: true, names: rows.map(userLabel).filter(Boolean), text: lines.join(' ') };
 }
 
 async function storedCalls(organizationId) {
@@ -555,6 +570,14 @@ async function nexcallSummary(organizationId, window, employeeName, text) {
       const body = await nexcallLeads({ ...auth, phone });
       const rows = Array.isArray(body?.data) ? body.data : [];
       return { matched: true, names: [], text: `Nexcall leads for ${window.label}: ${rows.length}.` };
+    }
+    if (kind === 'report') {
+      const body = await nexcallCallReport({
+        ...auth,
+        userId: knownUser?.user_id,
+        callType: callTypeOf(text) || undefined
+      });
+      return formatReport(window, reportParts(body), knownUser ? '' : employeeName, Boolean(knownUser?.user_id));
     }
     const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
     const body = await nexcallCalls({

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth.jsx';
 import { clientNav, platformNav, Shell } from './shell.jsx';
 import { Login, ResetPassword } from './pages/Login.jsx';
+import { Privacy } from './pages/Privacy.jsx';
 import { CommandCenter, Insights } from './pages/Command.jsx';
 import { CampaignDetail, Campaigns, LeadDetail, Leads, Sources } from './pages/Growth.jsx';
 import { Activities, CallDetail, Calls, Opportunity, Pipeline } from './pages/Sales.jsx';
@@ -41,6 +42,7 @@ export function App() {
     <Routes>
       <Route path="/login" element={<Guest><Login /></Guest>} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/privacy" element={<Privacy />} />
       <Route path="/app" element={<Require realm="client"><Shell kicker="Workspace" nav={clientNav} home="/app" /></Require>}>
         <Route index element={<CommandCenter />} />
         <Route path="insights" element={<Insights />} />

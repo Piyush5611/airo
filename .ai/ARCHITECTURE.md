@@ -78,7 +78,7 @@ Client side: `client/src/api.js` keeps the access token in memory, retries once 
 
 ```
 main.jsx → BrowserRouter → AuthProvider → App (routes)
-   /login, /reset-password
+   /login, /reset-password, /privacy (public privacy policy)
    /app/*       <Require realm="client">   Shell(clientNav)   → pages/*
    /platform/*  <Require realm="platform"> Shell(platformNav) → pages/*
 ```

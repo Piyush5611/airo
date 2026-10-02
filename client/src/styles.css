@@ -447,6 +447,15 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
 .hints { margin-top: 8px; color: var(--muted); font-size: 13px; }
 .hints summary { cursor: pointer; }
 
+.legal { min-height: 100vh; background: var(--paper); }
+.legal-head { background: #0d1220; color: white; padding: 20px 32px; }
+.legal-head .login-brand { color: white; text-decoration: none; }
+.legal-body { width: min(760px, 100%); margin: 32px auto; padding: 32px; background: white; border-radius: 20px; box-shadow: var(--shadow); color: var(--ink-soft); line-height: 1.6; }
+.legal-body h1 { font-size: 36px; color: var(--ink); margin: 0 0 4px; }
+.legal-body h2 { font-size: 20px; color: var(--ink); margin: 28px 0 8px; }
+.legal-body ul, .legal-body ol { padding-left: 20px; }
+.legal-body li { margin: 6px 0; }
+
 @media (max-width: 1200px) {
   .kpi-grid, .triple { grid-template-columns: 1fr 1fr; }
   .desk.has-panel, .split, .layout, .brief-card, .connect-card, .tech-layout { grid-template-columns: 1fr; }

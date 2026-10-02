@@ -11,10 +11,19 @@ function quiet() {
 }
 
 function metaError(data) {
-  const message = String(data?.error?.message || 'Meta Ads rejected the request.')
+  const error = data?.error || {};
+  const detail = String(error.error_user_msg || error.error_user_title || '').trim();
+  const base = String(error.message || 'Meta Ads rejected the request.').trim();
+  const blame = Array.isArray(error.error_data?.blame_field_specs)
+    ? error.error_data.blame_field_specs.flat().filter((item) => typeof item === 'string').slice(0, 4).join(', ')
+    : '';
+  const message = [detail || base, blame ? `Field: ${blame}` : '']
+    .filter(Boolean)
+    .join(' ')
     .replace(/access_token=[^&\s]+/gi, '')
+    .replace(/EAA[A-Za-z0-9]+/g, '')
     .slice(0, 240);
-  return new ApiError(422, message, 'validation_error');
+  return new ApiError(422, message || 'Meta Ads rejected the request.', 'validation_error');
 }
 
 export function actId(accountId) {
@@ -347,7 +356,6 @@ export async function createMetaAdSet({ apiKey, accountId, campaignId, name, obj
     campaign_id: String(campaignId),
     billing_event: 'IMPRESSIONS',
     optimization_goal: plan.goal,
-    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
     destination_type: plan.destination,
     targeting: JSON.stringify(targetingFor({ ...input, advantageAudience: input.advantageAudience !== false })),
     status: 'PAUSED'
@@ -896,12 +904,14 @@ export async function createMetaAd(input) {
       campaign_id: campaign.id,
       billing_event: 'IMPRESSIONS',
       optimization_goal: plan.goal,
-      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
       destination_type: plan.destination,
       targeting: JSON.stringify(targetingFor({ ...input, advantageAudience: advantage })),
       status: 'PAUSED'
     };
-    if (!campaignLevel) adsetParams[budgetKey] = String(share);
+    if (!campaignLevel) {
+      adsetParams[budgetKey] = String(share);
+      adsetParams.bid_strategy = 'LOWEST_COST_WITHOUT_CAP';
+    }
     if (start) adsetParams.start_time = start;
     if (end) adsetParams.end_time = end;
     if (plan.lead || plan.messenger) adsetParams.promoted_object = JSON.stringify({ page_id: pageId });

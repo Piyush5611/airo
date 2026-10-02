@@ -204,7 +204,12 @@ export async function verifyMetaAccount({ apiKey, accountId }) {
   } catch (error) {
     if (error.message === 'The API did not respond.') throw error;
     if (error.message.startsWith('Account id must look like')) throw error;
-    throw new ApiError(422, 'Wrong API.', 'validation_error');
+    const reason = String(error.message || '')
+      .replace(/access_token=[^&\s]+/gi, '')
+      .replace(/EAA[A-Za-z0-9]+/g, '')
+      .trim()
+      .slice(0, 180);
+    throw new ApiError(422, reason ? `Wrong API. ${reason}` : 'Wrong API.', 'validation_error');
   }
 }
 
@@ -308,7 +313,7 @@ export async function pullMetaAds({ apiKey, accountId }) {
   };
 }
 
-export async function createMetaCampaign({ apiKey, accountId, name, objective, dailyBudget, status }) {
+export async function createMetaCampaign({ apiKey, accountId, name, objective, dailyBudget, status, specialCategory }) {
   if (!OBJECTIVES.includes(objective)) {
     throw new ApiError(422, 'Choose a Meta campaign objective.', 'validation_error');
   }
@@ -319,11 +324,12 @@ export async function createMetaCampaign({ apiKey, accountId, name, objective, d
   if (!Number.isFinite(budget) || budget < 1) {
     throw new ApiError(422, 'Enter a daily budget.', 'validation_error');
   }
+  const allowedCategory = ['HOUSING', 'EMPLOYMENT', 'CREDIT', 'ISSUES_ELECTIONS_POLITICS'];
   const created = await graph(`act_${act}/campaigns`, apiKey, {
     name: String(name).slice(0, 180),
     objective,
     status: status === 'ACTIVE' ? 'ACTIVE' : 'PAUSED',
-    special_ad_categories: JSON.stringify([]),
+    special_ad_categories: JSON.stringify(allowedCategory.includes(specialCategory) ? [specialCategory] : []),
     daily_budget: String(budget),
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP'
   }, 'POST');

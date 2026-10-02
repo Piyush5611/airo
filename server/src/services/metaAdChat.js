@@ -1,13 +1,14 @@
 import { one, run } from '../db/sql.js';
 import { decryptJson } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
-import { createMetaAd, listMetaPages, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
+import { createMetaAd, createMetaCampaign, listMetaPages, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
 import { upsertObject } from '../repositories/connectionRepo.js';
 import { recordAudit } from './auditService.js';
 import { writeAdPlan } from './llmService.js';
 
 const START = /\b(run|start|launch|chalao|chala|banao)\b.{0,40}\bmeta\b|\bmeta\s+ads?\b.{0,24}\b(run|start|launch|chalao|chala|banao)\b/i;
 const CANCEL = /^(cancel|stop|ruk|band|nahi chahiye|nahin chahiye)\b/i;
+const SKIP_IMAGE = /^(skip|baad mein|baad me|later|no image|image nahi|image nahin|without image)\b/i;
 const REPORT = /\b(report|nexcall|hisab|yesterday|aaj ka|calling report|kitne call)\b/i;
 const HINGLISH = /\b(kya|hai|hain|karo|chahiye|bhejo|nahi|nahin|haan|mujhe|mera|meri|chalao|banao|ruk|theek|thik|yaar|kro)\b/i;
 const CTA = new Set(['LEARN_MORE', 'SIGN_UP', 'SHOP_NOW', 'BOOK_NOW']);
@@ -613,8 +614,8 @@ async function buildPlan(organizationId, conversationId, payload, english) {
       `Text: ${payload.message}`,
       say(
         english,
-        'Send an https link to a JPG or PNG under 2 MB. To change the copy first, send it as: headline | ad text',
-        'JPG ya PNG ka https link bhejo, 2 MB se kam. Copy badalni ho to pehle aise bhejo: headline | ad text'
+        'Send an https link to a JPG or PNG under 2 MB. A Google search link is not the image. Reply skip to save the campaign without an image. To change the copy first, send it as: headline | ad text',
+        'JPG ya PNG ka https link bhejo, 2 MB se kam. Google search link image nahi hota. Bina image ke campaign save karne ke liye skip likho. Copy badalni ho to pehle aise bhejo: headline | ad text'
       )
     ].join('\n')
   };
@@ -637,9 +638,10 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
       )
     };
   }
+  if (SKIP_IMAGE.test(text)) return saveWithoutImage(organizationId, conversationId, payload, english);
   const imageUrl = publicImageUrl(text);
   if (!imageUrl) {
-    return { text: say(english, 'Send a direct https link to a JPG or PNG under 2 MB.', 'JPG ya PNG ka direct https link bhejo, 2 MB se kam.') };
+    return { text: say(english, 'Send a direct https link to a JPG or PNG under 2 MB, or reply skip.', 'JPG ya PNG ka direct https link bhejo, 2 MB se kam, ya skip likho.') };
   }
   const account = await metaAccount(organizationId);
   if (!account) return { text: connectLine(english) };
@@ -647,7 +649,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
   try {
     imageBase64 = await downloadImage(imageUrl);
   } catch (error) {
-    return { text: say(english, error.message, error.message) };
+    return { text: say(english, `${error.message} Or reply skip.`, `${error.message} Ya skip likho.`) };
   }
   try {
     const created = await createMetaAd({
@@ -694,6 +696,43 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
   } catch (error) {
     const reason = String(error.message || 'Meta did not save the ad.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
     return { text: say(english, `Meta did not save the ad. ${reason} Send the image link again, or say cancel.`, `Meta ne ad save nahi kiya. ${reason} Image link dubara bhejo, ya cancel likho.`) };
+  }
+}
+
+async function saveWithoutImage(organizationId, conversationId, payload, english) {
+  const account = await metaAccount(organizationId);
+  if (!account) return { text: connectLine(english) };
+  try {
+    const created = await createMetaCampaign({
+      apiKey: account.apiKey,
+      accountId: account.accountId,
+      name: String(payload.product || 'Meta ad').slice(0, 80),
+      objective: payload.objectiveKey,
+      dailyBudget: payload.dailyBudget,
+      status: 'PAUSED',
+      specialCategory: payload.specialCategory || ''
+    });
+    payload.campaignId = created.id;
+    payload.skippedImage = true;
+    await saveDraft(organizationId, conversationId, 'done', payload, created.id);
+    await rememberCampaign(organizationId, account, { campaignId: created.id }, payload);
+    await recordAudit({ auth: null, ip: null }, {
+      action: 'connection.meta_ad_created',
+      resource: 'connection',
+      resourceId: account.connectionId,
+      organizationId,
+      metadata: { channel: 'whatsapp', publish: false }
+    });
+    return {
+      text: say(
+        english,
+        `Image skipped. Paused campaign ${created.id} is saved on Meta without an ad. It is not live. Add a JPG or PNG from Connections, Meta Ads, when you want the ad itself.`,
+        `Image skip ho gayi. Paused campaign ${created.id} Meta pe save ho gayi, bina ad ke. Live nahi hai. Ad ke liye baad mein Connections, Meta Ads par JPG ya PNG lagana.`
+      )
+    };
+  } catch (error) {
+    const reason = String(error.message || 'Meta did not save the campaign.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
+    return { text: say(english, `Meta did not save the campaign. ${reason}`, `Meta ne campaign save nahi kiya. ${reason}`) };
   }
 }
 

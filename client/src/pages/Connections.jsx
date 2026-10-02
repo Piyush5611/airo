@@ -158,6 +158,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [dailyBudget, setDailyBudget] = useState('');
   const [pageId, setPageId] = useState('');
   const [pages, setPages] = useState([]);
+  const [pageNote, setPageNote] = useState('');
   const [headline, setHeadline] = useState('');
   const [message, setMessage] = useState('');
   const [link, setLink] = useState('');
@@ -209,6 +210,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
       .then((result) => {
         const next = result?.pages || [];
         setPages(next);
+        setPageNote(result?.note || '');
         setPageId((current) => current || next[0]?.id || '');
       })
       .catch((err) => setError(err.message));
@@ -222,6 +224,22 @@ function MetaAdsManager({ id, data, canManage, reload }) {
     api.get(`/api/connections/${id}/meta/pixels`)
       .then((result) => setPixels(result?.pixels || []))
       .catch(() => setPixels([]));
+  }
+
+  async function connectPages() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await api.post(`/api/connections/${id}/meta/pages`, {});
+      const next = result?.pages || [];
+      setPages(next);
+      setPageNote(result?.note || '');
+      setPageId((current) => current || next[0]?.id || '');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -709,9 +727,9 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                 ) : (
                   <div className="connect-missing">
                     <strong>Facebook Page is not connected</strong>
-                    <p className="quiet">Connect the Page to this ad account in Meta, then refresh. The Page name will show here.</p>
+                    <p className="quiet">{pageNote || 'Meta returned no Page for this ad account.'}</p>
                     <div className="page-actions">
-                      <a className="btn" href="https://business.facebook.com/latest/settings/pages" target="_blank" rel="noreferrer">Connect Page</a>
+                      <button className="btn" type="button" disabled={busy} onClick={connectPages}>Connect Page</button>
                       <button className="btn" type="button" onClick={loadIdentity}>Refresh</button>
                     </div>
                   </div>

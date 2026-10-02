@@ -358,22 +358,80 @@ async function safeList(path, apiKey, params) {
   }
 }
 
-function pageChoices(rows) {
-  return (rows || [])
-    .filter((row) => row.id && row.name)
-    .map((row) => ({ id: String(row.id), name: String(row.name).slice(0, 180) }));
+async function readEdge(path, apiKey, params = {}) {
+  try {
+    const rows = [];
+    let page = await graph(path, apiKey, params);
+    rows.push(...(Array.isArray(page.data) ? page.data : []));
+    let guard = 0;
+    while (page.paging?.next && rows.length < 100 && guard < 3) {
+      page = await graph(page.paging.next, apiKey);
+      rows.push(...(page.data || []));
+      guard += 1;
+    }
+    return { rows, error: '' };
+  } catch (error) {
+    return {
+      rows: [],
+      error: String(error.message || '').replace(/access_token=[^&\s]+/gi, '').slice(0, 200)
+    };
+  }
+}
+
+function rememberPages(found, rows) {
+  for (const row of rows || []) {
+    const id = String(row.id || '');
+    if (!/^\d{5,20}$/.test(id)) continue;
+    const name = String(row.name || row.global_brand_page_name || '').trim().slice(0, 180);
+    const current = found.get(id);
+    if (!current) found.set(id, { id, name });
+    else if (name && !current.name) found.set(id, { id, name });
+  }
+}
+
+async function fillPageNames(apiKey, found) {
+  const missing = [...found.values()].filter((page) => !page.name);
+  if (!missing.length) return;
+  try {
+    const data = await graph(`${GRAPH}/`, apiKey, {
+      ids: missing.map((page) => page.id).join(','),
+      fields: 'id,name'
+    });
+    for (const page of missing) {
+      const name = String(data?.[page.id]?.name || '').trim().slice(0, 180);
+      if (name) found.set(page.id, { id: page.id, name });
+    }
+  } catch {
+    // The id is still enough to show the Page.
+  }
+  for (const page of found.values()) {
+    if (!page.name) found.set(page.id, { id: page.id, name: `Page ${page.id}` });
+  }
 }
 
 export async function listMetaPages({ apiKey, accountId }) {
   const act = actId(accountId);
   const found = new Map();
-  function add(rows) {
-    for (const page of pageChoices(rows)) {
-      if (!found.has(page.id)) found.set(page.id, page);
-    }
+  const errors = [];
+  function take(result) {
+    rememberPages(found, result.rows);
+    if (!result.rows.length && result.error) errors.push(result.error);
   }
-  add(await safeList(`act_${act}/promote_pages`, apiKey, { fields: 'id,name', limit: '50' }));
-  add(await safeList('me/accounts', apiKey, { fields: 'id,name', limit: '50' }));
+  take(await readEdge(`act_${act}/promote_pages`, apiKey));
+  if (!found.size) take(await readEdge(`act_${act}/promote_pages`, apiKey, { fields: 'id,name' }));
+  try {
+    const account = await graph(`act_${act}`, apiKey, { fields: 'promote_pages{id,name}' });
+    rememberPages(found, account?.promote_pages?.data || []);
+  } catch (error) {
+    if (!found.size) errors.push(String(error.message || '').slice(0, 200));
+  }
+  take(await readEdge('me/accounts', apiKey, { fields: 'id,name', limit: '100' }));
+  try {
+    const me = await graph('me', apiKey, { fields: 'id' });
+    if (me?.id) take(await readEdge(`${me.id}/assigned_pages`, apiKey, { fields: 'id,name' }));
+  } catch {
+    // This token has no user id for assigned Pages.
+  }
   const businessIds = new Set();
   try {
     const account = await graph(`act_${act}`, apiKey, { fields: 'business' });
@@ -381,15 +439,64 @@ export async function listMetaPages({ apiKey, accountId }) {
   } catch {
     // The ad account did not name a business.
   }
-  const businesses = await safeList('me/businesses', apiKey, { fields: 'id,name', limit: '25' });
-  for (const business of businesses) {
+  const businesses = await readEdge('me/businesses', apiKey, { fields: 'id,name', limit: '25' });
+  for (const business of businesses.rows) {
     if (business.id) businessIds.add(String(business.id));
   }
   for (const businessId of businessIds) {
-    add(await safeList(`${businessId}/owned_pages`, apiKey, { fields: 'id,name', limit: '50' }));
-    add(await safeList(`${businessId}/client_pages`, apiKey, { fields: 'id,name', limit: '50' }));
+    take(await readEdge(`${businessId}/owned_pages`, apiKey, { fields: 'id,name', limit: '50' }));
+    take(await readEdge(`${businessId}/client_pages`, apiKey, { fields: 'id,name', limit: '50' }));
   }
-  return [...found.values()];
+  await fillPageNames(apiKey, found);
+  const pages = [...found.values()];
+  const note = pages.length ? '' : (errors.find(Boolean) || 'Meta returned no Pages for this ad account.');
+  return { pages, note };
+}
+
+export async function attachMetaPages({ apiKey, accountId }) {
+  const current = await listMetaPages({ apiKey, accountId });
+  if (current.pages.length) return current;
+  const act = actId(accountId);
+  let businessId = '';
+  let userId = '';
+  try {
+    const account = await graph(`act_${act}`, apiKey, { fields: 'business' });
+    businessId = account?.business?.id ? String(account.business.id) : '';
+  } catch {
+    businessId = '';
+  }
+  try {
+    const me = await graph('me', apiKey, { fields: 'id' });
+    userId = me?.id ? String(me.id) : '';
+  } catch {
+    userId = '';
+  }
+  const pageIds = new Set();
+  if (businessId) {
+    for (const edge of ['owned_pages', 'client_pages']) {
+      const listed = await readEdge(`${businessId}/${edge}`, apiKey, { fields: 'id,name', limit: '50' });
+      for (const row of listed.rows) {
+        if (row.id) pageIds.add(String(row.id));
+      }
+    }
+  }
+  let assignError = '';
+  if (userId && businessId) {
+    for (const pageId of pageIds) {
+      try {
+        await graph(`${pageId}/assigned_users`, apiKey, {
+          user: userId,
+          business: businessId,
+          tasks: JSON.stringify(['ADVERTISE', 'ANALYZE'])
+        }, 'POST');
+      } catch (error) {
+        assignError = String(error.message || '').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
+      }
+    }
+  }
+  const again = await listMetaPages({ apiKey, accountId });
+  if (!again.pages.length && assignError) again.note = assignError;
+  return again;
 }
 
 export async function searchPublicAds({ apiKey, query }) {

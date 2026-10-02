@@ -534,7 +534,7 @@ async function choosePage(organizationId, conversationId, payload, english) {
   if (!account) return { text: connectLine(english) };
   let pages = [];
   try {
-    pages = await listMetaPages({ apiKey: account.apiKey, accountId: account.accountId });
+    pages = (await listMetaPages({ apiKey: account.apiKey, accountId: account.accountId })).pages || [];
   } catch (error) {
     return { text: say(english, `Meta did not return a Facebook Page. ${String(error.message || '').slice(0, 160)}`, `Meta ne Facebook Page nahi di. ${String(error.message || '').slice(0, 160)}`) };
   }

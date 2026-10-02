@@ -1,6 +1,6 @@
 import { CATEGORIES } from '../domain/providers.js';
 import { cleanNexcallKey, nexcallBase, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
-import { createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -437,8 +437,12 @@ export async function createMetaCampaign(auth, req, id) {
 
 export async function metaPages(auth, id) {
   const secret = await metaSecret(auth, id);
-  const pages = await listMetaPages({ apiKey: secret.apiKey, accountId: secret.accountId });
-  return { pages };
+  return listMetaPages({ apiKey: secret.apiKey, accountId: secret.accountId });
+}
+
+export async function connectMetaPages(auth, id) {
+  const secret = await metaSecret(auth, id);
+  return attachMetaPages({ apiKey: secret.apiKey, accountId: secret.accountId });
 }
 
 export async function metaAudienceSearch(auth, id, kind, query) {

@@ -154,6 +154,9 @@ client.post('/connections/:id/sync', requirePermission('connections.manage'), va
 client.get('/connections/:id/meta/pages', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.metaPages(req.auth, req.params.id));
 }));
+client.post('/connections/:id/meta/pages', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.connectMetaPages(req.auth, req.params.id));
+}));
 client.get('/connections/:id/meta/audience', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.metaAudienceSearch(req.auth, req.params.id, req.query.kind, req.query.q));
 }));

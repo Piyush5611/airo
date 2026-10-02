@@ -337,6 +337,47 @@ export async function createMetaCampaign({ apiKey, accountId, name, objective, d
   return { id: String(created.id), currency: account.currency || '' };
 }
 
+export async function createMetaAdSet({ apiKey, accountId, campaignId, name, objective, pageId, conversion, ...input }) {
+  if (!/^\d{5,20}$/.test(String(campaignId || ''))) {
+    throw new ApiError(422, 'Unknown Meta campaign.', 'validation_error');
+  }
+  const plan = deliveryPlan(objective, conversion || '', input.pixelId || '');
+  const adsetParams = {
+    name: `${String(name || 'Meta ad').slice(0, 150)} ad set`.slice(0, 180),
+    campaign_id: String(campaignId),
+    billing_event: 'IMPRESSIONS',
+    optimization_goal: plan.goal,
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    destination_type: plan.destination,
+    targeting: JSON.stringify(targetingFor({ ...input, advantageAudience: input.advantageAudience !== false })),
+    status: 'PAUSED'
+  };
+  if ((plan.lead || plan.messenger) && pageId) {
+    adsetParams.promoted_object = JSON.stringify({ page_id: pageId });
+  }
+  const adset = await graph(`act_${actId(accountId)}/adsets`, apiKey, adsetParams, 'POST');
+  if (!adset.id) throw new ApiError(422, 'Meta Ads did not return an ad set.', 'validation_error');
+  return { adsetId: String(adset.id) };
+}
+
+export async function addMetaImageAd({ apiKey, accountId, adsetId, name, objective, pageId, headline, message, link, imageBase64, conversion, cta }) {
+  if (!/^\d{5,20}$/.test(String(adsetId || ''))) {
+    throw new ApiError(422, 'Unknown Meta ad set.', 'validation_error');
+  }
+  const plan = deliveryPlan(objective, conversion || '', '');
+  let website;
+  try { website = new URL(link); } catch { throw new ApiError(422, 'Enter a valid website link.', 'validation_error'); }
+  if (website.protocol !== 'https:') throw new ApiError(422, 'The website link must start with https.', 'validation_error');
+  const act = actId(accountId);
+  const bytes = imageBytes(imageBase64);
+  const pageToken = await pageAccessToken(apiKey, pageId);
+  const imageHash = await uploadImage(act, apiKey, bytes);
+  const formId = plan.lead ? await createLeadForm(pageId, pageToken, name, website.toString()) : '';
+  const creativeId = await makeCreative(act, apiKey, { website, pageId, name, headline, message, cta }, imageHash, formId, plan);
+  const adId = await makeAd(act, apiKey, `${name} ad`, adsetId, creativeId);
+  return { adId };
+}
+
 export async function setMetaCampaignStatus({ apiKey, campaignId, status }) {
   if (!/^\d{5,20}$/.test(String(campaignId || ''))) {
     throw new ApiError(422, 'Unknown Meta campaign.', 'validation_error');

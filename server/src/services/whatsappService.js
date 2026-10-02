@@ -144,13 +144,15 @@ export async function receiveWebhook(body) {
       const contact = value.contacts?.[0];
       for (const message of messages) {
         const phone = String(message.from || '');
-        const text = message.text?.body || message.type || '';
+        const image = inboundMedia(message);
+        const text = message.text?.body || image?.caption || (image ? `Photo ${image.mediaId}` : message.type || '');
         if (!phone || !text) continue;
         const saved = await storeInbound({
           phone,
           name: contact?.profile?.name || phone,
           body: String(text).slice(0, 2000),
-          reply: Boolean(message.text?.body)
+          reply: Boolean(message.text?.body || image),
+          mediaId: image?.mediaId || ''
         });
         if (saved?.reply) {
           answerWithModel(saved).catch(async (error) => {
@@ -174,7 +176,105 @@ export async function receiveWebhook(body) {
   }
 }
 
-async function storeInbound({ phone, name, body, reply }) {
+function inboundMedia(message) {
+  const image = message?.type === 'image' ? message.image : null;
+  const sticker = message?.type === 'sticker' ? message.sticker : null;
+  const document = message?.type === 'document' ? message.document : null;
+  const file = image || sticker || (document && /^image\/(jpeg|png|webp)$/i.test(String(document.mime_type || '')) ? document : null);
+  const mediaId = String(file?.id || '');
+  if (!/^\d{6,40}$/.test(mediaId)) return null;
+  return { mediaId, caption: String(file.caption || '').trim().slice(0, 1000) };
+}
+
+function metaMediaUrl(value, base) {
+  let parsed;
+  try { parsed = base ? new URL(value, base) : new URL(value); } catch { return ''; }
+  if (parsed.protocol !== 'https:') return '';
+  const host = parsed.hostname.toLowerCase();
+  if (!/(^|\.)(fbsbx\.com|fbcdn\.net|whatsapp\.net)$/.test(host)) return '';
+  return parsed.toString();
+}
+
+async function readLimited(response, max) {
+  if (!response.body) {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > max) throw new ApiError(422, 'Send a JPG or PNG photo under 2 MB.', 'validation_error');
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      throw new ApiError(422, 'Send a JPG or PNG photo under 2 MB.', 'validation_error');
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
+
+async function downloadWhatsappImage(mediaId) {
+  if (!/^\d{6,40}$/.test(String(mediaId || ''))) {
+    throw new ApiError(422, 'WhatsApp did not send a usable photo.', 'validation_error');
+  }
+  const bot = await repo.bot();
+  const secret = await savedSecret();
+  const version = String(bot?.apiVersion || '');
+  if (!secret?.accessToken || !/^v\d+\.\d+$/.test(version)) {
+    throw new ApiError(422, 'Connect the WhatsApp chatbot before using a chat photo.', 'validation_error');
+  }
+  let meta;
+  try {
+    meta = await fetch(`https://graph.facebook.com/${version}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${secret.accessToken}` },
+      signal: AbortSignal.timeout(15000)
+    });
+  } catch {
+    throw new ApiError(422, 'WhatsApp did not send the photo.', 'validation_error');
+  }
+  const info = await meta.json().catch(() => ({}));
+  const fileUrl = meta.ok ? metaMediaUrl(info.url) : '';
+  if (!fileUrl) {
+    const reason = String(info?.error?.message || '')
+      .replace(/access_token=[^&\s]+/gi, '')
+      .replace(/EAA[A-Za-z0-9]+/g, '')
+      .trim()
+      .slice(0, 140);
+    throw new ApiError(422, reason ? `WhatsApp did not send the photo. ${reason}` : 'WhatsApp did not send the photo.', 'validation_error');
+  }
+  let current = fileUrl;
+  for (let hop = 0; hop < 2; hop += 1) {
+    let response;
+    try {
+      response = await fetch(current, {
+        headers: { Authorization: `Bearer ${secret.accessToken}` },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(20000)
+      });
+    } catch {
+      throw new ApiError(422, 'WhatsApp did not send the photo.', 'validation_error');
+    }
+    if (response.status >= 300 && response.status < 400) {
+      const next = metaMediaUrl(response.headers.get('location'), current);
+      if (!next) throw new ApiError(422, 'WhatsApp did not send the photo.', 'validation_error');
+      current = next;
+      continue;
+    }
+    if (!response.ok) throw new ApiError(422, 'WhatsApp did not send the photo.', 'validation_error');
+    const length = Number(response.headers.get('content-length') || 0);
+    if (length > 2500000) throw new ApiError(422, 'Send a JPG or PNG photo under 2 MB.', 'validation_error');
+    const bytes = await readLimited(response, 2500000);
+    if (bytes.length < 100) throw new ApiError(422, 'WhatsApp did not send the photo.', 'validation_error');
+    return bytes.toString('base64');
+  }
+  throw new ApiError(422, 'WhatsApp did not send the photo.', 'validation_error');
+}
+
+async function storeInbound({ phone, name, body, reply, mediaId }) {
   const key = phoneKey(phone);
   let owner = null;
   if (key) {
@@ -211,6 +311,7 @@ async function storeInbound({ phone, name, body, reply }) {
         organizationId,
         recognized: Boolean(owner),
         businessLabel: owner?.label || '',
+        mediaId: mediaId || '',
         reply: true
       };
     }
@@ -228,6 +329,7 @@ async function storeInbound({ phone, name, body, reply }) {
     organizationId,
     recognized: Boolean(owner),
     businessLabel: owner?.label || '',
+    mediaId: mediaId || '',
     reply: Boolean(reply)
   };
 }
@@ -242,11 +344,25 @@ async function answerWithModel(saved) {
       content: row.body
     }));
   while (messages[0]?.role === 'assistant') messages.shift();
+  let imageBase64 = '';
+  let imageError = '';
+  if (saved.mediaId) {
+    try {
+      imageBase64 = await downloadWhatsappImage(saved.mediaId);
+    } catch (error) {
+      imageError = String(error?.message || 'WhatsApp did not send the photo.')
+        .replace(/access_token=[^&\s]+/gi, '')
+        .replace(/EAA[A-Za-z0-9]+/g, '')
+        .slice(0, 180);
+    }
+  }
   const meta = await handleMetaAdChat({
     organizationId: saved.organizationId,
     conversationId: saved.conversationId,
     recognized: saved.recognized,
-    messages
+    messages,
+    imageBase64,
+    imageError
   });
   if (meta?.text) {
     await deliverWhatsapp({

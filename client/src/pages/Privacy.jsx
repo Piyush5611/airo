@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useTitle } from '../ui.jsx';
 
 const UPDATED = '2 October 2026';
+const CONTACT = 'contactkalaakchar@gmail.com';
 
 export function Privacy() {
   useTitle('Privacy policy');
@@ -67,8 +68,8 @@ export function Privacy() {
         <h2 id="data-deletion">Deleting your data</h2>
         <p>To ask us to delete your information:</p>
         <ol>
-          <li>If you are a lead or customer of a business, ask that business, or contact Kala Akchar Media.</li>
-          <li>If you messaged the AIRO WhatsApp number or have an AIRO account, contact Kala Akchar Media.</li>
+          <li>If you are a lead or customer of a business, ask that business, or email <a href={`mailto:${CONTACT}`}>{CONTACT}</a>.</li>
+          <li>If you messaged the AIRO WhatsApp number or have an AIRO account, email <a href={`mailto:${CONTACT}`}>{CONTACT}</a>.</li>
           <li>Include the phone number or email address the data is linked to.</li>
         </ol>
         <p>We delete the information, except records we must keep by law, and confirm when it is done.</p>
@@ -77,7 +78,7 @@ export function Privacy() {
         <p>We will update this page when our practices change. The date at the top shows the latest version.</p>
 
         <h2>Contact</h2>
-        <p>Kala Akchar Media, operator of AIRO.</p>
+        <p>Kala Akchar Media, operator of AIRO. Email <a href={`mailto:${CONTACT}`}>{CONTACT}</a>.</p>
       </article>
     </div>
   );

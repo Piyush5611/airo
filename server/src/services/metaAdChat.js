@@ -1,7 +1,7 @@
 import { one, run } from '../db/sql.js';
 import { decryptJson } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
-import { addMetaImageAd, createMetaAd, createMetaAdSet, createMetaCampaign, listMetaPages, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
+import { addMetaImageAd, campaignObjective, createMetaAd, createMetaAdSet, createMetaCampaign, listMetaPages, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
 import { upsertObject } from '../repositories/connectionRepo.js';
 import { recordAudit } from './auditService.js';
 import { writeAdPlan } from './llmService.js';
@@ -251,7 +251,7 @@ async function rememberCampaign(organizationId, account, created, intake) {
     payload: {
       origin: 'api',
       status: 'PAUSED',
-      objective: intake.objectiveKey,
+      objective: campaignObjective(intake.objectiveKey, intake.conversion),
       budget: String(intake.dailyBudget),
       budgetKind: 'daily'
     }
@@ -844,6 +844,7 @@ async function saveWithoutImage(organizationId, conversationId, payload, english
       accountId: account.accountId,
       name: String(payload.product || 'Meta ad').slice(0, 80),
       objective: payload.objectiveKey,
+      conversion: payload.conversion,
       dailyBudget: payload.dailyBudget,
       status: 'PAUSED',
       specialCategory: payload.specialCategory || ''

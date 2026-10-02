@@ -4,7 +4,13 @@ const VERSION = 'v21.0';
 const GRAPH = `https://graph.facebook.com/${VERSION}`;
 const OFFSET = { JPY: 1, KRW: 1, VND: 1, CLP: 1, ISK: 1, PYG: 1 };
 
-const OBJECTIVES = ['OUTCOME_LEADS', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_SALES'];
+const OBJECTIVES = ['OUTCOME_LEADS', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_SALES', 'OUTCOME_ENGAGEMENT'];
+
+// Meta does not allow OUTCOME_LEADS with destination MESSENGER; click-to-Messenger runs under Engagement.
+export function campaignObjective(objective, conversion) {
+  if (objective === 'OUTCOME_LEADS' && conversion === 'messenger') return 'OUTCOME_ENGAGEMENT';
+  return objective;
+}
 
 function quiet() {
   return new ApiError(422, 'The API did not respond.', 'validation_error');
@@ -322,7 +328,8 @@ export async function pullMetaAds({ apiKey, accountId }) {
   };
 }
 
-export async function createMetaCampaign({ apiKey, accountId, name, objective, dailyBudget, status, specialCategory }) {
+export async function createMetaCampaign({ apiKey, accountId, name, objective: chosen, conversion, dailyBudget, status, specialCategory }) {
+  const objective = campaignObjective(chosen, conversion);
   if (!OBJECTIVES.includes(objective)) {
     throw new ApiError(422, 'Choose a Meta campaign objective.', 'validation_error');
   }
@@ -806,15 +813,16 @@ async function makeCreative(act, apiKey, input, imageHash, formId, plan, variant
     if (!created.id) throw new ApiError(422, 'Meta Ads did not return an ad creative.', 'validation_error');
     return String(created.id);
   }
-  const destination = plan.lead ? 'https://fb.me/' : plan.messenger ? `https://m.me/${input.pageId}` : website;
+  const destination = plan.lead ? 'https://fb.me/' : plan.messenger ? 'https://fb.com/messenger_doc/' : website;
+  let callToAction = { type: cta, value: { link: destination } };
+  if (plan.lead) callToAction = { type: 'SIGN_UP', value: { lead_gen_form_id: formId } };
+  if (plan.messenger) callToAction = { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } };
   const linkData = {
     message: text,
     name: headline,
     image_hash: imageHash,
     link: destination,
-    call_to_action: plan.lead
-      ? { type: 'SIGN_UP', value: { lead_gen_form_id: formId } }
-      : { type: cta, value: { link: destination } }
+    call_to_action: callToAction
   };
   const created = await graph(`act_${act}/adcreatives`, apiKey, {
     name: `${input.name} ${variant?.label || 'creative'}`.slice(0, 180),
@@ -877,7 +885,7 @@ export async function createMetaAd(input) {
   const allowedCategory = ['HOUSING', 'EMPLOYMENT', 'CREDIT', 'ISSUES_ELECTIONS_POLITICS'];
   const campaignParams = {
     name: String(name).slice(0, 180),
-    objective,
+    objective: campaignObjective(objective, input.conversion),
     status: 'PAUSED',
     special_ad_categories: JSON.stringify(allowedCategory.includes(input.specialCategory) ? [input.specialCategory] : []),
     is_adset_budget_sharing_enabled: 'false'
@@ -888,6 +896,19 @@ export async function createMetaAd(input) {
   }
   const campaign = await graph(`act_${act}/campaigns`, apiKey, campaignParams, 'POST');
   if (!campaign.id) throw new ApiError(422, 'Meta Ads did not return a campaign.', 'validation_error');
+  try {
+    return await fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, website, pageId, name, message, publish, fullBudget, campaignLevel, budgetKey, imageHash, formId });
+  } catch (error) {
+    try {
+      await graph(String(campaign.id), apiKey, {}, 'DELETE');
+    } catch {
+      // The paused campaign stays in Meta if delete is refused.
+    }
+    throw error;
+  }
+}
+
+async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, website, pageId, name, message, publish, fullBudget, campaignLevel, budgetKey, imageHash, formId }) {
   const versions = input.abTest ? [true, false] : [input.advantageAudience !== false];
   const share = Math.max(1, Math.floor(fullBudget / versions.length));
   const start = scheduleTime(input.startDate);

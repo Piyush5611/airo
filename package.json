@@ -12,7 +12,8 @@
     "seed": "npm run seed -w server",
     "start": "npm run start -w server",
     "build": "npm run build -w client",
-    "test": "npm run test -w server"
+    "test": "npm run test -w server",
+    "ai:context": "node scripts/generate-ai-context.cjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

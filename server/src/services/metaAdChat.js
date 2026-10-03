@@ -7,6 +7,8 @@ import { recordAudit } from './auditService.js';
 import { writeAdPlan } from './llmService.js';
 
 const START = /\b(run|start|launch|chalao|chala|banao)\b.{0,40}\bmeta\b|\bmeta\s+ads?\b.{0,24}\b(run|start|launch|chalao|chala|banao)\b/i;
+const OTHER_ADS = /\b(google|linkedin|youtube)\b.{0,24}\bads?\b|\b(run|start|launch|chalao|chala|banao)\b.{0,40}\b(google|linkedin|youtube)\b/i;
+const STALE_HOURS = 24;
 const CANCEL = /^(cancel|stop|ruk|band|nahi chahiye|nahin chahiye)\b/i;
 const SKIP_IMAGE = /^(skip|baad mein|baad me|later|no image|image nahi|image nahin|without image)\b/i;
 const REPORT = /\b(report|nexcall|hisab|yesterday|aaj ka|calling report|kitne call)\b/i;
@@ -39,7 +41,8 @@ function parsePayload(value) {
 
 async function loadDraft(conversationId) {
   const row = await one(
-    `SELECT id, step, payload, campaign_id AS campaignId
+    `SELECT id, step, payload, campaign_id AS campaignId,
+       TIMESTAMPDIFF(HOUR, updated_at, NOW()) AS ageHours
      FROM meta_ad_drafts WHERE conversation_id = ?`,
     [conversationId]
   );
@@ -218,8 +221,8 @@ function sharedPhoto(text, imageBase64, imageError) {
 function imageAsk(english) {
   return say(
     english,
-    'Send the ad photo in this chat. JPG or PNG, under 2 MB. An https link also works. Reply skip to leave the ad for later.',
-    'Ad ki photo isi chat mein bhejo. JPG ya PNG, 2 MB se kam. https link bhi chalega. Baad mein rakhne ke liye skip likho.'
+    'Send the ad photo in this chat. JPG or PNG, under 2 MB. An https link also works. Reply skip to leave the ad for later, or cancel to stop.',
+    'Ad ki photo isi chat mein bhejo. JPG ya PNG, 2 MB se kam. https link bhi chalega. Baad mein rakhne ke liye skip likho, band karne ke liye cancel.'
   );
 }
 
@@ -272,6 +275,23 @@ export async function handleMetaAdChat({ organizationId, conversationId, recogni
     };
   }
   const starting = START.test(text);
+  if (!starting && recognized && OTHER_ADS.test(text)) {
+    const english = englishOnly(text);
+    const name = text.match(/google|linkedin|youtube/i)[0].toLowerCase();
+    const label = { google: 'Google', linkedin: 'LinkedIn', youtube: 'YouTube' }[name];
+    const open = draft && draft.step !== 'done';
+    return {
+      text: say(
+        english,
+        `${label} ads cannot be created from WhatsApp yet. Open AIRO, then Connections, Advertising, ${label === 'YouTube' ? 'Google' : label} Ads.${open ? ' Your Meta ad setup in this chat is still open. Say cancel to stop it.' : ''}`,
+        `${label} ads abhi WhatsApp se nahi bante. AIRO mein Connections, Advertising, ${label === 'YouTube' ? 'Google' : label} Ads kholo.${open ? ' Is chat mein Meta ad setup abhi khula hai. Band karne ke liye cancel likho.' : ''}`
+      )
+    };
+  }
+  if (draft && draft.step !== 'done' && !starting && Number(draft.ageHours) >= STALE_HOURS) {
+    await clearDraft(conversationId);
+    draft = null;
+  }
   if (!draft && !starting) return null;
   if (draft?.step === 'done' && !starting) {
     const english = englishOnly(text) && draft.payload.lang !== 'hi';
@@ -853,7 +873,7 @@ async function saveWithoutImage(organizationId, conversationId, payload, english
     payload.campaignId = created.id;
     payload.adsetId = adset.adsetId;
     payload.skippedImage = true;
-    await saveDraft(organizationId, conversationId, 'ad', payload, created.id);
+    await saveDraft(organizationId, conversationId, 'done', payload, created.id);
     await rememberCampaign(organizationId, account, { campaignId: created.id }, payload);
     await rememberAdSet(organizationId, account, created.id, adset.adsetId, payload);
     await recordAudit({ auth: null, ip: null }, {
@@ -866,8 +886,8 @@ async function saveWithoutImage(organizationId, conversationId, payload, english
     return {
       text: say(
         english,
-        `Paused campaign ${created.id} and ad set ${adset.adsetId} are saved. ${imageAsk(true)}`,
-        `Paused campaign ${created.id} aur ad set ${adset.adsetId} save ho gaye. ${imageAsk(false)}`
+        `Paused campaign ${created.id} and ad set ${adset.adsetId} are saved on Meta without an ad. Nothing is live. Send the photo in this chat later, or add it from Connections, Meta Ads.`,
+        `Paused campaign ${created.id} aur ad set ${adset.adsetId} Meta pe bina ad ke save ho gaye. Kuch live nahi hai. Photo baad mein isi chat mein bhejo, ya Connections, Meta Ads se lagao.`
       )
     };
   } catch (error) {

@@ -6,6 +6,7 @@ Significant structural changes only. Newest first.
 
 - **Change:** Live Google Ads integration: `server/src/integrations/googleAds.js`, Google OAuth connect + account picker, sync, Search campaign create/edit/status, keyword ideas, live report. New env names `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `GOOGLE_ADS_API_VERSION`. `liveRecord` now also returns `parent`.
 - **Change (same day):** "Connect with Facebook" for Meta Ads (Facebook Login, account picker), sharing the OAuth helpers with Google. New env names `META_APP_ID`, `META_APP_SECRET`, `META_LOGIN_CONFIG_ID`, `META_OAUTH_REDIRECT_URI`. Connection detail returns `tokenExpiresAt`. Added `npm run check:logins` (`server/src/scripts/checkLogins.js`).
+- **Fix (same day):** WhatsApp Meta ad chat (`metaAdChat.js`): an open draft no longer captures "run Google/LinkedIn ads" messages (they get a "not from WhatsApp yet" reply), drafts idle for 24 hours are dropped, and skipping the photo ends the draft at `done` instead of asking to skip again.
 - **Reason:** Manage, create, and report on Google Ads from AIRO, and let many businesses connect Google and Meta without pasting tokens.
 - **Affected areas:** `connectionService`, `connectionRepo.setAccountLabel`, routes, schemas, `env.js`, `Connections.jsx`, `styles.css`.
 - **Migration/API impact:** No migration. New endpoints under `/api/connections/google/*`, `/api/connections/:id/google/*`, and public `/api/google-ads/callback`. Client rebuild needed.

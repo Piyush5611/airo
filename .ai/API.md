@@ -28,6 +28,7 @@ Legend for the Auth column: **Public** = no auth; **User** = any authenticated u
 | GET | `/api/meta/webhook` | Public (`META_VERIFY_TOKEN`) | Meta webhook verification | `metaWebhookService.verifyWebhook` |
 | POST | `/api/meta/webhook` | Public | Meta ad-account change events → `integration_objects` | `metaWebhookService.receiveWebhook` |
 | GET | `/api/google-ads/callback` | Public (signed `state`, 10 min) | Google OAuth redirect. Stores the refresh token as `pendingToken`, then redirects to `/app/connections?section=Advertising&google=pick` (or `google=error&reason=`) | `connectionService.googleCallback` |
+| GET | `/api/meta-ads/callback` | Public (signed `state`, 10 min) | Facebook Login redirect. Exchanges the code (long-lived token when it expires), stores `pendingToken`, redirects to `/app/connections?section=Advertising&meta=pick` (or `meta=error&reason=`) | `connectionService.metaCallback` |
 | POST | `/api/hooks/:token` | Public (per-connection token) | Generic inbound webhook for a connection | `connectionService.ingestWebhook` |
 
 ## Auth — `/api/auth`
@@ -122,6 +123,9 @@ Middleware for all: `authenticate`, `requireRealm('client')`, `blockSupportWrite
 | POST | `/api/connections/:id/meta/ads` | `connections.manage` | `idParams` + `metaAdSchema` (image base64 ≤4 MB string, targeting, budget, conversion, publish…) | `publishMetaAd` (201) |
 | POST | `/api/connections/:id/meta/edit` | `connections.manage` | `idParams` + `metaEditSchema` | `editMetaAdCampaign` |
 | POST | `/api/connections/:id/meta/status` | `connections.manage` | `idParams` + `metaStatusSchema` | `updateMetaCampaignStatus` |
+| POST | `/api/connections/meta/start` | `connections.manage` | — | `metaStart` → `{ url }` (Facebook Login dialog) |
+| GET | `/api/connections/meta/accounts` | `connections.manage` | — | `metaAccounts` → `{ accounts, note }` |
+| POST | `/api/connections/meta/account` | `connections.manage` | `metaAccountSchema` | `chooseMetaAccount` (verifies, saves, syncs) |
 | POST | `/api/connections/google/start` | `connections.manage` | — | `googleStart` → `{ url }` (Google consent screen) |
 | GET | `/api/connections/google/accounts` | `connections.manage` | — | `googleAccounts` → `{ accounts, note }` |
 | POST | `/api/connections/google/account` | `connections.manage` | `googleAccountSchema` | `chooseGoogleAccount` (verifies, saves, syncs) |

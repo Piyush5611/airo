@@ -132,6 +132,8 @@ Connections → "Connect with Google" → POST /api/connections/google/start →
   → verify → credential { apiKey: refresh token, accountId, loginCustomerId, currency, verified } → connected → sync
 ```
 
+Meta uses the same flow (`connectionService.oauthStart` / `oauthCallback` / `oauthRow`): "Connect with Facebook" → `POST /api/connections/meta/start` → Facebook Login dialog (`META_LOGIN_CONFIG_ID` for Facebook Login for Business, else scopes) → `GET /api/meta-ads/callback` → `/app/connections?meta=pick` → choose `act_` account → credential `{ apiKey: token, accountId, oauth: true, tokenExpiresAt }`. User tokens are exchanged for ~60-day tokens; system-user tokens never expire (`tokenExpiresAt` null). The paste-a-token form stays as a fallback. One AIRO app serves every organization; each organization stores only its own token.
+
 `server/src/integrations/googleAds.js` calls the REST API with the platform developer token. Search campaigns are created **paused** in one atomic `googleAds:mutate` (budget → campaign → criteria → ad group → keywords → responsive search ad); publishing enables the campaign. The report tab reads live from Google and is not stored. The generic `/api/connections/api` key form is refused for `google_ads`.
 
 ## LLM
@@ -156,5 +158,6 @@ MySQL-compatible via `mysql2/promise` pool (`timezone: 'Z'`, `dateStrings: true`
 | `npm run setup` | install + migrate + seed. |
 | `npm test` | `node --test src/tests/isolation.test.js`. |
 | `npm run ai:context` | Regenerate `.ai/FILE_STRUCTURE.md`. |
+| `npm run check:logins` | Check the Meta and Google login env setup (`server/src/scripts/checkLogins.js`). Prints no secrets. |
 
 The Express app does not serve `client/dist`; how static files are served in production — **Needs verification** (no config in repo).

@@ -1,7 +1,9 @@
+import { env } from '../config/env.js';
 import { ApiError } from '../utils/errors.js';
 
 const VERSION = 'v21.0';
 const GRAPH = `https://graph.facebook.com/${VERSION}`;
+const LOGIN_SCOPES = ['ads_management', 'ads_read', 'business_management', 'pages_show_list', 'pages_read_engagement', 'pages_manage_ads', 'leads_retrieval'];
 const OFFSET = { JPY: 1, KRW: 1, VND: 1, CLP: 1, ISK: 1, PYG: 1 };
 
 const OBJECTIVES = ['OUTCOME_LEADS', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_SALES', 'OUTCOME_ENGAGEMENT'];
@@ -211,6 +213,102 @@ async function draftCampaigns(act, token, publishedIds, publishedNames, currency
     }
   }
   return { objects, note: '' };
+}
+
+export function metaLoginSetup() {
+  const settings = env.metaLogin;
+  const redirectUri = settings.redirectUri || `${env.clientOrigin.replace(/\/$/, '')}/api/meta-ads/callback`;
+  return { ready: Boolean(settings.appId && settings.appSecret), redirectUri };
+}
+
+function loginConfig() {
+  const setup = metaLoginSetup();
+  if (!setup.ready) throw new ApiError(422, 'Connect with Facebook is not set up on this server yet.', 'validation_error');
+  return { ...env.metaLogin, redirectUri: setup.redirectUri };
+}
+
+export function metaAuthUrl(state) {
+  const settings = loginConfig();
+  const url = new URL(`https://www.facebook.com/${VERSION}/dialog/oauth`);
+  url.searchParams.set('client_id', settings.appId);
+  url.searchParams.set('redirect_uri', settings.redirectUri);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('state', state);
+  if (settings.configId) url.searchParams.set('config_id', settings.configId);
+  else url.searchParams.set('scope', LOGIN_SCOPES.join(','));
+  return url.toString();
+}
+
+async function oauthGet(path, params) {
+  const url = new URL(`${GRAPH}/${path}`);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+  let response;
+  try {
+    response = await fetch(url, { headers: { Accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(15000) });
+  } catch {
+    throw quiet();
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const reason = String(data?.error?.message || '').replace(/EAA[A-Za-z0-9]+/g, '').trim().slice(0, 160);
+    throw new ApiError(422, reason ? `Facebook sign-in failed. ${reason}` : 'Facebook sign-in failed.', 'validation_error');
+  }
+  return data;
+}
+
+async function tokenExpiry(token, settings) {
+  try {
+    const data = await oauthGet('debug_token', { input_token: token, access_token: `${settings.appId}|${settings.appSecret}` });
+    const expires = Number(data?.data?.expires_at);
+    if (data?.data?.is_valid === false) return { valid: false, expiresAt: null };
+    return { valid: true, expiresAt: expires > 0 ? new Date(expires * 1000).toISOString() : null };
+  } catch {
+    return { valid: true, expiresAt: undefined };
+  }
+}
+
+export async function exchangeMetaCode(code) {
+  const settings = loginConfig();
+  const first = await oauthGet('oauth/access_token', {
+    client_id: settings.appId,
+    client_secret: settings.appSecret,
+    redirect_uri: settings.redirectUri,
+    code
+  });
+  if (!first.access_token) throw new ApiError(422, 'Facebook did not return access.', 'validation_error');
+  let token = first.access_token;
+  let info = await tokenExpiry(token, settings);
+  if (!info.valid) throw new ApiError(422, 'Facebook returned an invalid token. Connect again.', 'validation_error');
+  if (info.expiresAt !== null) {
+    try {
+      const long = await oauthGet('oauth/access_token', {
+        grant_type: 'fb_exchange_token',
+        client_id: settings.appId,
+        client_secret: settings.appSecret,
+        fb_exchange_token: token
+      });
+      if (long.access_token) {
+        token = long.access_token;
+        info = await tokenExpiry(token, settings);
+      }
+    } catch {
+      // Keep the first token; it still works until it expires.
+    }
+  }
+  return { token, expiresAt: info.expiresAt || null };
+}
+
+export async function listMetaAdAccounts({ apiKey }) {
+  const rows = await list('me/adaccounts', apiKey, { fields: 'id,account_id,name,currency,account_status,business{name}' });
+  return rows
+    .filter((row) => /^\d{5,20}$/.test(String(row.account_id || '')))
+    .map((row) => ({
+      id: `act_${row.account_id}`,
+      name: String(row.name || `Ad account ${row.account_id}`).slice(0, 160),
+      currency: row.currency || '',
+      active: Number(row.account_status) === 1,
+      business: String(row.business?.name || '').slice(0, 160)
+    }));
 }
 
 export async function verifyMetaAccount({ apiKey, accountId }) {

@@ -38,6 +38,12 @@ export const env = {
   credentialsKey: read('CREDENTIALS_KEY', ''),
   whatsappVerifyToken: read('WHATSAPP_VERIFY_TOKEN', ''),
   metaVerifyToken: read('META_VERIFY_TOKEN', ''),
+  metaLogin: {
+    appId: read('META_APP_ID', ''),
+    appSecret: read('META_APP_SECRET', ''),
+    configId: read('META_LOGIN_CONFIG_ID', ''),
+    redirectUri: read('META_OAUTH_REDIRECT_URI', '')
+  },
   googleAds: {
     developerToken: read('GOOGLE_ADS_DEVELOPER_TOKEN', ''),
     clientId: read('GOOGLE_OAUTH_CLIENT_ID', ''),

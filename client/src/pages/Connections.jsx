@@ -24,13 +24,15 @@ export function Connections() {
   const [form, setForm] = useState(null);
   const [section, setSection] = useSection(CONNECTION_SECTIONS);
   const [params, setParams] = useSearchParams();
-  const googleStep = params.get('google');
-  const googleReason = params.get('reason');
+  const oauthProvider = params.get('google') ? 'google' : params.get('meta') ? 'meta' : '';
+  const oauthStep = oauthProvider ? params.get(oauthProvider) : '';
+  const oauthReason = params.get('reason');
 
-  function clearGoogle() {
+  function clearOAuth() {
     setParams((current) => {
       const next = new URLSearchParams(current);
       next.delete('google');
+      next.delete('meta');
       next.delete('reason');
       return next;
     }, { replace: true });
@@ -41,12 +43,14 @@ export function Connections() {
       <Subnav items={CONNECTION_SECTIONS} value={section} onChange={(next) => { setSection(next); setForm(null); }} />
       <State loading={loading} error={error} onRetry={reload}>
         {message ? <p>{message}</p> : null}
-        {googleStep === 'error' ? <p className="delta-down">{googleReason || 'Google sign-in failed.'}</p> : null}
-        {googleStep === 'pick' && can('connections.manage') ? (
-          <GoogleAccountPicker
-            onCancel={clearGoogle}
+        {oauthStep === 'error' ? <p className="delta-down">{oauthReason || 'Sign-in failed.'}</p> : null}
+        {oauthStep === 'pick' && can('connections.manage') ? (
+          <OAuthAccountPicker
+            key={oauthProvider}
+            provider={oauthProvider}
+            onCancel={clearOAuth}
             onDone={(notice, connectionId) => {
-              clearGoogle();
+              clearOAuth();
               setMessage(notice);
               window.dispatchEvent(new Event('airo:connections'));
               if (connectionId) navigate(`/app/connections/${connectionId}`); else reload();
@@ -87,6 +91,7 @@ function ProviderApiForm({ provider, onDone }) {
   const [baseUrl, setBaseUrl] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [manual, setManual] = useState(false);
   const nexcall = provider.providerKey === 'nexcall';
   const meta = provider.providerKey === 'meta_ads';
 
@@ -100,7 +105,16 @@ function ProviderApiForm({ provider, onDone }) {
   }
 
   if (provider.providerKey === 'google_ads') {
-    return <GoogleConnect linked={Boolean(provider.connection?.linked)} />;
+    return <OAuthConnect provider="google" linked={Boolean(provider.connection?.linked)} />;
+  }
+
+  if (meta && !manual) {
+    return (
+      <div className="stack">
+        <OAuthConnect provider="meta" linked={Boolean(provider.connection?.linked)} />
+        <button className="btn-ghost" type="button" onClick={() => setManual(true)}>Paste an access token instead</button>
+      </div>
+    );
   }
 
   async function save(event) {
@@ -152,7 +166,31 @@ function customerLabel(id) {
   return raw.length === 10 ? `${raw.slice(0, 3)}-${raw.slice(3, 6)}-${raw.slice(6)}` : raw;
 }
 
-function GoogleConnect({ linked }) {
+const OAUTH_PROVIDERS = {
+  google: {
+    brand: 'Google',
+    product: 'Google Ads',
+    start: '/api/connections/google/start',
+    accounts: '/api/connections/google/accounts',
+    save: '/api/connections/google/account',
+    field: 'customerId',
+    help: 'Sign in with the Google account that can open your Google Ads account. Google asks you to allow AIRO, then you pick the ad account here.',
+    option: (account) => `${account.name} · ${customerLabel(account.id)}${account.currency ? ` · ${account.currency}` : ''}${account.manager ? ` · via ${account.manager}` : ''}${account.test ? ' · test' : ''}`
+  },
+  meta: {
+    brand: 'Facebook',
+    product: 'Meta Ads',
+    start: '/api/connections/meta/start',
+    accounts: '/api/connections/meta/accounts',
+    save: '/api/connections/meta/account',
+    field: 'accountId',
+    help: 'Sign in with the Facebook account that manages your ad account and Page. Facebook asks you to allow AIRO, then you pick the ad account here.',
+    option: (account) => `${account.name} · ${account.id}${account.currency ? ` · ${account.currency}` : ''}${account.business ? ` · ${account.business}` : ''}${account.active ? '' : ' · not active'}`
+  }
+};
+
+function OAuthConnect({ provider, linked }) {
+  const setup = OAUTH_PROVIDERS[provider];
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -160,7 +198,7 @@ function GoogleConnect({ linked }) {
     setBusy(true);
     setError('');
     try {
-      const result = await api.post('/api/connections/google/start', {});
+      const result = await api.post(setup.start, {});
       window.location.assign(result.url);
     } catch (err) {
       setError(err.message);
@@ -170,15 +208,16 @@ function GoogleConnect({ linked }) {
 
   return (
     <section className="panel form-grid">
-      <h2>{linked ? 'Change Google Ads account' : 'Connect Google Ads'}</h2>
-      <p className="quiet">Sign in with the Google account that can open your Google Ads account. Google asks you to allow AIRO, then you pick the ad account here.</p>
-      <button className="btn-primary" type="button" disabled={busy} onClick={start}>{busy ? 'Opening Google' : 'Connect with Google'}</button>
+      <h2>{linked ? `Change ${setup.product} account` : `Connect ${setup.product}`}</h2>
+      <p className="quiet">{setup.help}</p>
+      <button className="btn-primary" type="button" disabled={busy} onClick={start}>{busy ? `Opening ${setup.brand}` : `Connect with ${setup.brand}`}</button>
       {error ? <p className="delta-down">{error}</p> : null}
     </section>
   );
 }
 
-function GoogleAccountPicker({ onDone, onCancel }) {
+function OAuthAccountPicker({ provider, onDone, onCancel }) {
+  const setup = OAUTH_PROVIDERS[provider];
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState([]);
   const [note, setNote] = useState('');
@@ -188,7 +227,7 @@ function GoogleAccountPicker({ onDone, onCancel }) {
 
   useEffect(() => {
     let active = true;
-    api.get('/api/connections/google/accounts')
+    api.get(setup.accounts)
       .then((result) => {
         if (!active) return;
         const rows = result?.accounts || [];
@@ -199,14 +238,14 @@ function GoogleAccountPicker({ onDone, onCancel }) {
       .catch((err) => { if (active) setNote(err.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [setup.accounts]);
 
   async function save(event) {
     event.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const saved = await api.post('/api/connections/google/account', { customerId: choice });
+      const saved = await api.post(setup.save, { [setup.field]: choice });
       onDone(saved.notice, saved.linked ? saved.id : null);
     } catch (err) {
       setError(err.message);
@@ -217,20 +256,16 @@ function GoogleAccountPicker({ onDone, onCancel }) {
 
   return (
     <form className="panel form-grid" onSubmit={save}>
-      <h2>Choose the Google Ads account</h2>
-      {loading ? <p className="quiet">Reading the accounts this Google login can open…</p> : null}
+      <h2>Choose the {setup.product} account</h2>
+      {loading ? <p className="quiet">Reading the accounts this {setup.brand} login can open…</p> : null}
       {!loading && accounts.length ? (
         <label className="stack-field">Ad account
           <select value={choice} onChange={(event) => setChoice(event.target.value)}>
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name} · {customerLabel(account.id)}{account.currency ? ` · ${account.currency}` : ''}{account.manager ? ` · via ${account.manager}` : ''}{account.test ? ' · test' : ''}
-              </option>
-            ))}
+            {accounts.map((account) => <option key={account.id} value={account.id}>{setup.option(account)}</option>)}
           </select>
         </label>
       ) : null}
-      {!loading && !accounts.length ? <p className="delta-down">{note || 'Google returned no ad accounts for this login.'}</p> : null}
+      {!loading && !accounts.length ? <p className="delta-down">{note || `${setup.brand} returned no ad accounts for this login.`}</p> : null}
       <div className="page-actions">
         <button className="btn" type="button" onClick={onCancel}>Cancel</button>
         <button className="btn-primary" type="submit" disabled={busy || !choice}>{busy ? 'Checking' : 'Connect this account'}</button>
@@ -1679,6 +1714,11 @@ export function ConnectionDetail() {
         {data?.linked ? (
           <div className="stack">
             <p><Badge value={data.status} /> <span className="quiet">Last sync {when(data.lastSyncAt)}.</span></p>
+            {data.tokenExpiresAt ? (
+              <p className={new Date(data.tokenExpiresAt).getTime() - Date.now() < 10 * 86400000 ? 'delta-down' : 'quiet'}>
+                The Facebook login expires on {data.tokenExpiresAt.slice(0, 10)}. Use Connect with Facebook again before then.
+              </p>
+            ) : null}
             {data.providerKey === 'nexcall' ? (
               <section className="panel">
                 <h2>Connected</h2>

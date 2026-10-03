@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { CATEGORIES } from '../domain/providers.js';
 import { createGoogleSearchCampaign, editGoogleCampaign, exchangeGoogleCode, googleAuthUrl, googleKeywordIdeas, googleReport, listGoogleAccounts, pullGoogleAds, searchGoogleLanguages, setGoogleCampaignStatus, suggestGoogleLocations, verifyGoogleAccount } from '../integrations/googleAds.js';
 import { cleanNexcallKey, nexcallBase, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
-import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, exchangeMetaCode, listAdInstagram, listMetaAdAccounts, listMetaPages, listMetaPixels, listPageInstagram, metaAuthUrl, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -114,6 +114,7 @@ export async function detail(auth, id) {
     errors,
     records: objects.map(liveRecord).filter(Boolean),
     linked: isLinked(connection, storedSecret),
+    tokenExpiresAt: storedSecret?.tokenExpiresAt || null,
     webhookPath: canManage && token ? `/api/hooks/${token}` : null,
     tool: connection.providerKey === 'nexcall' ? await nexcallTool(id, connection.mode) : null
   };
@@ -172,7 +173,12 @@ export async function ingestWebhook(token, body) {
 
 async function credentialPreview(connection) {
   const row = await repo.credential(connection.id);
-  const preview = keyPreview(readSecret(row?.ciphertext));
+  const secret = readSecret(row?.ciphertext);
+  const preview = keyPreview(secret);
+  if (connection.providerKey === 'meta_ads' && preview && secret?.oauth) {
+    const expires = secret.tokenExpiresAt ? ` The login expires on ${secret.tokenExpiresAt.slice(0, 10)}; connect again before then.` : '';
+    return `Signed in with Facebook. Sync reads campaigns, ads, and the last 30 days from Meta.${expires}`;
+  }
   if (connection.providerKey === 'whatsapp') {
     return 'The shared AIRO chatbot is connected on the platform. This workspace does not store a WhatsApp API key.';
   }
@@ -536,10 +542,76 @@ export async function updateMetaCampaignStatus(auth, req, id) {
   return synced;
 }
 
-const GOOGLE_BACK = '/app/connections?section=Advertising';
+const CONNECTIONS_BACK = '/app/connections?section=Advertising';
+const OAUTH = {
+  google_ads: { flag: 'google', label: 'Google' },
+  meta_ads: { flag: 'meta', label: 'Facebook' }
+};
 
-function googleStateSecret() {
-  return `${env.jwtSecret}:google_ads_oauth`;
+function oauthStateSecret(providerKey) {
+  return `${env.jwtSecret}:${providerKey}_oauth`;
+}
+
+function oauthStart(auth, providerKey, buildUrl) {
+  const state = jwt.sign(
+    { purpose: providerKey, organizationId: auth.organizationId, userId: auth.userId },
+    oauthStateSecret(providerKey),
+    { expiresIn: '10m' }
+  );
+  return { url: buildUrl(state) };
+}
+
+async function oauthCallback(req, providerKey, exchange) {
+  const { flag, label: name } = OAUTH[providerKey];
+  const fail = (message) => `${CONNECTIONS_BACK}&${flag}=error&reason=${encodeURIComponent(String(message || `${name} sign-in failed.`).slice(0, 200))}`;
+  let state;
+  try {
+    state = jwt.verify(String(req.query.state || ''), oauthStateSecret(providerKey));
+  } catch {
+    return fail(`${name} sign-in expired. Start again from Connections.`);
+  }
+  if (state.purpose !== providerKey || !state.organizationId) return fail(`${name} sign-in expired. Start again from Connections.`);
+  if (req.query.error) return fail(req.query.error === 'access_denied' ? `${name} access was not allowed.` : `${name} sign-in failed.`);
+  const code = String(req.query.code || '');
+  if (!code || code.length > 2048) return fail(`${name} sign-in failed.`);
+  try {
+    const pending = await exchange(code);
+    const provider = await repo.findProvider(providerKey);
+    if (!provider) return fail('This provider is not in the provider list.');
+    const existing = (await repo.list(state.organizationId)).find((item) => item.providerKey === providerKey);
+    const id = existing?.id || await repo.createConnection({
+      organizationId: state.organizationId,
+      providerId: provider.id,
+      status: 'pending',
+      accountLabel: provider.name
+    });
+    const previous = readSecret(existing?.ciphertext) || {};
+    await repo.saveCredential(id, encryptJson({
+      ...previous,
+      provider: providerKey,
+      pendingToken: pending.token,
+      pendingExpiresAt: pending.expiresAt || null
+    }));
+    if (existing?.status === 'disconnected') await repo.setStatus(state.organizationId, id, 'pending');
+    await recordAudit({ ip: req.ip, auth: { userId: state.userId } }, {
+      action: `connection.${flag}_authorized`,
+      resource: 'connection',
+      resourceId: id,
+      organizationId: state.organizationId
+    });
+    return `${CONNECTIONS_BACK}&${flag}=pick`;
+  } catch (error) {
+    return fail(error.message);
+  }
+}
+
+async function oauthRow(auth, providerKey) {
+  const row = (await repo.list(auth.organizationId)).find((item) => item.providerKey === providerKey);
+  const secret = row ? readSecret(row.ciphertext) || {} : {};
+  const token = secret.pendingToken || secret.apiKey;
+  if (!row || !token) throw new ApiError(422, `Sign in with ${OAUTH[providerKey].label} first.`, 'validation_error');
+  const fresh = Boolean(secret.pendingToken);
+  return { id: row.id, token, expiresAt: fresh ? secret.pendingExpiresAt || null : secret.tokenExpiresAt || null, oauth: fresh || Boolean(secret.oauth) };
 }
 
 function googleInput(secret) {
@@ -549,12 +621,6 @@ function googleInput(secret) {
     loginCustomerId: secret.loginCustomerId || '',
     currency: secret.currency || ''
   };
-}
-
-async function googleRow(auth) {
-  const row = (await repo.list(auth.organizationId)).find((item) => item.providerKey === 'google_ads');
-  if (!row) throw new ApiError(422, 'Sign in with Google first.', 'validation_error');
-  return { id: row.id, secret: readSecret(row.ciphertext) || {} };
 }
 
 async function googleSecret(auth, id) {
@@ -576,63 +642,63 @@ async function syncWithNotice(auth, req, id, done) {
 }
 
 export function googleStart(auth) {
-  const state = jwt.sign(
-    { purpose: 'google_ads', organizationId: auth.organizationId, userId: auth.userId },
-    googleStateSecret(),
-    { expiresIn: '10m' }
-  );
-  return { url: googleAuthUrl(state) };
+  return oauthStart(auth, 'google_ads', googleAuthUrl);
 }
 
-export async function googleCallback(req) {
-  const fail = (message) => `${GOOGLE_BACK}&google=error&reason=${encodeURIComponent(String(message || 'Google sign-in failed.').slice(0, 200))}`;
-  let state;
-  try {
-    state = jwt.verify(String(req.query.state || ''), googleStateSecret());
-  } catch {
-    return fail('Google sign-in expired. Start again from Connections.');
-  }
-  if (state.purpose !== 'google_ads' || !state.organizationId) return fail('Google sign-in expired. Start again from Connections.');
-  if (req.query.error) return fail(req.query.error === 'access_denied' ? 'Google access was not allowed.' : 'Google sign-in failed.');
-  const code = String(req.query.code || '');
-  if (!code || code.length > 1024) return fail('Google sign-in failed.');
-  try {
-    const refreshToken = await exchangeGoogleCode(code);
-    const provider = await repo.findProvider('google_ads');
-    if (!provider) return fail('Google Ads is not in the provider list.');
-    const existing = (await repo.list(state.organizationId)).find((item) => item.providerKey === 'google_ads');
-    const id = existing?.id || await repo.createConnection({
-      organizationId: state.organizationId,
-      providerId: provider.id,
-      status: 'pending',
-      accountLabel: provider.name
-    });
-    const previous = readSecret(existing?.ciphertext) || {};
-    await repo.saveCredential(id, encryptJson({ ...previous, provider: 'google_ads', pendingToken: refreshToken }));
-    if (existing?.status === 'disconnected') await repo.setStatus(state.organizationId, id, 'pending');
-    await recordAudit({ ip: req.ip, auth: { userId: state.userId } }, {
-      action: 'connection.google_authorized',
-      resource: 'connection',
-      resourceId: id,
-      organizationId: state.organizationId
-    });
-    return `${GOOGLE_BACK}&google=pick`;
-  } catch (error) {
-    return fail(error.message);
-  }
+export function googleCallback(req) {
+  return oauthCallback(req, 'google_ads', async (code) => ({ token: await exchangeGoogleCode(code) }));
 }
 
 export async function googleAccounts(auth) {
-  const { secret } = await googleRow(auth);
-  const refreshToken = secret.pendingToken || secret.apiKey;
-  if (!refreshToken) throw new ApiError(422, 'Sign in with Google first.', 'validation_error');
-  return listGoogleAccounts({ refreshToken });
+  const { token } = await oauthRow(auth, 'google_ads');
+  return listGoogleAccounts({ refreshToken: token });
+}
+
+export function metaStart(auth) {
+  return oauthStart(auth, 'meta_ads', metaAuthUrl);
+}
+
+export function metaCallback(req) {
+  return oauthCallback(req, 'meta_ads', exchangeMetaCode);
+}
+
+export async function metaAccounts(auth) {
+  const { token } = await oauthRow(auth, 'meta_ads');
+  const accounts = await listMetaAdAccounts({ apiKey: token });
+  return { accounts, note: accounts.length ? '' : 'Facebook returned no ad accounts for this login. Give this login access to the ad account in Meta Business Settings.' };
+}
+
+export async function chooseMetaAccount(auth, req) {
+  const { id, token, expiresAt, oauth } = await oauthRow(auth, 'meta_ads');
+  const wanted = `act_${req.body.accountId.replace(/^act_/i, '')}`;
+  const chosen = (await listMetaAdAccounts({ apiKey: token })).find((account) => account.id === wanted);
+  if (!chosen) throw new ApiError(422, 'This Facebook login cannot open that ad account.', 'validation_error');
+  await verifyMetaAccount({ apiKey: token, accountId: chosen.id });
+  await repo.saveCredential(id, encryptJson({
+    mode: 'live',
+    provider: 'meta_ads',
+    apiKey: token,
+    accountId: chosen.id,
+    oauth,
+    tokenExpiresAt: expiresAt,
+    verified: true
+  }));
+  await repo.setAccountLabel(auth.organizationId, id, chosen.name);
+  await repo.setMode(auth.organizationId, id, 'live');
+  await repo.setStatus(auth.organizationId, id, 'connected');
+  await recordAudit(req, { action: 'connection.credential_saved', resource: 'connection', resourceId: id, metadata: { provider: 'meta_ads' } });
+  const synced = await sync(auth, req, id);
+  const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
+  const campaigns = (synced.records || []).filter((row) => row.type === 'campaign').length;
+  synced.notice = failed
+    ? `Meta Ads is connected. Sync failed: ${failed}`
+    : (campaigns ? `Meta Ads is connected. ${campaigns} campaigns came back from Meta.` : 'Meta Ads is connected. Meta returned no campaigns.');
+  synced.linked = true;
+  return synced;
 }
 
 export async function chooseGoogleAccount(auth, req) {
-  const { id, secret } = await googleRow(auth);
-  const refreshToken = secret.pendingToken || secret.apiKey;
-  if (!refreshToken) throw new ApiError(422, 'Sign in with Google first.', 'validation_error');
+  const { id, token: refreshToken } = await oauthRow(auth, 'google_ads');
   const wanted = req.body.customerId.replace(/-/g, '');
   const listed = await listGoogleAccounts({ refreshToken });
   const chosen = listed.accounts.find((account) => account.id === wanted);

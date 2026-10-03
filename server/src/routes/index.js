@@ -50,6 +50,10 @@ router.get('/google-ads/callback', asyncHandler(async (req, res) => {
   res.redirect(302, await connections.googleCallback(req));
 }));
 
+router.get('/meta-ads/callback', asyncHandler(async (req, res) => {
+  res.redirect(302, await connections.metaCallback(req));
+}));
+
 router.post('/hooks/:token', asyncHandler(async (req, res) => {
   ok(res, await connections.ingestWebhook(req.params.token, req.body));
 }));
@@ -181,6 +185,15 @@ client.post('/connections/:id/meta/edit', requirePermission('connections.manage'
 }));
 client.post('/connections/:id/meta/status', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaStatusSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.updateMetaCampaignStatus(req.auth, req, req.params.id));
+}));
+client.post('/connections/meta/start', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
+  ok(res, connections.metaStart(req.auth));
+}));
+client.get('/connections/meta/accounts', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
+  ok(res, await connections.metaAccounts(req.auth));
+}));
+client.post('/connections/meta/account', requirePermission('connections.manage'), validate(schemas.metaAccountSchema), asyncHandler(async (req, res) => {
+  ok(res, await connections.chooseMetaAccount(req.auth, req));
 }));
 client.post('/connections/google/start', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
   ok(res, connections.googleStart(req.auth));

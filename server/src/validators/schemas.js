@@ -146,6 +146,10 @@ const googleId = z.string().regex(/^\d{1,20}$/);
 const googleDay = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal('')]).optional();
 const googleStatus = z.enum(['ENABLED', 'PAUSED']);
 
+export const metaAccountSchema = body({
+  accountId: z.string().regex(/^(act_)?\d{5,20}$/i)
+});
+
 export const googleAccountSchema = body({
   customerId: z.string().regex(/^\d{3}-?\d{3}-?\d{4}$/)
 });

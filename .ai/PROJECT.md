@@ -80,11 +80,12 @@ Permissions are keyed strings (e.g. `leads.view`, `platform_ai.manage`) stored i
 | --- | --- | --- |
 | Meta Graph / Marketing API (v21.0) | `server/src/integrations/metaAds.js` | Verify account, pull campaigns/ad sets/ads/insights, list Pages/pixels/Instagram, audience search, Ad Library search, create campaign/ad set/creative/ad, change status. |
 | Meta webhooks | `server/src/services/metaWebhookService.js` | `/api/meta/webhook`. |
+| Google Ads API (REST, `GOOGLE_ADS_API_VERSION`, default v25) + Google OAuth | `server/src/integrations/googleAds.js` | OAuth sign-in (scope `adwords`), list accessible accounts (incl. via manager), pull campaigns/ad groups/ads/keywords + 30-day metrics, live report (daily, campaigns, keywords, search terms), location/language search, keyword ideas, create Search campaign (paused), edit name/budget, enable/pause. Needs `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`. |
 | WhatsApp Cloud API (Graph) | `server/src/services/whatsappService.js` | Shared platform chatbot: webhook receive, send text, download inbound media. |
 | Nexcall / W-Caller external API | `server/src/integrations/nexcall.js` | Read-only, `x-api-key`; leads, calls, call report, follow-ups. |
 | OpenAI, Anthropic, Google Gemini | `server/src/integrations/llm.js` | List models, chat replies. One model per purpose (`server/src/domain/llmPurposes.js`). |
 | Google, LinkedIn, HubSpot, Salesforce token checks | `server/src/integrations/verify.js` | Key verification only. |
-| Other providers (Google Ads, portals, CRMs, analytics…) | `server/src/integrations/adapters.js` | **Development adapters only** — they return fixed sample objects and call no live API. |
+| Other providers (portals, CRMs, analytics…) | `server/src/integrations/adapters.js` | **Development adapters only** — they return fixed sample objects and call no live API. |
 
 ## Storage
 

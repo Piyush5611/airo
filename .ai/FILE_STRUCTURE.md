@@ -5,7 +5,7 @@
 Ignored directories: .cache, .cursor, .git, .idea, .next, .nuxt, .output, .parcel-cache, .shots, .svelte-kit, .turbo, .vite, .vscode, __pycache__, build, cache, coverage, dist, node_modules, out, temp, tmp.
 File names are listed only. File contents (including any `.env`) are never read.
 
-Directories: 20. Files: 101.
+Directories: 20. Files: 102.
 
 ```text
 airo3/
@@ -73,6 +73,7 @@ airo3/
 │   │   │   └── providers.js
 │   │   ├── integrations/
 │   │   │   ├── adapters.js
+│   │   │   ├── googleAds.js
 │   │   │   ├── llm.js
 │   │   │   ├── metaAds.js
 │   │   │   ├── nexcall.js

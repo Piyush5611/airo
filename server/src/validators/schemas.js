@@ -142,6 +142,57 @@ export const metaAdSchema = body({
   cta: z.enum(['LEARN_MORE', 'SIGN_UP', 'CONTACT_US', 'MESSAGE_PAGE', 'SHOP_NOW']).optional()
 });
 
+const googleId = z.string().regex(/^\d{1,20}$/);
+const googleDay = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal('')]).optional();
+const googleStatus = z.enum(['ENABLED', 'PAUSED']);
+
+export const googleAccountSchema = body({
+  customerId: z.string().regex(/^\d{3}-?\d{3}-?\d{4}$/)
+});
+
+export const googleStatusSchema = body({
+  campaignId: googleId,
+  status: googleStatus
+});
+
+export const googleEditSchema = body({
+  campaignId: googleId,
+  name: z.string().min(2).max(180),
+  dailyBudget: z.number().positive().max(100000000).optional(),
+  status: googleStatus
+});
+
+export const googleIdeasSchema = body({
+  seeds: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
+  url: z.union([z.string().url().max(500), z.literal('')]).optional(),
+  locations: z.array(googleId).max(10).optional(),
+  languageId: z.union([googleId, z.literal('')]).optional()
+});
+
+export const googleCampaignSchema = body({
+  name: z.string().trim().min(2).max(180),
+  dailyBudget: z.number().min(1).max(100000000),
+  bidding: z.enum(['MAXIMIZE_CLICKS', 'MAXIMIZE_CONVERSIONS', 'MANUAL_CPC']),
+  cpcBid: z.number().positive().max(100000).optional(),
+  searchPartners: z.boolean().optional(),
+  presenceOnly: z.boolean().optional(),
+  locations: z.array(z.object({ id: googleId, name: z.string().max(120).optional() })).max(20).optional(),
+  languages: z.array(z.object({ id: googleId, name: z.string().max(80).optional() })).max(10).optional(),
+  keywords: z.array(z.object({
+    text: z.string().trim().min(1).max(80),
+    matchType: z.enum(['BROAD', 'PHRASE', 'EXACT'])
+  })).min(1).max(50),
+  negatives: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
+  finalUrl: z.string().url().max(500),
+  headlines: z.array(z.string().trim().min(1).max(30)).min(3).max(15),
+  descriptions: z.array(z.string().trim().min(1).max(90)).min(2).max(4),
+  path1: z.string().trim().max(15).optional(),
+  path2: z.string().trim().max(15).optional(),
+  startDate: googleDay,
+  endDate: googleDay,
+  publish: z.boolean().optional()
+});
+
 export const configSchema = body({
   mapping: z.record(z.string(), z.any()).optional(),
   sync: z.record(z.string(), z.any()).optional()

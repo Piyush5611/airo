@@ -27,6 +27,7 @@ Legend for the Auth column: **Public** = no auth; **User** = any authenticated u
 | POST | `/api/whatsapp/webhook` | Public | Inbound WhatsApp messages; triggers async bot reply | `whatsappService.receiveWebhook` |
 | GET | `/api/meta/webhook` | Public (`META_VERIFY_TOKEN`) | Meta webhook verification | `metaWebhookService.verifyWebhook` |
 | POST | `/api/meta/webhook` | Public | Meta ad-account change events → `integration_objects` | `metaWebhookService.receiveWebhook` |
+| GET | `/api/google-ads/callback` | Public (signed `state`, 10 min) | Google OAuth redirect. Stores the refresh token as `pendingToken`, then redirects to `/app/connections?section=Advertising&google=pick` (or `google=error&reason=`) | `connectionService.googleCallback` |
 | POST | `/api/hooks/:token` | Public (per-connection token) | Generic inbound webhook for a connection | `connectionService.ingestWebhook` |
 
 ## Auth — `/api/auth`
@@ -121,6 +122,16 @@ Middleware for all: `authenticate`, `requireRealm('client')`, `blockSupportWrite
 | POST | `/api/connections/:id/meta/ads` | `connections.manage` | `idParams` + `metaAdSchema` (image base64 ≤4 MB string, targeting, budget, conversion, publish…) | `publishMetaAd` (201) |
 | POST | `/api/connections/:id/meta/edit` | `connections.manage` | `idParams` + `metaEditSchema` | `editMetaAdCampaign` |
 | POST | `/api/connections/:id/meta/status` | `connections.manage` | `idParams` + `metaStatusSchema` | `updateMetaCampaignStatus` |
+| POST | `/api/connections/google/start` | `connections.manage` | — | `googleStart` → `{ url }` (Google consent screen) |
+| GET | `/api/connections/google/accounts` | `connections.manage` | — | `googleAccounts` → `{ accounts, note }` |
+| POST | `/api/connections/google/account` | `connections.manage` | `googleAccountSchema` | `chooseGoogleAccount` (verifies, saves, syncs) |
+| GET | `/api/connections/:id/google/locations?q=` | `connections.manage` | `idParams` | `googleLocations` |
+| GET | `/api/connections/:id/google/languages?q=` | `connections.manage` | `idParams` | `googleLanguages` |
+| POST | `/api/connections/:id/google/ideas` | `connections.manage` | `idParams` + `googleIdeasSchema` | `googleIdeas` → `{ ideas }` |
+| GET | `/api/connections/:id/google/report?range=` | `connections.view` | `idParams` (range checked in integration) | `googleReportFor` (live, not stored) |
+| POST | `/api/connections/:id/google/campaigns` | `connections.manage` | `idParams` + `googleCampaignSchema` | `createGoogleCampaign` (201) |
+| POST | `/api/connections/:id/google/edit` | `connections.manage` | `idParams` + `googleEditSchema` | `editGoogleAdCampaign` |
+| POST | `/api/connections/:id/google/status` | `connections.manage` | `idParams` + `googleStatusSchema` | `updateGoogleCampaignStatus` |
 | POST | `/api/connections/:id/disconnect` | `connections.manage` | `idParams` | `disconnect` |
 
 ### Workspace and WhatsApp (client)

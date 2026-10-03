@@ -46,6 +46,10 @@ router.post('/meta/webhook', asyncHandler(async (req, res) => {
   res.sendStatus(200);
 }));
 
+router.get('/google-ads/callback', asyncHandler(async (req, res) => {
+  res.redirect(302, await connections.googleCallback(req));
+}));
+
 router.post('/hooks/:token', asyncHandler(async (req, res) => {
   ok(res, await connections.ingestWebhook(req.params.token, req.body));
 }));
@@ -177,6 +181,36 @@ client.post('/connections/:id/meta/edit', requirePermission('connections.manage'
 }));
 client.post('/connections/:id/meta/status', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaStatusSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.updateMetaCampaignStatus(req.auth, req, req.params.id));
+}));
+client.post('/connections/google/start', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
+  ok(res, connections.googleStart(req.auth));
+}));
+client.get('/connections/google/accounts', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
+  ok(res, await connections.googleAccounts(req.auth));
+}));
+client.post('/connections/google/account', requirePermission('connections.manage'), validate(schemas.googleAccountSchema), asyncHandler(async (req, res) => {
+  ok(res, await connections.chooseGoogleAccount(req.auth, req));
+}));
+client.get('/connections/:id/google/locations', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.googleLocations(req.auth, req.params.id, req.query.q));
+}));
+client.get('/connections/:id/google/languages', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.googleLanguages(req.auth, req.params.id, req.query.q));
+}));
+client.post('/connections/:id/google/ideas', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.googleIdeasSchema)), asyncHandler(async (req, res) => {
+  ok(res, await connections.googleIdeas(req.auth, req, req.params.id));
+}));
+client.get('/connections/:id/google/report', requirePermission('connections.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.googleReportFor(req.auth, req.params.id, String(req.query.range || 'LAST_30_DAYS')));
+}));
+client.post('/connections/:id/google/campaigns', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.googleCampaignSchema)), asyncHandler(async (req, res) => {
+  ok(res, await connections.createGoogleCampaign(req.auth, req, req.params.id), 201);
+}));
+client.post('/connections/:id/google/edit', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.googleEditSchema)), asyncHandler(async (req, res) => {
+  ok(res, await connections.editGoogleAdCampaign(req.auth, req, req.params.id));
+}));
+client.post('/connections/:id/google/status', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.googleStatusSchema)), asyncHandler(async (req, res) => {
+  ok(res, await connections.updateGoogleCampaignStatus(req.auth, req, req.params.id));
 }));
 client.post('/connections/:id/disconnect', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.disconnect(req.auth, req, req.params.id));

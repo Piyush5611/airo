@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { inr, label, num, when } from '../format.js';
-import { Badge, Page, State, Subnav, Table, useSection } from '../ui.jsx';
+import { Badge, LineChart, Page, State, Subnav, Table, useSection } from '../ui.jsx';
 
 const CONNECTION_SECTIONS = ['Advertising', 'Real Estate Portals', 'Communication', 'Calling', 'CRM', 'Analytics', 'Developer / API'];
 const CATEGORY_KEY = {
@@ -23,12 +23,36 @@ export function Connections() {
   const [message, setMessage] = useState('');
   const [form, setForm] = useState(null);
   const [section, setSection] = useSection(CONNECTION_SECTIONS);
+  const [params, setParams] = useSearchParams();
+  const googleStep = params.get('google');
+  const googleReason = params.get('reason');
+
+  function clearGoogle() {
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete('google');
+      next.delete('reason');
+      return next;
+    }, { replace: true });
+  }
 
   return (
     <Page eyebrow="Connections" title="Connections" lede="Open a tool to see only the records its API or webhook has sent. Sample rows are not shown.">
       <Subnav items={CONNECTION_SECTIONS} value={section} onChange={(next) => { setSection(next); setForm(null); }} />
       <State loading={loading} error={error} onRetry={reload}>
         {message ? <p>{message}</p> : null}
+        {googleStep === 'error' ? <p className="delta-down">{googleReason || 'Google sign-in failed.'}</p> : null}
+        {googleStep === 'pick' && can('connections.manage') ? (
+          <GoogleAccountPicker
+            onCancel={clearGoogle}
+            onDone={(notice, connectionId) => {
+              clearGoogle();
+              setMessage(notice);
+              window.dispatchEvent(new Event('airo:connections'));
+              if (connectionId) navigate(`/app/connections/${connectionId}`); else reload();
+            }}
+          />
+        ) : null}
         <div className="stack">
           {data?.categories.filter((category) => category.key === CATEGORY_KEY[section]).map((category) => (
             <section className="panel" key={category.key}>
@@ -75,6 +99,10 @@ function ProviderApiForm({ provider, onDone }) {
     );
   }
 
+  if (provider.providerKey === 'google_ads') {
+    return <GoogleConnect linked={Boolean(provider.connection?.linked)} />;
+  }
+
   async function save(event) {
     event.preventDefault();
     setBusy(true);
@@ -114,6 +142,99 @@ function ProviderApiForm({ provider, onDone }) {
         </label>
       )}
       <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Checking' : 'Save API key'}</button>
+      {error ? <p className="delta-down">{error}</p> : null}
+    </form>
+  );
+}
+
+function customerLabel(id) {
+  const raw = String(id || '');
+  return raw.length === 10 ? `${raw.slice(0, 3)}-${raw.slice(3, 6)}-${raw.slice(6)}` : raw;
+}
+
+function GoogleConnect({ linked }) {
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function start() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await api.post('/api/connections/google/start', {});
+      window.location.assign(result.url);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel form-grid">
+      <h2>{linked ? 'Change Google Ads account' : 'Connect Google Ads'}</h2>
+      <p className="quiet">Sign in with the Google account that can open your Google Ads account. Google asks you to allow AIRO, then you pick the ad account here.</p>
+      <button className="btn-primary" type="button" disabled={busy} onClick={start}>{busy ? 'Opening Google' : 'Connect with Google'}</button>
+      {error ? <p className="delta-down">{error}</p> : null}
+    </section>
+  );
+}
+
+function GoogleAccountPicker({ onDone, onCancel }) {
+  const [loading, setLoading] = useState(true);
+  const [accounts, setAccounts] = useState([]);
+  const [note, setNote] = useState('');
+  const [choice, setChoice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    api.get('/api/connections/google/accounts')
+      .then((result) => {
+        if (!active) return;
+        const rows = result?.accounts || [];
+        setAccounts(rows);
+        setNote(result?.note || '');
+        setChoice(rows[0]?.id || '');
+      })
+      .catch((err) => { if (active) setNote(err.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function save(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const saved = await api.post('/api/connections/google/account', { customerId: choice });
+      onDone(saved.notice, saved.linked ? saved.id : null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="panel form-grid" onSubmit={save}>
+      <h2>Choose the Google Ads account</h2>
+      {loading ? <p className="quiet">Reading the accounts this Google login can open…</p> : null}
+      {!loading && accounts.length ? (
+        <label className="stack-field">Ad account
+          <select value={choice} onChange={(event) => setChoice(event.target.value)}>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name} · {customerLabel(account.id)}{account.currency ? ` · ${account.currency}` : ''}{account.manager ? ` · via ${account.manager}` : ''}{account.test ? ' · test' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {!loading && !accounts.length ? <p className="delta-down">{note || 'Google returned no ad accounts for this login.'}</p> : null}
+      <div className="page-actions">
+        <button className="btn" type="button" onClick={onCancel}>Cancel</button>
+        <button className="btn-primary" type="submit" disabled={busy || !choice}>{busy ? 'Checking' : 'Connect this account'}</button>
+      </div>
       {error ? <p className="delta-down">{error}</p> : null}
     </form>
   );
@@ -897,13 +1018,635 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   );
 }
 
+const GOOGLE_RANGES = [
+  ['LAST_7_DAYS', 'Last 7 days'],
+  ['LAST_14_DAYS', 'Last 14 days'],
+  ['LAST_30_DAYS', 'Last 30 days'],
+  ['THIS_MONTH', 'This month'],
+  ['LAST_MONTH', 'Last month']
+];
+
+function lines(text) {
+  return String(text || '').split('\n').map((item) => item.trim()).filter(Boolean);
+}
+
+function countCell(value) {
+  return value == null || value === '' ? '—' : num(value);
+}
+
+function googleStatus(value) {
+  const status = String(value || '').toLowerCase();
+  return status === 'enabled' ? 'active' : status;
+}
+
+function GoogleAdsManager({ id, data, canManage, reload }) {
+  const records = (data.records || []).filter((row) => row.origin === 'api');
+  const campaigns = records.filter((row) => row.type === 'campaign');
+  const adGroups = records.filter((row) => row.type === 'ad_group');
+  const ads = records.filter((row) => row.type === 'ad');
+  const keywordRows = records.filter((row) => row.type === 'keyword');
+  const currency = campaigns.find((row) => row.fields?.currency)?.fields.currency || 'INR';
+  const failed = data.jobs?.[0]?.status === 'failed' ? data.jobs[0].summary : '';
+  const campaignName = new Map(campaigns.map((row) => [row.externalId, row.name]));
+  const groupCampaign = new Map(adGroups.map((row) => [row.externalId, campaignName.get(row.parent) || '—']));
+  const groupName = new Map(adGroups.map((row) => [row.externalId, row.name]));
+  const steps = ['Campaign', 'Targeting', 'Keywords', 'Ad', 'Review'];
+  const [view, setView] = useState('Campaigns');
+  const [step, setStep] = useState(0);
+  const [name, setName] = useState('');
+  const [bidding, setBidding] = useState('MAXIMIZE_CLICKS');
+  const [cpcBid, setCpcBid] = useState('');
+  const [dailyBudget, setDailyBudget] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [searchPartners, setSearchPartners] = useState(false);
+  const [presenceOnly, setPresenceOnly] = useState(false);
+  const [locations, setLocations] = useState([]);
+  const [locationQuery, setLocationQuery] = useState('');
+  const [locationHits, setLocationHits] = useState([]);
+  const [locationNote, setLocationNote] = useState('');
+  const [languages, setLanguages] = useState([]);
+  const [languageQuery, setLanguageQuery] = useState('');
+  const [languageHits, setLanguageHits] = useState([]);
+  const [keywordText, setKeywordText] = useState('');
+  const [matchType, setMatchType] = useState('BROAD');
+  const [negativeText, setNegativeText] = useState('');
+  const [ideas, setIdeas] = useState([]);
+  const [ideaNote, setIdeaNote] = useState('');
+  const [finalUrl, setFinalUrl] = useState('');
+  const [headlines, setHeadlines] = useState(['', '', '', '', '']);
+  const [descriptions, setDescriptions] = useState(['', '']);
+  const [path1, setPath1] = useState('');
+  const [path2, setPath2] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [range, setRange] = useState('LAST_30_DAYS');
+  const [report, setReport] = useState(null);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState('');
+  const [chartField, setChartField] = useState('spend');
+  const publishMode = useRef(false);
+
+  const keywordList = lines(keywordText);
+  const negativeList = lines(negativeText);
+  const filledHeadlines = headlines.map((item) => item.trim()).filter(Boolean);
+  const filledDescriptions = descriptions.map((item) => item.trim()).filter(Boolean);
+
+  useEffect(() => {
+    if (!canManage || locationQuery.trim().length < 2) {
+      setLocationHits([]);
+      setLocationNote('');
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setLocationNote('Searching…');
+      api.get(`/api/connections/${id}/google/locations?q=${encodeURIComponent(locationQuery.trim())}`)
+        .then((result) => {
+          const rows = result?.results || [];
+          setLocationHits(rows);
+          setLocationNote(rows.length ? '' : (result?.note || 'No location found.'));
+        })
+        .catch((err) => { setLocationHits([]); setLocationNote(err.message); });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [id, canManage, locationQuery]);
+
+  useEffect(() => {
+    if (!canManage || languageQuery.trim().length < 2) {
+      setLanguageHits([]);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      api.get(`/api/connections/${id}/google/languages?q=${encodeURIComponent(languageQuery.trim())}`)
+        .then((result) => setLanguageHits(result?.results || []))
+        .catch(() => setLanguageHits([]));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [id, canManage, languageQuery]);
+
+  useEffect(() => {
+    if (view !== 'Report') return undefined;
+    let active = true;
+    setReportBusy(true);
+    setReportError('');
+    api.get(`/api/connections/${id}/google/report?range=${range}`)
+      .then((result) => { if (active) setReport(result); })
+      .catch((err) => { if (active) { setReport(null); setReportError(err.message); } })
+      .finally(() => { if (active) setReportBusy(false); });
+    return () => { active = false; };
+  }, [id, view, range]);
+
+  async function loadIdeas() {
+    setIdeaNote('Asking Google…');
+    setIdeas([]);
+    try {
+      const seeds = keywordList.length ? keywordList.slice(0, 10) : lines(name.replace(/[^\p{L}\p{N} ]/gu, ' ')).slice(0, 1);
+      const result = await api.post(`/api/connections/${id}/google/ideas`, {
+        seeds,
+        url: /^https?:\/\//i.test(finalUrl.trim()) ? finalUrl.trim() : '',
+        locations: locations.map((item) => item.id),
+        languageId: languages[0]?.id || ''
+      });
+      const rows = result?.ideas || [];
+      setIdeas(rows);
+      setIdeaNote(rows.length ? '' : 'Google returned no keyword ideas.');
+    } catch (err) {
+      setIdeaNote(err.message);
+    }
+  }
+
+  function addKeyword(text) {
+    if (keywordList.some((item) => item.toLowerCase() === text.toLowerCase())) return;
+    setKeywordText((current) => (current.trim() ? `${current.trim()}\n${text}` : text));
+  }
+
+  function check(target) {
+    if (target >= 1) {
+      if (name.trim().length < 2) return 'Enter a campaign name.';
+      if (!(Number(dailyBudget) >= 1)) return 'Enter a daily budget.';
+      if (bidding === 'MANUAL_CPC' && !(Number(cpcBid) > 0)) return 'Manual CPC needs a max CPC bid.';
+      if (startDate && endDate && endDate < startDate) return 'The end date must be after the start date.';
+    }
+    if (target >= 3) {
+      if (!keywordList.length) return 'Add at least one keyword.';
+      if (keywordList.length > 50) return 'Use 50 keywords or fewer.';
+      if (keywordList.some((item) => item.length > 80)) return 'Each keyword must be 80 characters or fewer.';
+    }
+    if (target >= 4) {
+      if (!/^https?:\/\//i.test(finalUrl.trim())) return 'Enter the website link, starting with https.';
+      if (filledHeadlines.length < 3) return 'Write at least 3 headlines.';
+      if (filledDescriptions.length < 2) return 'Write at least 2 descriptions.';
+    }
+    return '';
+  }
+
+  function nextStep() {
+    const problem = check(step + 1);
+    if (problem) { setError(problem); return; }
+    setError('');
+    setStep((current) => Math.min(current + 1, steps.length - 1));
+  }
+
+  async function createCampaign(event) {
+    event.preventDefault();
+    if (step < steps.length - 1) { nextStep(); return; }
+    const problem = check(steps.length - 1);
+    if (problem) { setError(problem); return; }
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const saved = await api.post(`/api/connections/${id}/google/campaigns`, {
+        name: name.trim(),
+        dailyBudget: Number(dailyBudget),
+        bidding,
+        cpcBid: bidding === 'MANUAL_CPC' ? Number(cpcBid) : undefined,
+        searchPartners,
+        presenceOnly,
+        locations,
+        languages,
+        keywords: keywordList.map((text) => ({ text, matchType })),
+        negatives: negativeList,
+        finalUrl: finalUrl.trim(),
+        headlines: filledHeadlines,
+        descriptions: filledDescriptions,
+        path1: path1.trim() || undefined,
+        path2: path2.trim() || undefined,
+        startDate,
+        endDate,
+        publish: publishMode.current
+      });
+      setName('');
+      setDailyBudget('');
+      setCpcBid('');
+      setKeywordText('');
+      setNegativeText('');
+      setIdeas([]);
+      setFinalUrl('');
+      setHeadlines(['', '', '', '', '']);
+      setDescriptions(['', '']);
+      setPath1('');
+      setPath2('');
+      setStep(0);
+      setNotice(saved?.notice || 'Campaign saved on Google Ads.');
+      reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const saved = await api.post(`/api/connections/${id}/google/edit`, {
+        campaignId: editing.id,
+        name: editing.name,
+        dailyBudget: Number(editing.budget) >= 1 ? Number(editing.budget) : undefined,
+        status: editing.status
+      });
+      setEditing(null);
+      setNotice(saved?.notice || 'Campaign updated in Google Ads.');
+      reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setCampaignStatus(campaignId, status) {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const saved = await api.post(`/api/connections/${id}/google/status`, { campaignId, status });
+      setNotice(saved?.notice || 'Campaign updated in Google Ads.');
+      reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  let host = 'your-site.com';
+  try { if (finalUrl.trim()) host = new URL(finalUrl.trim()).hostname.replace(/^www\./, ''); } catch { host = 'your-site.com'; }
+  const displayPath = [host, path1.trim(), path1.trim() ? path2.trim() : ''].filter(Boolean).join('/');
+  const preview = (
+    <aside className="search-preview">
+      <p>Preview</p>
+      <small>Sponsored · {displayPath}</small>
+      <b>{filledHeadlines.slice(0, 3).join(' | ') || 'Headline 1 | Headline 2 | Headline 3'}</b>
+      <span>{filledDescriptions.slice(0, 2).join(' ') || 'Description 1. Description 2.'}</span>
+    </aside>
+  );
+  const biddingName = { MAXIMIZE_CLICKS: 'Maximize clicks', MAXIMIZE_CONVERSIONS: 'Maximize conversions', MANUAL_CPC: 'Manual CPC' };
+  const daily = report?.daily || [];
+  const reportTotal = (key) => (daily.length ? daily.reduce((sum, row) => sum + Number(row[key] || 0), 0) : null);
+  const tabs = ['Campaigns', 'Ad groups', 'Keywords', 'Ads', 'Report'];
+
+  return (
+    <div className="stack">
+      {failed ? <p className="delta-down">{failed}</p> : data.jobs?.[0]?.summary ? <p className="quiet">{data.jobs[0].summary}</p> : null}
+      {notice ? <p>{notice}</p> : null}
+      {error ? <p className="delta-down">{error}</p> : null}
+      <div className="metric-strip">
+        <div className="metric"><span>Spend, 30 days</span><strong>{money(total(campaigns, 'spend'), currency)}</strong></div>
+        <div className="metric"><span>Impressions</span><strong>{total(campaigns, 'impressions') == null ? '—' : num(total(campaigns, 'impressions'))}</strong></div>
+        <div className="metric"><span>Clicks</span><strong>{total(campaigns, 'clicks') == null ? '—' : num(total(campaigns, 'clicks'))}</strong></div>
+        <div className="metric"><span>Conversions</span><strong>{total(campaigns, 'conversions') == null ? '—' : num(total(campaigns, 'conversions'))}</strong></div>
+      </div>
+      {canManage ? (
+        <form className="form-grid panel" onSubmit={createCampaign}>
+          <h2>Create Search campaign</h2>
+          <div className="ad-steps" aria-label="Campaign steps">
+            {steps.map((item, index) => (
+              <span key={item} className={index === step ? 'is-on' : index < step ? 'is-done' : ''}>
+                <b>{index + 1}</b>{item}
+              </span>
+            ))}
+          </div>
+          {step === 0 ? (
+            <>
+              <label className="stack-field">Campaign name
+                <input value={name} onChange={(event) => setName(event.target.value)} maxLength={180} />
+              </label>
+              <label className="stack-field">Daily budget ({currency})
+                <input type="number" min="1" step="1" value={dailyBudget} onChange={(event) => setDailyBudget(event.target.value)} />
+              </label>
+              <label className="stack-field">Bidding
+                <select value={bidding} onChange={(event) => setBidding(event.target.value)}>
+                  <option value="MAXIMIZE_CLICKS">Maximize clicks</option>
+                  <option value="MAXIMIZE_CONVERSIONS">Maximize conversions (needs conversion tracking)</option>
+                  <option value="MANUAL_CPC">Manual CPC</option>
+                </select>
+              </label>
+              {bidding === 'MANUAL_CPC' ? (
+                <label className="stack-field">Max CPC bid ({currency})
+                  <input type="number" min="0.01" step="0.01" value={cpcBid} onChange={(event) => setCpcBid(event.target.value)} />
+                </label>
+              ) : null}
+              <label className="stack-field">Start date
+                <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+              </label>
+              <label className="stack-field">End date
+                <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+              </label>
+              <Switch checked={searchPartners} onChange={setSearchPartners} label="Google search partners" hint="Also show ads on partner search sites." />
+            </>
+          ) : null}
+          {step === 1 ? (
+            <>
+              <label className="stack-field">Locations
+                <input value={locationQuery} onChange={(event) => setLocationQuery(event.target.value)} placeholder="Search a city or area, e.g. Pune, Noida" />
+              </label>
+              {locationHits.length ? (
+                <ul className="pick-results">
+                  {locationHits.map((hit) => (
+                    <li key={hit.id}>
+                      <button type="button" className="btn" onClick={() => {
+                        setLocations((current) => current.some((item) => item.id === hit.id) ? current : [...current, { id: hit.id, name: hit.name }]);
+                        setLocationQuery('');
+                        setLocationHits([]);
+                      }}>{hit.name}{hit.type ? ` · ${label(hit.type.toLowerCase())}` : ''}</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {locationNote ? <p className="quiet">{locationNote}</p> : null}
+              {locations.length ? (
+                <div className="choice-grid">
+                  {locations.map((item) => (
+                    <div key={item.id} className="pick-chip">
+                      <span>{item.name}</span>
+                      <button type="button" className="btn" onClick={() => setLocations((current) => current.filter((row) => row.id !== item.id))}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="quiet">No location added, so the campaign targets all of India.</p>}
+              <Switch checked={presenceOnly} onChange={setPresenceOnly} label="Only people in these locations" hint="Off also reaches people searching about these locations from elsewhere, which is Google's default." />
+              <label className="stack-field">Languages
+                <input value={languageQuery} onChange={(event) => setLanguageQuery(event.target.value)} placeholder="Leave empty for all languages, or search English, Hindi" />
+              </label>
+              {languageHits.length ? (
+                <ul className="pick-results">
+                  {languageHits.map((hit) => (
+                    <li key={hit.id}>
+                      <button type="button" className="btn" onClick={() => {
+                        setLanguages((current) => current.some((item) => item.id === hit.id) ? current : [...current, hit]);
+                        setLanguageQuery('');
+                        setLanguageHits([]);
+                      }}>{hit.name}</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {languages.length ? (
+                <div className="choice-grid">
+                  {languages.map((item) => (
+                    <div key={item.id} className="pick-chip">
+                      <span>{item.name}</span>
+                      <button type="button" className="btn" onClick={() => setLanguages((current) => current.filter((row) => row.id !== item.id))}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="quiet">No language selected, so Google includes all languages.</p>}
+            </>
+          ) : null}
+          {step === 2 ? (
+            <>
+              <label className="stack-field">Keywords, one per line
+                <textarea rows={6} value={keywordText} onChange={(event) => setKeywordText(event.target.value)} placeholder={'3 bhk flats in pune\nready to move flats pune'} />
+              </label>
+              <label className="stack-field">Match type
+                <select value={matchType} onChange={(event) => setMatchType(event.target.value)}>
+                  <option value="BROAD">Broad</option>
+                  <option value="PHRASE">Phrase</option>
+                  <option value="EXACT">Exact</option>
+                </select>
+              </label>
+              <p className="quiet">{keywordList.length} of 50 keywords.</p>
+              <div className="page-actions">
+                <button className="btn" type="button" onClick={loadIdeas}>Get keyword ideas from Google</button>
+              </div>
+              {ideaNote ? <p className="quiet">{ideaNote}</p> : null}
+              {ideas.length ? (
+                <Table columns={[
+                  { key: 'text', label: 'Keyword' },
+                  { key: 'searches', label: 'Monthly searches', render: (row) => countCell(row.searches) },
+                  { key: 'competition', label: 'Competition', render: (row) => row.competition ? label(row.competition.toLowerCase()) : '—' },
+                  { key: 'bid', label: 'Top of page bid', render: (row) => row.lowBid || row.highBid ? `${money(row.lowBid, currency)} – ${money(row.highBid, currency)}` : '—' },
+                  { key: 'add', label: '', render: (row) => <button type="button" className="btn" disabled={keywordList.some((item) => item.toLowerCase() === row.text.toLowerCase())} onClick={() => addKeyword(row.text)}>Add</button> }
+                ]} rows={ideas.map((row) => ({ ...row, id: row.text }))} />
+              ) : null}
+              <label className="stack-field">Negative keywords, one per line
+                <textarea rows={3} value={negativeText} onChange={(event) => setNegativeText(event.target.value)} placeholder={'free\nrent\njobs'} />
+              </label>
+            </>
+          ) : null}
+          {step === 3 ? (
+            <div className="ad-studio">
+              <div className="stack">
+                <label className="stack-field">Final URL
+                  <input type="url" value={finalUrl} onChange={(event) => setFinalUrl(event.target.value)} placeholder="https://" />
+                </label>
+                <label className="stack-field">Display path 1
+                  <input value={path1} onChange={(event) => setPath1(event.target.value)} maxLength={15} />
+                </label>
+                <label className="stack-field">Display path 2
+                  <input value={path2} onChange={(event) => setPath2(event.target.value)} maxLength={15} disabled={!path1.trim()} />
+                </label>
+                <h3>Headlines ({filledHeadlines.length}/15, at least 3)</h3>
+                {headlines.map((value, index) => (
+                  <label key={`h${index}`} className="stack-field">Headline {index + 1} · {value.length}/30
+                    <input value={value} maxLength={30} onChange={(event) => setHeadlines((current) => current.map((item, at) => at === index ? event.target.value : item))} />
+                  </label>
+                ))}
+                {headlines.length < 15 ? <button type="button" className="btn" onClick={() => setHeadlines((current) => [...current, ''])}>Add headline</button> : null}
+                <h3>Descriptions ({filledDescriptions.length}/4, at least 2)</h3>
+                {descriptions.map((value, index) => (
+                  <label key={`d${index}`} className="stack-field">Description {index + 1} · {value.length}/90
+                    <input value={value} maxLength={90} onChange={(event) => setDescriptions((current) => current.map((item, at) => at === index ? event.target.value : item))} />
+                  </label>
+                ))}
+                {descriptions.length < 4 ? <button type="button" className="btn" onClick={() => setDescriptions((current) => [...current, ''])}>Add description</button> : null}
+              </div>
+              {preview}
+            </div>
+          ) : null}
+          {step === 4 ? (
+            <>
+              <dl className="review-list">
+                <div><dt>Campaign</dt><dd>{name}</dd></div>
+                <div><dt>Budget</dt><dd>{money(dailyBudget, currency)} per day</dd></div>
+                <div><dt>Bidding</dt><dd>{biddingName[bidding]}{bidding === 'MANUAL_CPC' ? ` · max ${money(cpcBid, currency)}` : ''}</dd></div>
+                <div><dt>Schedule</dt><dd>{startDate || 'Starts when published'}{endDate ? ` to ${endDate}` : ''}</dd></div>
+                <div><dt>Networks</dt><dd>Google Search{searchPartners ? ' + search partners' : ''}</dd></div>
+                <div><dt>Locations</dt><dd>{locations.length ? locations.map((item) => item.name).join(', ') : 'India'} · {presenceOnly ? 'people in these locations' : 'people in or interested in these locations'}</dd></div>
+                <div><dt>Languages</dt><dd>{languages.length ? languages.map((item) => item.name).join(', ') : 'All languages'}</dd></div>
+                <div><dt>Keywords</dt><dd>{keywordList.length} · {label(matchType.toLowerCase())} match{negativeList.length ? ` · ${negativeList.length} negative` : ''}</dd></div>
+                <div><dt>Ad</dt><dd>{filledHeadlines.length} headlines · {filledDescriptions.length} descriptions · {finalUrl}</dd></div>
+              </dl>
+              {preview}
+              <p className="quiet">Save paused creates everything in Google Ads without spending. Publish turns the campaign on. Google reviews the ad before it shows.</p>
+            </>
+          ) : null}
+          <div className="page-actions">
+            {step > 0 ? <button className="btn" type="button" disabled={busy} onClick={() => { setError(''); setStep((current) => current - 1); }}>Back</button> : null}
+            {step < steps.length - 1 ? <button className="btn-primary" type="button" onClick={nextStep}>Next</button> : null}
+            {step === steps.length - 1 ? (
+              <>
+                <button className="btn" type="submit" disabled={busy} onClick={() => { publishMode.current = false; }}>Save paused</button>
+                <button className="btn-primary" type="submit" disabled={busy} onClick={() => { publishMode.current = true; }}>{busy ? 'Saving' : 'Publish'}</button>
+              </>
+            ) : null}
+          </div>
+        </form>
+      ) : null}
+      {editing ? (
+        <form className="form-grid panel" onSubmit={saveEdit}>
+          <h2>Edit campaign</h2>
+          <label className="stack-field">Name
+            <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} required minLength={2} />
+          </label>
+          <label className="stack-field">Daily budget ({currency})
+            <input type="number" min="1" step="1" value={editing.budget} onChange={(event) => setEditing({ ...editing, budget: event.target.value })} />
+          </label>
+          <label className="stack-field">Status
+            <select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })}>
+              <option value="PAUSED">Paused</option>
+              <option value="ENABLED">Enabled</option>
+            </select>
+          </label>
+          <div className="page-actions">
+            <button className="btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
+            <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving' : 'Save'}</button>
+          </div>
+        </form>
+      ) : null}
+      <div className="tabs" role="tablist">
+        {tabs.map((item) => (
+          <button key={item} type="button" className={view === item ? 'is-on' : ''} onClick={() => setView(item)}>{item}</button>
+        ))}
+      </div>
+      {view === 'Campaigns' ? (
+        campaigns.length ? (
+          <Table columns={[
+            { key: 'name', label: 'Campaign' },
+            { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> },
+            { key: 'channel', label: 'Type', render: (row) => label(String(row.fields?.channel || '').toLowerCase()) || '—' },
+            { key: 'budget', label: 'Daily budget', render: (row) => money(row.fields?.budget, row.fields?.currency) },
+            { key: 'spend', label: 'Spend', render: (row) => money(row.fields?.spend, row.fields?.currency) },
+            { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.fields?.clicks) },
+            { key: 'conversions', label: 'Conversions', render: (row) => countCell(row.fields?.conversions) },
+            { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ENABLED' || row.fields?.status === 'PAUSED') ? (
+              <span className="page-actions">
+                <button className="btn" type="button" disabled={busy} onClick={() => setEditing({ id: row.externalId, name: row.name, budget: row.fields?.budget || '', status: row.fields?.status || 'PAUSED' })}>Edit</button>
+                <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ENABLED' ? 'PAUSED' : 'ENABLED')}>
+                  {row.fields.status === 'ENABLED' ? 'Pause' : 'Turn on'}
+                </button>
+              </span>
+            ) : null }
+          ]} rows={campaigns} />
+        ) : (
+          <div className="empty">
+            <strong>No campaigns from Google Ads.</strong>
+            <p className="quiet">Sync reads this account from Google. Sample campaigns are not listed here.</p>
+          </div>
+        )
+      ) : null}
+      {view === 'Ad groups' ? (
+        <Table columns={[
+          { key: 'name', label: 'Ad group' },
+          { key: 'campaign', label: 'Campaign', render: (row) => campaignName.get(row.parent) || '—' },
+          { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> }
+        ]} rows={adGroups} />
+      ) : null}
+      {view === 'Keywords' ? (
+        <Table columns={[
+          { key: 'name', label: 'Keyword' },
+          { key: 'match', label: 'Match', render: (row) => label(String(row.fields?.matchType || '').toLowerCase()) || '—' },
+          { key: 'group', label: 'Ad group', render: (row) => groupName.get(row.parent) || '—' },
+          { key: 'campaign', label: 'Campaign', render: (row) => groupCampaign.get(row.parent) || '—' },
+          { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> }
+        ]} rows={keywordRows} />
+      ) : null}
+      {view === 'Ads' ? (
+        <Table columns={[
+          { key: 'name', label: 'Ad' },
+          { key: 'type', label: 'Type', render: (row) => label(String(row.fields?.adType || '').toLowerCase()) || '—' },
+          { key: 'group', label: 'Ad group', render: (row) => groupName.get(row.parent) || '—' },
+          { key: 'approval', label: 'Review', render: (row) => label(String(row.fields?.approval || '').toLowerCase()) || '—' },
+          { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> }
+        ]} rows={ads} />
+      ) : null}
+      {view === 'Report' ? (
+        <div className="stack">
+          <div className="page-actions">
+            <select value={range} onChange={(event) => setRange(event.target.value)} aria-label="Report range">
+              {GOOGLE_RANGES.map(([key, text]) => <option key={key} value={key}>{text}</option>)}
+            </select>
+            <select value={chartField} onChange={(event) => setChartField(event.target.value)} aria-label="Chart metric">
+              <option value="spend">Spend</option>
+              <option value="clicks">Clicks</option>
+              <option value="impressions">Impressions</option>
+              <option value="conversions">Conversions</option>
+            </select>
+          </div>
+          {reportBusy ? <p className="quiet">Reading the report from Google Ads…</p> : null}
+          {reportError ? <p className="delta-down">{reportError}</p> : null}
+          {report?.notes?.length ? <p className="quiet">{report.notes.join(' ')}</p> : null}
+          {report && !reportBusy ? (
+            <>
+              <div className="metric-strip">
+                <div className="metric"><span>Spend</span><strong>{money(reportTotal('spend'), report.currency || currency)}</strong></div>
+                <div className="metric"><span>Impressions</span><strong>{countCell(reportTotal('impressions'))}</strong></div>
+                <div className="metric"><span>Clicks</span><strong>{countCell(reportTotal('clicks'))}</strong></div>
+                <div className="metric"><span>Conversions</span><strong>{countCell(reportTotal('conversions'))}</strong></div>
+              </div>
+              {daily.length > 1 ? (
+                <section className="panel">
+                  <h3>{label(chartField)} by day</h3>
+                  <LineChart points={daily} field={chartField} />
+                  <p className="quiet">{daily[0].date} to {daily[daily.length - 1].date}</p>
+                </section>
+              ) : <p className="quiet">Google returned no daily rows for this range.</p>}
+              <h3>Campaigns</h3>
+              <Table columns={[
+                { key: 'name', label: 'Campaign' },
+                { key: 'spend', label: 'Spend', render: (row) => money(row.spend, report.currency || currency) },
+                { key: 'impressions', label: 'Impr.', render: (row) => countCell(row.impressions) },
+                { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.clicks) },
+                { key: 'ctr', label: 'CTR', render: (row) => row.ctr == null ? '—' : `${row.ctr}%` },
+                { key: 'cpc', label: 'Avg. CPC', render: (row) => money(row.cpc, report.currency || currency) },
+                { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) },
+                { key: 'cpa', label: 'Cost / conv.', render: (row) => money(row.costPerConversion, report.currency || currency) }
+              ]} rows={report.campaigns || []} />
+              <h3>Top keywords</h3>
+              <Table columns={[
+                { key: 'text', label: 'Keyword' },
+                { key: 'match', label: 'Match', render: (row) => label(String(row.matchType || '').toLowerCase()) || '—' },
+                { key: 'campaign', label: 'Campaign' },
+                { key: 'spend', label: 'Spend', render: (row) => money(row.spend, report.currency || currency) },
+                { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.clicks) },
+                { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) }
+              ]} rows={report.keywords || []} />
+              <h3>Search terms</h3>
+              <Table columns={[
+                { key: 'term', label: 'Search term' },
+                { key: 'campaign', label: 'Campaign' },
+                { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.clicks) },
+                { key: 'spend', label: 'Spend', render: (row) => money(row.spend, report.currency || currency) },
+                { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) }
+              ]} rows={report.searchTerms || []} />
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ConnectionDetail() {
   const { id } = useParams();
   const { data, loading, error, reload } = useResource(id ? `/api/connections/${id}` : null);
   const { can } = useAuth();
   const [busy, setBusy] = useState(false);
-  const meta = data?.providerKey === 'meta_ads';
-  const records = meta ? (data?.records || []).filter((row) => row.type !== 'campaign' && row.type !== 'adset' && row.type !== 'ad') : (data?.records || []);
+  const metaOnly = data?.providerKey === 'meta_ads';
+  const google = data?.providerKey === 'google_ads';
+  const meta = metaOnly || google;
+  const records = metaOnly
+    ? (data?.records || []).filter((row) => row.type !== 'campaign' && row.type !== 'adset' && row.type !== 'ad')
+    : google
+      ? (data?.records || []).filter((row) => !['campaign', 'ad_group', 'ad', 'keyword'].includes(row.type))
+      : (data?.records || []);
   const fieldKeys = [...new Set(records.flatMap((row) => Object.keys(row.fields || {})))].slice(0, 6);
 
   async function act(path) {
@@ -921,7 +1664,9 @@ export function ConnectionDetail() {
     <Page
       eyebrow={data ? `Connections / ${label(data.category)}` : 'Connections'}
       title={data?.name || 'Connection'}
-      lede={meta ? 'Create the campaign, ad set, and ad here, then publish them to the connected Meta account.' : 'Only records returned by this tool\'s API or posted to its webhook.'}
+      lede={google
+        ? 'Create Search campaigns, manage them, and read reports for the connected Google Ads account.'
+        : metaOnly ? 'Create the campaign, ad set, and ad here, then publish them to the connected Meta account.' : 'Only records returned by this tool\'s API or posted to its webhook.'}
       actions={can('connections.manage') && data ? (
         <>
           <button className="btn" disabled={busy} onClick={() => act(`/api/connections/${id}/sync`)}>Sync</button>
@@ -941,7 +1686,8 @@ export function ConnectionDetail() {
                 <p className="quiet">{data.credentialPreview}</p>
               </section>
             ) : null}
-            {meta ? <MetaAdsManager id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
+            {metaOnly ? <MetaAdsManager id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
+            {google ? <GoogleAdsManager id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
             {!meta && data.webhookPath ? (
               <section className="panel">
                 <h2>Webhook</h2>

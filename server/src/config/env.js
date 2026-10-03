@@ -38,6 +38,13 @@ export const env = {
   credentialsKey: read('CREDENTIALS_KEY', ''),
   whatsappVerifyToken: read('WHATSAPP_VERIFY_TOKEN', ''),
   metaVerifyToken: read('META_VERIFY_TOKEN', ''),
+  googleAds: {
+    developerToken: read('GOOGLE_ADS_DEVELOPER_TOKEN', ''),
+    clientId: read('GOOGLE_OAUTH_CLIENT_ID', ''),
+    clientSecret: read('GOOGLE_OAUTH_CLIENT_SECRET', ''),
+    redirectUri: read('GOOGLE_OAUTH_REDIRECT_URI', ''),
+    version: read('GOOGLE_ADS_API_VERSION', 'v25')
+  },
   seedPassword: read('SEED_PASSWORD', 'AiroDemo#2026'),
   db: {
     host: required('DB_HOST'),

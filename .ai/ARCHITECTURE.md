@@ -122,6 +122,18 @@ One bot for the whole platform (`whatsapp_bot` row id 1), managed by platform pe
 
 `server/src/integrations/metaAds.js` creates objects **paused**: campaign → ad set → (image upload, optional lead form) → creative → ad; publishing sets ACTIVE. Used by both the Connections UI (`/api/connections/:id/meta/*`) and the WhatsApp `metaAdChat` flow. Click-to-Messenger leads run under objective `OUTCOME_ENGAGEMENT` (`campaignObjective()`).
 
+## Google Ads
+
+```
+Connections → "Connect with Google" → POST /api/connections/google/start → Google consent (scope adwords, offline)
+  → GET /api/google-ads/callback (state = JWT signed with JWT_SECRET + ":google_ads_oauth", 10 min)
+  → refresh token saved encrypted as pendingToken (connection status 'pending' if new)
+  → /app/connections?google=pick → choose account (direct or under a manager → login-customer-id)
+  → verify → credential { apiKey: refresh token, accountId, loginCustomerId, currency, verified } → connected → sync
+```
+
+`server/src/integrations/googleAds.js` calls the REST API with the platform developer token. Search campaigns are created **paused** in one atomic `googleAds:mutate` (budget → campaign → criteria → ad group → keywords → responsive search ad); publishing enables the campaign. The report tab reads live from Google and is not stored. The generic `/api/connections/api` key form is refused for `google_ads`.
+
 ## LLM
 
 - Platform connects providers (OpenAI, Anthropic, Gemini) per purpose (`assistant`, `whatsapp`, `leads`, `ads`, `calls`) → `llm_connection` table, encrypted key.

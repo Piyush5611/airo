@@ -1,4 +1,7 @@
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env.js';
 import { CATEGORIES } from '../domain/providers.js';
+import { createGoogleSearchCampaign, editGoogleCampaign, exchangeGoogleCode, googleAuthUrl, googleKeywordIdeas, googleReport, listGoogleAccounts, pullGoogleAds, searchGoogleLanguages, setGoogleCampaignStatus, suggestGoogleLocations, verifyGoogleAccount } from '../integrations/googleAds.js';
 import { cleanNexcallKey, nexcallBase, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
 import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, listAdInstagram, listMetaPages, listMetaPixels, listPageInstagram, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
@@ -129,6 +132,7 @@ function liveRecord(row) {
     type: row.objectType,
     name: row.name,
     externalId: row.externalId,
+    parent: row.parentExternalId || null,
     origin: payload.origin,
     fields
   };
@@ -178,6 +182,9 @@ async function credentialPreview(connection) {
   if (connection.providerKey === 'meta_ads' && preview) {
     return `Live token ${preview}. Sync reads campaigns, ads, and the last 30 days from Meta.`;
   }
+  if (connection.providerKey === 'google_ads' && preview) {
+    return 'Signed in with Google. Sync reads campaigns, ad groups, ads, keywords, and the last 30 days from Google Ads.';
+  }
   if (preview) {
     return `API key ${preview} is saved encrypted. Sync still uses the development adapter and does not call this provider.`;
   }
@@ -204,6 +211,9 @@ export async function saveProviderApi(auth, req) {
   if (!provider) throw new ApiError(422, 'Unknown provider.', 'validation_error');
   if (provider.providerKey === 'whatsapp') {
     throw new ApiError(422, 'WhatsApp uses the shared AIRO chatbot. Super Admin and Developer/Admin connect that API on the platform.', 'validation_error');
+  }
+  if (provider.providerKey === 'google_ads') {
+    throw new ApiError(422, 'Google Ads connects with the Connect with Google button.', 'validation_error');
   }
   const apiKey = provider.providerKey === 'nexcall' ? cleanNexcallKey(req.body.apiKey) : req.body.apiKey.trim();
   const accountId = (req.body.accountId || '').trim();
@@ -526,6 +536,187 @@ export async function updateMetaCampaignStatus(auth, req, id) {
   return synced;
 }
 
+const GOOGLE_BACK = '/app/connections?section=Advertising';
+
+function googleStateSecret() {
+  return `${env.jwtSecret}:google_ads_oauth`;
+}
+
+function googleInput(secret) {
+  return {
+    refreshToken: secret.apiKey,
+    accountId: secret.accountId,
+    loginCustomerId: secret.loginCustomerId || '',
+    currency: secret.currency || ''
+  };
+}
+
+async function googleRow(auth) {
+  const row = (await repo.list(auth.organizationId)).find((item) => item.providerKey === 'google_ads');
+  if (!row) throw new ApiError(422, 'Sign in with Google first.', 'validation_error');
+  return { id: row.id, secret: readSecret(row.ciphertext) || {} };
+}
+
+async function googleSecret(auth, id) {
+  const connection = await repo.getConnection(auth.organizationId, id);
+  if (!connection) throw new ApiError(404, 'Connection not found.', 'not_found');
+  if (connection.providerKey !== 'google_ads') throw new ApiError(422, 'This action is only for Google Ads.', 'validation_error');
+  const secret = await storedSecret(id);
+  if (!secret?.apiKey || !secret.verified || !secret.accountId || connection.status !== 'connected') {
+    throw new ApiError(422, 'Connect Google Ads before managing campaigns.', 'validation_error');
+  }
+  return googleInput(secret);
+}
+
+async function syncWithNotice(auth, req, id, done) {
+  const synced = await sync(auth, req, id);
+  const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
+  synced.notice = failed ? `${done} Sync failed: ${failed}` : done;
+  return synced;
+}
+
+export function googleStart(auth) {
+  const state = jwt.sign(
+    { purpose: 'google_ads', organizationId: auth.organizationId, userId: auth.userId },
+    googleStateSecret(),
+    { expiresIn: '10m' }
+  );
+  return { url: googleAuthUrl(state) };
+}
+
+export async function googleCallback(req) {
+  const fail = (message) => `${GOOGLE_BACK}&google=error&reason=${encodeURIComponent(String(message || 'Google sign-in failed.').slice(0, 200))}`;
+  let state;
+  try {
+    state = jwt.verify(String(req.query.state || ''), googleStateSecret());
+  } catch {
+    return fail('Google sign-in expired. Start again from Connections.');
+  }
+  if (state.purpose !== 'google_ads' || !state.organizationId) return fail('Google sign-in expired. Start again from Connections.');
+  if (req.query.error) return fail(req.query.error === 'access_denied' ? 'Google access was not allowed.' : 'Google sign-in failed.');
+  const code = String(req.query.code || '');
+  if (!code || code.length > 1024) return fail('Google sign-in failed.');
+  try {
+    const refreshToken = await exchangeGoogleCode(code);
+    const provider = await repo.findProvider('google_ads');
+    if (!provider) return fail('Google Ads is not in the provider list.');
+    const existing = (await repo.list(state.organizationId)).find((item) => item.providerKey === 'google_ads');
+    const id = existing?.id || await repo.createConnection({
+      organizationId: state.organizationId,
+      providerId: provider.id,
+      status: 'pending',
+      accountLabel: provider.name
+    });
+    const previous = readSecret(existing?.ciphertext) || {};
+    await repo.saveCredential(id, encryptJson({ ...previous, provider: 'google_ads', pendingToken: refreshToken }));
+    if (existing?.status === 'disconnected') await repo.setStatus(state.organizationId, id, 'pending');
+    await recordAudit({ ip: req.ip, auth: { userId: state.userId } }, {
+      action: 'connection.google_authorized',
+      resource: 'connection',
+      resourceId: id,
+      organizationId: state.organizationId
+    });
+    return `${GOOGLE_BACK}&google=pick`;
+  } catch (error) {
+    return fail(error.message);
+  }
+}
+
+export async function googleAccounts(auth) {
+  const { secret } = await googleRow(auth);
+  const refreshToken = secret.pendingToken || secret.apiKey;
+  if (!refreshToken) throw new ApiError(422, 'Sign in with Google first.', 'validation_error');
+  return listGoogleAccounts({ refreshToken });
+}
+
+export async function chooseGoogleAccount(auth, req) {
+  const { id, secret } = await googleRow(auth);
+  const refreshToken = secret.pendingToken || secret.apiKey;
+  if (!refreshToken) throw new ApiError(422, 'Sign in with Google first.', 'validation_error');
+  const wanted = req.body.customerId.replace(/-/g, '');
+  const listed = await listGoogleAccounts({ refreshToken });
+  const chosen = listed.accounts.find((account) => account.id === wanted);
+  if (!chosen) throw new ApiError(422, listed.note || 'This Google login cannot open that ad account.', 'validation_error');
+  const account = await verifyGoogleAccount({ refreshToken, accountId: chosen.id, loginCustomerId: chosen.loginCustomerId });
+  await repo.saveCredential(id, encryptJson({
+    mode: 'live',
+    provider: 'google_ads',
+    apiKey: refreshToken,
+    accountId: chosen.id,
+    loginCustomerId: chosen.loginCustomerId || null,
+    accountName: account.name,
+    currency: account.currency,
+    timeZone: account.timeZone,
+    verified: true
+  }));
+  await repo.saveConfig(id, defaultMapping, { frequency: 'hourly', objects: ['campaigns', 'ad_groups', 'ads', 'keywords', 'spend'] });
+  await repo.setAccountLabel(auth.organizationId, id, account.name);
+  await repo.setMode(auth.organizationId, id, 'live');
+  await repo.setStatus(auth.organizationId, id, 'connected');
+  await recordAudit(req, { action: 'connection.credential_saved', resource: 'connection', resourceId: id, metadata: { provider: 'google_ads' } });
+  const synced = await sync(auth, req, id);
+  const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
+  const campaigns = (synced.records || []).filter((row) => row.type === 'campaign').length;
+  synced.notice = failed
+    ? `Google Ads is connected. Sync failed: ${failed}`
+    : (campaigns ? `Google Ads is connected. ${campaigns} campaigns came back from Google.` : 'Google Ads is connected. Google returned no campaigns.');
+  synced.linked = true;
+  return synced;
+}
+
+export async function googleLocations(auth, id, query) {
+  const input = await googleSecret(auth, id);
+  try {
+    return { results: await suggestGoogleLocations({ refreshToken: input.refreshToken, query }) };
+  } catch (error) {
+    return { results: [], note: error.message };
+  }
+}
+
+export async function googleLanguages(auth, id, query) {
+  const input = await googleSecret(auth, id);
+  try {
+    return { results: await searchGoogleLanguages(input, query) };
+  } catch (error) {
+    return { results: [], note: error.message };
+  }
+}
+
+export async function googleIdeas(auth, req, id) {
+  const input = await googleSecret(auth, id);
+  return { ideas: await googleKeywordIdeas(input, req.body) };
+}
+
+export async function googleReportFor(auth, id, range) {
+  const input = await googleSecret(auth, id);
+  return googleReport(input, range);
+}
+
+export async function createGoogleCampaign(auth, req, id) {
+  const input = await googleSecret(auth, id);
+  await createGoogleSearchCampaign({ ...req.body, ...input });
+  await recordAudit(req, {
+    action: req.body.publish ? 'connection.google_campaign_published' : 'connection.google_campaign_created',
+    resource: 'connection',
+    resourceId: id
+  });
+  return syncWithNotice(auth, req, id, req.body.publish ? 'Campaign published on Google Ads.' : 'Campaign saved on Google Ads as paused.');
+}
+
+export async function editGoogleAdCampaign(auth, req, id) {
+  const input = await googleSecret(auth, id);
+  await editGoogleCampaign({ ...req.body, ...input });
+  await recordAudit(req, { action: 'connection.google_campaign_edited', resource: 'connection', resourceId: id });
+  return syncWithNotice(auth, req, id, 'Campaign updated in Google Ads.');
+}
+
+export async function updateGoogleCampaignStatus(auth, req, id) {
+  const input = await googleSecret(auth, id);
+  await setGoogleCampaignStatus({ ...input, campaignId: req.body.campaignId, status: req.body.status });
+  await recordAudit(req, { action: 'connection.google_campaign_updated', resource: 'connection', resourceId: id, metadata: { status: req.body.status } });
+  return syncWithNotice(auth, req, id, req.body.status === 'ENABLED' ? 'Campaign is live on Google Ads.' : 'Campaign paused on Google Ads.');
+}
+
 async function pullConnection(connection, id) {
   const secret = await storedSecret(id);
   if (connection.providerKey === 'nexcall' && secret?.apiKey) {
@@ -536,6 +727,12 @@ async function pullConnection(connection, id) {
       throw new ApiError(422, 'Account id is required for Meta Ads.', 'validation_error');
     }
     return pullMetaAds({ apiKey: secret.apiKey, accountId: secret.accountId });
+  }
+  if (connection.providerKey === 'google_ads') {
+    if (!secret?.apiKey || !secret.accountId || !secret.verified) {
+      throw new ApiError(422, 'Choose a Google Ads account before syncing.', 'validation_error');
+    }
+    return pullGoogleAds(googleInput(secret));
   }
   return {
     mode: 'empty',

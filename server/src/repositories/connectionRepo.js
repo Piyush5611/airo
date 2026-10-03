@@ -185,6 +185,13 @@ export function markSynced(connectionId) {
   return run(`UPDATE integration_connections SET last_sync_at = UTC_TIMESTAMP() WHERE id = ?`, [connectionId]);
 }
 
+export function setAccountLabel(organizationId, id, accountLabel) {
+  return run(
+    `UPDATE integration_connections SET account_label = ? WHERE organization_id = ? AND id = ?`,
+    [accountLabel, organizationId, id]
+  );
+}
+
 export function setStatus(organizationId, id, status) {
   return run(
     `UPDATE integration_connections SET status = ? WHERE organization_id = ? AND id = ?`,

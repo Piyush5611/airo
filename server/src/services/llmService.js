@@ -247,18 +247,73 @@ HEADLINE: under 40 characters
 TEXT: under 200 characters
 CTA: LEARN_MORE or SIGN_UP or SHOP_NOW or BOOK_NOW`;
 
-export async function writeAdPlan({ intake, publicAds, english }) {
+const GOOGLE_PLAN_BRIEF = `You write one Google Search ad for AIRO.
+Write the ad itself in English with English letters only. Never use Hindi script.
+Use only the facts in this message. Do not invent prices, offers, discounts, awards, ratings, phone numbers, or claims the business did not give.
+If the facts include an owner idea, follow it as long as it fits these rules.
+Headlines: under 30 characters each, no exclamation marks, no ALL CAPS words, all different.
+Descriptions: under 90 characters each, all different.
+Return lines in exactly this format and nothing else:
+STRATEGY: one or two sentences about who searches for this and why these keywords
+HEADLINE: text (write this line 8 times, one headline per line)
+DESCRIPTION: text (write this line 3 times, one description per line)`;
+
+async function adModels() {
   const attempts = [];
   for (const purpose of ['ads', 'whatsapp', 'assistant']) {
     let row;
     try { row = await repo.connectionByPurpose(purpose); } catch (error) {
-      if (schemaMissing(error)) return null;
+      if (schemaMissing(error)) return [];
       throw error;
     }
     if (row?.credentialCiphertext && !attempts.some((item) => Number(item.row.id) === Number(row.id))) {
       attempts.push({ purpose, row });
     }
   }
+  return attempts;
+}
+
+export async function writeGoogleAdPlan({ intake, english }) {
+  const attempts = await adModels();
+  if (!attempts.length) return null;
+  const facts = [
+    `Chat language: ${english ? 'English' : 'Hinglish'} (the ad text stays English).`,
+    `Product or service: ${intake.product}`,
+    `Website: ${intake.website}`,
+    `Location: ${intake.region}`,
+    `Daily budget: ${intake.dailyBudget}`,
+    `Keywords: ${(intake.keywords || []).map((item) => item.text).join(', ') || 'none yet'}`,
+    intake.idea ? `Owner idea: ${intake.idea}` : 'Owner idea: none'
+  ].join('\n');
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      const text = await replyLlm({
+        provider: attempt.row.provider,
+        model: attempt.row.modelName,
+        apiKey: await readKey(attempt.row),
+        baseUrl: attempt.row.baseUrl || '',
+        messages: [{ role: 'user', content: 'Write the Google Search ad from these facts.' }],
+        facts,
+        system: GOOGLE_PLAN_BRIEF
+      });
+      await recordAudit({ auth: null, ip: null }, {
+        action: 'llm.chat',
+        resource: 'llm_connection',
+        resourceId: attempt.row.id,
+        organizationId: intake.organizationId || null,
+        metadata: { purpose: attempt.purpose, provider: attempt.row.provider, model: attempt.row.modelName, channel: 'whatsapp' }
+      });
+      return { text: String(text || '').slice(0, 3000), model: attempt.row.modelName };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+export async function writeAdPlan({ intake, publicAds, english }) {
+  const attempts = await adModels();
   if (!attempts.length) return null;
   const facts = [
     `Language: ${english ? 'English' : 'Hinglish'}.`,

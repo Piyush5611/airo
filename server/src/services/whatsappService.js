@@ -9,6 +9,7 @@ import * as repo from '../repositories/whatsappRepo.js';
 import { notifyWhatsappMessage, streamWhatsapp } from './whatsappLive.js';
 import { replyWhatsapp } from './llmService.js';
 import { handleMetaAdChat } from './metaAdChat.js';
+import { handleGoogleAdChat } from './googleAdChat.js';
 
 function publicBot(row) {
   if (!row) return null;
@@ -355,6 +356,20 @@ async function answerWithModel(saved) {
         .replace(/EAA[A-Za-z0-9]+/g, '')
         .slice(0, 180);
     }
+  }
+  const google = await handleGoogleAdChat({
+    organizationId: saved.organizationId,
+    conversationId: saved.conversationId,
+    recognized: saved.recognized,
+    messages
+  });
+  if (google?.text) {
+    await deliverWhatsapp({
+      conversationId: saved.conversationId,
+      text: String(google.text).slice(0, 4000),
+      actionTaken: 'Google ad'
+    });
+    return;
   }
   const meta = await handleMetaAdChat({
     organizationId: saved.organizationId,

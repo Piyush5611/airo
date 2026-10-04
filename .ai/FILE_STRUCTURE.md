@@ -5,7 +5,7 @@
 Ignored directories: .cache, .cursor, .git, .idea, .next, .nuxt, .output, .parcel-cache, .shots, .svelte-kit, .turbo, .vite, .vscode, __pycache__, build, cache, coverage, dist, node_modules, out, temp, tmp.
 File names are listed only. File contents (including any `.env`) are never read.
 
-Directories: 21. Files: 103.
+Directories: 21. Files: 106.
 
 ```text
 airo3/
@@ -63,7 +63,8 @@ airo3/
 │   │   │   │   ├── 006_llm.sql
 │   │   │   │   ├── 007_llm_purposes.sql
 │   │   │   │   ├── 008_whatsapp_numbers.sql
-│   │   │   │   └── 009_meta_ad_drafts.sql
+│   │   │   │   ├── 009_meta_ad_drafts.sql
+│   │   │   │   └── 010_google_ad_drafts.sql
 │   │   │   ├── migrate.js
 │   │   │   ├── seed.js
 │   │   │   └── sql.js
@@ -96,11 +97,13 @@ airo3/
 │   │   ├── routes/
 │   │   │   └── index.js
 │   │   ├── scripts/
-│   │   │   └── checkLogins.js
+│   │   │   ├── checkLogins.js
+│   │   │   └── createReviewer.js
 │   │   ├── services/
 │   │   │   ├── auditService.js
 │   │   │   ├── authService.js
 │   │   │   ├── connectionService.js
+│   │   │   ├── googleAdChat.js
 │   │   │   ├── growthService.js
 │   │   │   ├── intelligenceService.js
 │   │   │   ├── llmService.js

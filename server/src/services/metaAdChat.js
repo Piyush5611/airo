@@ -5,10 +5,12 @@ import { addMetaImageAd, campaignObjective, createMetaAd, createMetaAdSet, creat
 import { upsertObject } from '../repositories/connectionRepo.js';
 import { recordAudit } from './auditService.js';
 import { writeAdPlan } from './llmService.js';
+import { clearGoogleDraft } from './googleAdChat.js';
 
 const START = /\b(run|start|launch|chalao|chala|banao)\b.{0,40}\bmeta\b|\bmeta\s+ads?\b.{0,24}\b(run|start|launch|chalao|chala|banao)\b/i;
-const OTHER_ADS = /\b(google|linkedin|youtube)\b.{0,24}\bads?\b|\b(run|start|launch|chalao|chala|banao)\b.{0,40}\b(google|linkedin|youtube)\b/i;
+const OTHER_ADS = /\b(linkedin|youtube)\b.{0,24}\bads?\b|\b(run|start|launch|chalao|chala|banao)\b.{0,40}\b(linkedin|youtube)\b/i;
 const STALE_HOURS = 24;
+const GREETING = /^(hi+|hello|hey|hlo|namaste|namaskar|good\s+(morning|afternoon|evening))[\s!.?]*$/i;
 const CANCEL = /^(cancel|stop|ruk|band|nahi chahiye|nahin chahiye)\b/i;
 const SKIP_IMAGE = /^(skip|baad mein|baad me|later|no image|image nahi|image nahin|without image)\b/i;
 const REPORT = /\b(report|nexcall|hisab|yesterday|aaj ka|calling report|kitne call)\b/i;
@@ -277,8 +279,8 @@ export async function handleMetaAdChat({ organizationId, conversationId, recogni
   const starting = START.test(text);
   if (!starting && recognized && OTHER_ADS.test(text)) {
     const english = englishOnly(text);
-    const name = text.match(/google|linkedin|youtube/i)[0].toLowerCase();
-    const label = { google: 'Google', linkedin: 'LinkedIn', youtube: 'YouTube' }[name];
+    const name = text.match(/linkedin|youtube/i)[0].toLowerCase();
+    const label = { linkedin: 'LinkedIn', youtube: 'YouTube' }[name];
     const open = draft && draft.step !== 'done';
     return {
       text: say(
@@ -321,6 +323,16 @@ export async function handleMetaAdChat({ organizationId, conversationId, recogni
     };
   }
   if (starting) return begin(organizationId, conversationId, text);
+  if (GREETING.test(text)) {
+    const english = draft.payload.lang !== 'hi';
+    return {
+      text: say(
+        english,
+        `Hi, I am the AIRO assistant. A Meta ad setup${draft.payload.product ? ` for ${draft.payload.product}` : ''} is still open in this chat. Continue with the last question, or reply cancel to close it and ask me anything else.`,
+        `Hi, main AIRO assistant hoon. Is chat mein ek Meta ad setup${draft.payload.product ? ` (${draft.payload.product})` : ''} abhi khula hai. Pichhle sawaal ka jawab do, ya band karke kuch aur poochhne ke liye cancel likho.`
+      )
+    };
+  }
   if (CANCEL.test(text)) {
     await clearDraft(conversationId);
     return {
@@ -349,6 +361,7 @@ async function begin(organizationId, conversationId, text) {
   const account = await metaAccount(organizationId);
   if (!account) return { text: `I am the AIRO assistant. ${connectLine(english)}` };
   const payload = { lang: english ? 'en' : 'hi', sample: text.slice(0, 80) };
+  await clearGoogleDraft(conversationId);
   await saveDraft(organizationId, conversationId, 'category', payload);
   return {
     text: say(

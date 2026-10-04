@@ -34,7 +34,7 @@ Inbound webhooks (Meta, WhatsApp, generic connection hooks) enter the same Expre
 | Controller helper | `server/src/controllers/http.js` | `ok(res, data, status)` → `{ success: true, data }`. |
 | Middleware | `server/src/middleware/` | `authenticate`, `requireRealm`, `requirePermission`, `blockSupportWrites`, `validate`, `errorHandler`, `notFound`. |
 | Validation | `server/src/validators/schemas.js` | zod schemas over `{ body, query, params }`. |
-| Services | `server/src/services/` | Domain logic per area (auth, growth, sales, connections, intelligence, workspace, platform, whatsapp, llm, metaAdChat, whatsappReport, metaWebhook, audit). |
+| Services | `server/src/services/` | Domain logic per area (auth, growth, sales, connections, intelligence, workspace, platform, whatsapp, llm, metaAdChat, googleAdChat, whatsappReport, metaWebhook, audit). |
 | Repositories | `server/src/repositories/` | Raw parameterized SQL per area. |
 | Integrations | `server/src/integrations/` | `metaAds.js`, `nexcall.js`, `llm.js`, `verify.js`, `adapters.js` (dev-only sample adapters). |
 | Domain constants | `server/src/domain/` | Roles/permissions (`access.js`), provider catalog (`providers.js`), LLM purposes (`llmPurposes.js`). |
@@ -110,6 +110,7 @@ Meta → POST /api/whatsapp/webhook
                     → conversation assigned to that organization
     → answerWithModel (async, fire-and-forget)
          ├─ inbound image? download via Graph media API
+         ├─ googleAdChat.handleGoogleAdChat ("run google ads" Search draft flow, google_ad_drafts)
          ├─ metaAdChat.handleMetaAdChat   ("run meta ads" draft flow, meta_ad_drafts)
          └─ else llmService.replyWhatsapp (+ whatsappReport for Nexcall call reports)
     → deliverWhatsapp: Graph /{phone_number_id}/messages (only within 24h of last inbound)

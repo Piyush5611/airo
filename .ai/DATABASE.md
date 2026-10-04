@@ -28,6 +28,7 @@
 | `007_llm_purposes.sql` | `llm_connection.id` auto-increment, + `purpose` (unique). |
 | `008_whatsapp_numbers.sql` | `whatsapp_business_numbers`. |
 | `009_meta_ad_drafts.sql` | `meta_ad_drafts`. |
+| `010_google_ad_drafts.sql` | `google_ad_drafts`. |
 
 ## Conventions
 
@@ -157,6 +158,7 @@ Columns listed are the important ones; see the SQL file for the full definition.
 | `whatsapp_conversations` | `organization_id`, `contact_name`, `contact_phone`, `topic`, `status`, `last_message_at` | IX (`organization_id`, `last_message_at`) |
 | `whatsapp_messages` | `conversation_id`, `direction`, `body`, `action_taken`, `created_at` | FK conversation (cascade) |
 | `meta_ad_drafts` | `organization_id`, `conversation_id`, `step`, `payload` JSON, `campaign_id`, `updated_at` | UQ `conversation_id`; FK org, conversation |
+| `google_ad_drafts` | same columns as `meta_ad_drafts` | UQ `conversation_id`; FK org, conversation |
 
 ## Important query modules
 
@@ -172,4 +174,5 @@ Columns listed are the important ones; see the SQL file for the full definition.
 | `server/src/repositories/whatsappRepo.js` | Bot, businesses, numbers, conversations, messages |
 | `server/src/repositories/llmRepo.js` | `llm_connection` |
 | `server/src/services/metaAdChat.js` | Direct SQL on `meta_ad_drafts` |
+| `server/src/services/googleAdChat.js` | Direct SQL on `google_ad_drafts` (and closes an open `meta_ad_drafts` row when a Google draft starts) |
 | `server/src/utils/scope.js` | Lead data-scope SQL fragment |

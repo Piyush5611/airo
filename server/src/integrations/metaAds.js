@@ -298,8 +298,40 @@ export async function exchangeMetaCode(code) {
   return { token, expiresAt: info.expiresAt || null };
 }
 
+async function grantedScopes(token) {
+  const settings = env.metaLogin;
+  if (!settings.appId || !settings.appSecret) return null;
+  try {
+    const data = await oauthGet('debug_token', { input_token: token, access_token: `${settings.appId}|${settings.appSecret}` });
+    return Array.isArray(data?.data?.scopes) ? data.data.scopes : null;
+  } catch {
+    return null;
+  }
+}
+
+async function missingAdScopes(token, error) {
+  const scopes = await grantedScopes(token);
+  if (!scopes) return error;
+  const missing = ['ads_read', 'ads_management', 'business_management'].filter((scope) => !scopes.includes(scope));
+  if (!missing.length) return error;
+  return new ApiError(
+    422,
+    `Facebook did not give AIRO these permissions: ${missing.join(', ')}. Connect again, allow every permission, and pick the ad account and Page when Facebook asks.`,
+    'validation_error'
+  );
+}
+
 export async function listMetaAdAccounts({ apiKey }) {
-  const rows = await list('me/adaccounts', apiKey, { fields: 'id,account_id,name,currency,account_status,business{name}' });
+  let rows;
+  try {
+    rows = await list('me/adaccounts', apiKey, { fields: 'id,account_id,name,currency,account_status,business{name}' });
+  } catch {
+    try {
+      rows = await list('me/adaccounts', apiKey, { fields: 'id,account_id,name,currency,account_status' });
+    } catch (error) {
+      throw await missingAdScopes(apiKey, error);
+    }
+  }
   return rows
     .filter((row) => /^\d{5,20}$/.test(String(row.account_id || '')))
     .map((row) => ({

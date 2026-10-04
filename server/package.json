@@ -11,6 +11,7 @@
     "migrate": "node src/db/migrate.js",
     "seed": "node src/db/seed.js",
     "check:logins": "node src/scripts/checkLogins.js",
+    "create:reviewer": "node src/scripts/createReviewer.js",
     "test": "node --test src/tests/isolation.test.js"
   },
   "dependencies": {

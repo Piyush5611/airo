@@ -14,6 +14,7 @@
     "build": "npm run build -w client",
     "test": "npm run test -w server",
     "check:logins": "npm run check:logins -w server",
+    "create:reviewer": "npm run create:reviewer -w server --",
     "ai:context": "node scripts/generate-ai-context.cjs"
   },
   "devDependencies": {

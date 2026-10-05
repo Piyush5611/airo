@@ -775,7 +775,7 @@ function StatLine({ row, currency, resultKey, resultLabel }) {
   );
 }
 
-function MetaAdCard({ ad, adsetName, currency }) {
+function MetaAdCard({ ad, adsetName, currency, actions }) {
   const creative = ad.creative || {};
   let host = '';
   try { host = creative.link ? new URL(creative.link).hostname.replace(/^www\./, '') : ''; } catch { host = ''; }
@@ -800,11 +800,12 @@ function MetaAdCard({ ad, adsetName, currency }) {
         </div>
       </div>
       <StatLine row={ad} currency={currency} resultKey="leads" resultLabel="leads" />
+      {actions}
     </article>
   );
 }
 
-function GoogleAdCard({ ad, groupName, currency }) {
+function GoogleAdCard({ ad, groupName, currency, actions }) {
   let host = 'your-site.com';
   try { if (ad.finalUrl) host = new URL(ad.finalUrl).hostname.replace(/^www\./, ''); } catch { host = 'your-site.com'; }
   const path = [host, ad.path1, ad.path1 ? ad.path2 : ''].filter(Boolean).join('/');
@@ -833,11 +834,151 @@ function GoogleAdCard({ ad, groupName, currency }) {
         </details>
       ) : null}
       <StatLine row={ad} currency={currency} resultKey="conversions" resultLabel="conversions" />
+      {actions}
     </article>
   );
 }
 
-function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose }) {
+const META_CTAS = ['LEARN_MORE', 'SIGN_UP', 'CONTACT_US', 'CALL_NOW', 'GET_QUOTE', 'APPLY_NOW', 'BOOK_NOW', 'GET_OFFER', 'SUBSCRIBE', 'DOWNLOAD', 'SHOP_NOW', 'MESSAGE_PAGE', 'WHATSAPP_MESSAGE'];
+const AGES = Array.from({ length: 53 }, (_, index) => String(index + 13));
+
+function editValue(field, value) {
+  if (field.type === 'lines') return String(value || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  if (field.type === 'number') return value === '' || value == null ? null : Number(value);
+  return value ?? '';
+}
+
+function SearchPicker({ search, value, onChange, idKey, placeholder }) {
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState([]);
+  const [note, setNote] = useState('');
+  const searchRef = useRef(search);
+  searchRef.current = search;
+
+  useEffect(() => {
+    const text = query.trim();
+    if (text.length < 2) {
+      setHits([]);
+      setNote('');
+      return undefined;
+    }
+    let active = true;
+    const timer = setTimeout(() => {
+      setNote('Searching…');
+      api.get(searchRef.current(text))
+        .then((result) => {
+          if (!active) return;
+          const rows = result?.results || [];
+          setHits(rows);
+          setNote(rows.length ? '' : (result?.note || 'Nothing found.'));
+        })
+        .catch((err) => { if (active) { setHits([]); setNote(err.message); } });
+    }, 350);
+    return () => { active = false; clearTimeout(timer); };
+  }, [query]);
+
+  const chosen = new Set(value.map((item) => String(item[idKey])));
+  return (
+    <div className="search-picker">
+      {value.length ? (
+        <div className="cy-chips">
+          {value.map((item) => (
+            <span key={item[idKey]} className="chip">
+              {item.name}
+              <button type="button" aria-label={`Remove ${item.name}`} onClick={() => onChange(value.filter((other) => String(other[idKey]) !== String(item[idKey])))}>×</button>
+            </span>
+          ))}
+        </div>
+      ) : <p className="quiet">None chosen.</p>}
+      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={placeholder} />
+      {note ? <p className="quiet">{note}</p> : null}
+      {hits.length ? (
+        <ul className="search-hits">
+          {hits.filter((hit) => !chosen.has(String(hit[idKey]))).map((hit) => (
+            <li key={hit[idKey]}>
+              <button type="button" onClick={() => { onChange([...value, { [idKey]: String(hit[idKey]), name: hit.name }]); setQuery(''); setHits([]); }}>
+                {hit.name}{hit.region ? <small>{hit.region}</small> : hit.type ? <small>{label(String(hit.type).toLowerCase())}</small> : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function EditForm({ editing, busy, error, onSave, onCancel }) {
+  const { title, fields, initial, note } = editing;
+  const [values, setValues] = useState(() => Object.fromEntries(fields.map((field) => [field.key, field.type === 'lines' ? (initial[field.key] || []).join('\n') : initial[field.key] ?? ''])));
+  const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));
+
+  function submit(event) {
+    event.preventDefault();
+    const changes = {};
+    for (const field of fields) {
+      const next = editValue(field, values[field.key]);
+      const before = editValue(field, field.type === 'lines' ? (initial[field.key] || []).join('\n') : initial[field.key]);
+      if (field.type === 'number' && next == null) continue;
+      if (JSON.stringify(next) !== JSON.stringify(before)) changes[field.key] = field.toPayload ? field.toPayload(next) : next;
+    }
+    onSave(changes, values);
+  }
+
+  return (
+    <form className="drawer-section drawer-edit" onSubmit={submit}>
+      <header className="drawer-edit-head">
+        <h3>{title}</h3>
+        <button type="button" className="drawer-close" onClick={onCancel} aria-label="Cancel">×</button>
+      </header>
+      {note ? <p className="quiet">{note}</p> : null}
+      <div className="drawer-edit-grid">
+        {fields.map((field) => {
+          const value = values[field.key];
+          let input;
+          if (field.type === 'select') {
+            input = (
+              <select value={value} onChange={(event) => set(field.key, event.target.value)}>
+                {field.options.map(([key, text]) => <option key={key} value={key}>{text}</option>)}
+              </select>
+            );
+          } else if (field.type === 'textarea' || field.type === 'lines') {
+            input = <textarea rows={field.rows || 4} value={value} onChange={(event) => set(field.key, event.target.value)} maxLength={field.max ? field.max * 20 : undefined} />;
+          } else if (field.type === 'picker') {
+            input = <SearchPicker search={field.search} idKey={field.idKey} placeholder={field.placeholder} value={value || []} onChange={(next) => set(field.key, next)} />;
+          } else {
+            input = (
+              <input
+                type={field.type || 'text'}
+                value={value}
+                min={field.min}
+                step={field.step}
+                maxLength={field.type === 'text' || !field.type ? field.max : undefined}
+                onChange={(event) => set(field.key, event.target.value)}
+              />
+            );
+          }
+          const lines = field.type === 'lines' ? editValue(field, value) : null;
+          const tooLong = lines && field.max ? lines.filter((line) => line.length > field.max).length : 0;
+          return (
+            <label key={field.key} className={`stack-field${field.wide || ['textarea', 'lines', 'picker'].includes(field.type) ? ' wide' : ''}`}>
+              {field.label}
+              {input}
+              {lines ? <em className={tooLong ? 'delta-down' : 'quiet'}>{lines.length} lines{field.max ? ` · max ${field.max} characters each` : ''}{tooLong ? ` · ${tooLong} too long` : ''}</em> : null}
+              {field.hint ? <em className="quiet">{field.hint}</em> : null}
+            </label>
+          );
+        })}
+      </div>
+      {error ? <p className="delta-down">{error}</p> : null}
+      <div className="page-actions">
+        <button className="btn" type="button" onClick={onCancel}>Cancel</button>
+        <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving' : 'Save changes'}</button>
+      </div>
+    </form>
+  );
+}
+
+function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, canManage, onChanged }) {
   const [range, setRange] = useState(initialRange || 'LAST_30_DAYS');
   const [tab, setTab] = useState('Ads');
   const [field, setField] = useState('spend');
@@ -854,6 +995,218 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose }
   const keywords = data?.keywords || [];
   const tabs = meta ? ['Ads', 'Ad sets'] : ['Ads', 'Ad groups', 'Keywords'];
   const counts = { Ads: ads.length, 'Ad sets': groups.length, 'Ad groups': groups.length, Keywords: keywords.length };
+
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState('');
+  const [editError, setEditError] = useState('');
+  const [notice, setNotice] = useState('');
+  const bodyRef = useRef(null);
+  const statusOn = meta ? 'ACTIVE' : 'ENABLED';
+  const statusOptions = meta ? [['ACTIVE', 'Active'], ['PAUSED', 'Paused']] : [['ENABLED', 'Enabled'], ['PAUSED', 'Paused']];
+  const audienceUrl = `/api/connections/${connectionId}/meta/audience`;
+
+  async function saveItem(kind, itemId, changes, key = `${kind}:${itemId}`) {
+    if (!Object.keys(changes).length) {
+      setEditing(null);
+      return;
+    }
+    setSaving(key);
+    setEditError('');
+    setNotice('');
+    try {
+      const result = await api.post(`/api/connections/${connectionId}/${brand}/items/${kind}/${encodeURIComponent(itemId)}`, changes);
+      setNotice(result?.notice || 'Saved.');
+      setEditing(null);
+      reload();
+      onChanged?.();
+    } catch (err) {
+      setEditError(err.message);
+    } finally {
+      setSaving('');
+    }
+  }
+
+  function openEdit(config) {
+    setEditError('');
+    setNotice('');
+    setEditing({ ...config, token: Date.now() });
+    bodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function toggleStatus(kind, itemId, status, name) {
+    const next = status === statusOn ? 'PAUSED' : statusOn;
+    if (next === statusOn && !window.confirm(`Turn on "${name}"? It can start spending.`)) return;
+    saveItem(kind, itemId, { status: next });
+  }
+
+  function statusButton(kind, itemId, status, name) {
+    if (status !== statusOn && status !== 'PAUSED') return null;
+    return (
+      <button className="btn" type="button" disabled={Boolean(saving)} onClick={() => toggleStatus(kind, itemId, status, name)}>
+        {saving === `${kind}:${itemId}` ? 'Saving' : status === statusOn ? 'Pause' : 'Turn on'}
+      </button>
+    );
+  }
+
+  function editCampaign() {
+    if (!info) return;
+    const fields = [
+      { key: 'name', label: 'Campaign name', max: 180, wide: true },
+      { key: 'status', label: 'Status', type: 'select', options: statusOptions }
+    ];
+    if (info.budget) fields.push({ key: 'budget', label: `${meta && info.budgetKind === 'lifetime' ? 'Lifetime' : 'Daily'} budget (${currency})`, type: 'number', min: 1, step: '1' });
+    if (!meta) {
+      const current = ['TARGET_SPEND', 'MAXIMIZE_CONVERSIONS', 'MANUAL_CPC'].includes(info.bidding) ? (info.bidding === 'TARGET_SPEND' ? 'MAXIMIZE_CLICKS' : info.bidding) : '';
+      fields.push(
+        { key: 'endDate', label: 'End date', type: 'date', hint: 'Leave blank for no end date.' },
+        { key: 'bidding', label: 'Bidding', type: 'select', options: [...(current ? [] : [['', `Keep current (${label(String(info.bidding || 'unknown').toLowerCase())})`]]), ['MAXIMIZE_CLICKS', 'Maximize clicks'], ['MAXIMIZE_CONVERSIONS', 'Maximize conversions'], ['MANUAL_CPC', 'Manual CPC']] },
+        { key: 'locations', label: 'Locations', type: 'picker', idKey: 'id', placeholder: 'Search a city, state, or country', search: (q) => `/api/connections/${connectionId}/google/locations?q=${encodeURIComponent(q)}`, toPayload: (items) => items.map((item) => item.id), hint: 'Ads show only to people in these places. Remove all to keep the current list.' }
+      );
+      openEdit({
+        title: 'Edit campaign',
+        fields,
+        initial: { name: info.name, status: info.status, budget: info.budget || '', endDate: info.endDate && !info.endDate.startsWith('2037') ? info.endDate : '', bidding: current, locations: info.locations || [] },
+        submit: (changes) => {
+          if (changes.bidding === '') delete changes.bidding;
+          if (Array.isArray(changes.locations) && !changes.locations.length) delete changes.locations;
+          return saveItem('campaign', info.id, changes);
+        }
+      });
+      return;
+    }
+    openEdit({
+      title: 'Edit campaign',
+      fields,
+      note: info.budget ? '' : 'This campaign has no campaign budget. Its budget is set on each ad set.',
+      initial: { name: info.name, status: info.status, budget: info.budget || '' },
+      submit: (changes) => saveItem('campaign', info.id, changes)
+    });
+  }
+
+  function editAdset(set) {
+    const edit = set.targeting.edit || {};
+    const fields = [
+      { key: 'name', label: 'Ad set name', max: 180, wide: true },
+      { key: 'status', label: 'Status', type: 'select', options: statusOptions }
+    ];
+    if (set.budget) fields.push({ key: 'budget', label: `${set.budgetKind === 'lifetime' ? 'Lifetime' : 'Daily'} budget (${currency})`, type: 'number', min: 1, step: '1' });
+    fields.push(
+      { key: 'endDate', label: 'End date', type: 'date', hint: set.budgetKind === 'lifetime' ? 'A lifetime budget needs an end date.' : 'Leave as is to keep the current end.' },
+      { key: 'ageMin', label: 'Minimum age', type: 'select', options: AGES.map((age) => [age, age]) },
+      { key: 'ageMax', label: 'Maximum age', type: 'select', options: AGES.map((age) => [age, age === '65' ? '65+' : age]) },
+      { key: 'gender', label: 'Gender', type: 'select', options: [['all', 'All'], ['men', 'Men'], ['women', 'Women']] },
+      { key: 'cities', label: 'Cities', type: 'picker', idKey: 'key', placeholder: 'Search a city', search: (q) => `${audienceUrl}?kind=city&q=${encodeURIComponent(q)}`, hint: edit.otherPlaces?.length ? `Also targeted and kept as is: ${edit.otherPlaces.join(', ')}.` : 'With no city, the ad set targets India.' },
+      { key: 'interests', label: 'Interests', type: 'picker', idKey: 'id', placeholder: 'Search an interest', search: (q) => `${audienceUrl}?kind=interest&q=${encodeURIComponent(q)}` }
+    );
+    openEdit({
+      title: `Edit ad set · ${set.name}`,
+      fields,
+      note: set.targeting.advantage ? 'Advantage+ audience is on, so Meta may show ads beyond these age and interest choices.' : '',
+      initial: {
+        name: set.name,
+        status: set.status,
+        budget: set.budget || '',
+        endDate: set.endTime ? String(set.endTime).slice(0, 10) : '',
+        ageMin: String(edit.ageMin || 18),
+        ageMax: String(edit.ageMax || 65),
+        gender: edit.gender || 'all',
+        cities: edit.cities || [],
+        interests: edit.interests || []
+      },
+      submit: (changes) => {
+        if (changes.ageMin != null) changes.ageMin = Number(changes.ageMin);
+        if (changes.ageMax != null) changes.ageMax = Number(changes.ageMax);
+        if (changes.endDate === '') delete changes.endDate;
+        return saveItem('adset', set.id, changes);
+      }
+    });
+  }
+
+  function editMetaAd(ad) {
+    const creative = ad.creative || {};
+    const fields = [
+      { key: 'name', label: 'Ad name', max: 180, wide: true },
+      { key: 'status', label: 'Status', type: 'select', options: statusOptions }
+    ];
+    if (creative.editable) {
+      const ctas = META_CTAS.includes(creative.cta) || !creative.cta ? META_CTAS : [creative.cta, ...META_CTAS];
+      fields.push(
+        { key: 'headline', label: 'Headline', max: 255, wide: true },
+        { key: 'text', label: 'Primary text', type: 'textarea', rows: 5 },
+        ...(creative.leadForm ? [] : [{ key: 'link', label: 'Website link', type: 'url', wide: true }]),
+        ...(creative.cta ? [{ key: 'cta', label: 'Button', type: 'select', options: ctas.map((key) => [key, label(key.toLowerCase())]) }] : [])
+      );
+    }
+    openEdit({
+      title: `Edit ad · ${ad.name}`,
+      fields,
+      note: creative.editable
+        ? 'Changing the headline, text, link, or button makes a new creative with the same image or video. Meta reviews the ad again.'
+        : 'This ad uses a dynamic or catalog creative, so only the name and status can be changed here.',
+      initial: { name: ad.name, status: ad.status, headline: creative.headline, text: creative.text, link: creative.link, cta: creative.cta },
+      submit: (changes) => saveItem('ad', ad.id, changes)
+    });
+  }
+
+  function editGoogleAd(ad) {
+    const rsa = ad.type === 'RESPONSIVE_SEARCH_AD';
+    const fields = [{ key: 'status', label: 'Status', type: 'select', options: statusOptions }];
+    if (rsa) {
+      fields.push(
+        { key: 'headlines', label: 'Headlines (one per line, 3 to 15)', type: 'lines', max: 30, rows: 8 },
+        { key: 'descriptions', label: 'Descriptions (one per line, 2 to 4)', type: 'lines', max: 90, rows: 4 },
+        { key: 'finalUrl', label: 'Final URL', type: 'url', wide: true },
+        { key: 'path1', label: 'Display path 1', max: 15 },
+        { key: 'path2', label: 'Display path 2', max: 15 }
+      );
+    }
+    openEdit({
+      title: `Edit ad${ad.name ? ` · ${ad.name}` : ''}`,
+      fields,
+      note: rsa ? 'Google reviews the ad again after text changes.' : 'Only responsive search ads can have their text changed here.',
+      initial: { status: ad.status, headlines: ad.headlines, descriptions: ad.descriptions, finalUrl: ad.finalUrl, path1: ad.path1, path2: ad.path2 },
+      submit: (changes) => saveItem('ad', ad.id, changes)
+    });
+  }
+
+  function editGroup(group) {
+    openEdit({
+      title: `Edit ad group · ${group.name}`,
+      fields: [
+        { key: 'name', label: 'Ad group name', max: 255, wide: true },
+        { key: 'status', label: 'Status', type: 'select', options: statusOptions },
+        { key: 'cpcBid', label: `Max CPC bid (${currency})`, type: 'number', min: 0.01, step: '0.01', hint: 'Used with Manual CPC bidding.' }
+      ],
+      initial: { name: group.name, status: group.status, cpcBid: group.cpcBid || '' },
+      submit: (changes) => saveItem('ad_group', group.id, changes)
+    });
+  }
+
+  function addKeywords() {
+    if (!groups.length) return;
+    openEdit({
+      title: 'Add keywords',
+      fields: [
+        { key: 'group', label: 'Ad group', type: 'select', options: groups.map((group) => [group.id, group.name]) },
+        { key: 'matchType', label: 'Match type', type: 'select', options: [['PHRASE', 'Phrase'], ['EXACT', 'Exact'], ['BROAD', 'Broad']] },
+        { key: 'keywords', label: 'Keywords (one per line)', type: 'lines', max: 80, rows: 6 }
+      ],
+      initial: { group: groups[0].id, matchType: 'PHRASE', keywords: [] },
+      submit: (_changes, values) => {
+        const list = editValue({ type: 'lines' }, values.keywords);
+        if (!list.length) {
+          setEditError('Add at least one keyword.');
+          return undefined;
+        }
+        return saveItem('keywords', values.group, { keywords: list.map((text) => ({ text, matchType: values.matchType })) });
+      }
+    });
+  }
+
+  function removeKeyword(row) {
+    if (!window.confirm(`Remove the keyword "${row.text}"? This cannot be undone.`)) return;
+    saveItem('keyword', row.id, { status: 'REMOVED' });
+  }
 
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -889,11 +1242,33 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose }
           </div>
           <button type="button" className="drawer-close" onClick={onClose} aria-label="Close">×</button>
         </header>
-        <div className="drawer-body">
+        <div className="drawer-body" ref={bodyRef}>
+          {notice ? <p className="ads-alert is-good">{notice}</p> : null}
+          {editError && !editing ? <p className="ads-alert is-bad">{editError}</p> : null}
+          {editing ? (
+            <EditForm
+              key={editing.token}
+              editing={editing}
+              busy={Boolean(saving)}
+              error={editError}
+              onCancel={() => { setEditing(null); setEditError(''); }}
+              onSave={(changes, values) => editing.submit(changes, values)}
+            />
+          ) : null}
           {facts.length ? (
             <dl className="drawer-facts">
               {facts.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}
             </dl>
+          ) : null}
+          {canManage && info ? (
+            <div className="page-actions drawer-actions">
+              <button className="btn-primary" type="button" onClick={editCampaign}>Edit campaign</button>
+              {statusButton('campaign', info.id, info.status, info.name)}
+              {!meta && groups.length ? <button className="btn" type="button" onClick={addKeywords}>+ Add keywords</button> : null}
+            </div>
+          ) : null}
+          {!meta && info?.locations?.length ? (
+            <div className="cy-chips">{info.locations.map((place) => <span key={place.id} className="chip is-soft">{place.name}</span>)}</div>
           ) : null}
           <div className="tabs ads-range">
             {GOOGLE_RANGES.map(([key, text]) => (
@@ -940,9 +1315,17 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose }
               {tab === 'Ads' ? (
                 ads.length ? (
                   <div className="ad-cards">
-                    {ads.map((ad) => (meta
-                      ? <MetaAdCard key={ad.id} ad={ad} adsetName={groupName.get(ad.adsetId)} currency={currency} />
-                      : <GoogleAdCard key={ad.id} ad={ad} groupName={groupName.get(ad.groupId)} currency={currency} />))}
+                    {ads.map((ad) => {
+                      const actions = canManage ? (
+                        <div className="page-actions ad-card-actions">
+                          <button className="btn" type="button" onClick={() => (meta ? editMetaAd(ad) : editGoogleAd(ad))}>Edit</button>
+                          {statusButton('ad', ad.id, ad.status, ad.name || 'this ad')}
+                        </div>
+                      ) : null;
+                      return meta
+                        ? <MetaAdCard key={ad.id} ad={ad} adsetName={groupName.get(ad.adsetId)} currency={currency} actions={actions} />
+                        : <GoogleAdCard key={ad.id} ad={ad} groupName={groupName.get(ad.groupId)} currency={currency} actions={actions} />;
+                    })}
                   </div>
                 ) : <p className="quiet">This campaign has no ads.</p>
               ) : null}
@@ -967,6 +1350,12 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose }
                         {set.targeting.places.length ? <div className="cy-chips">{set.targeting.places.map((place) => <span key={place} className="chip">{place}</span>)}</div> : null}
                         {set.targeting.interests.length ? <div className="cy-chips">{set.targeting.interests.map((item) => <span key={item} className="chip is-soft">{item}</span>)}</div> : null}
                         <StatLine row={set} currency={currency} resultKey="leads" resultLabel="leads" />
+                        {canManage ? (
+                          <div className="page-actions ad-card-actions">
+                            <button className="btn" type="button" onClick={() => editAdset(set)}>Edit</button>
+                            {statusButton('adset', set.id, set.status, set.name)}
+                          </div>
+                        ) : null}
                       </article>
                     ))}
                   </div>
@@ -980,7 +1369,13 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose }
                   { key: 'spend', label: 'Spend', render: (row) => money(row.spend, currency) },
                   { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.clicks) },
                   { key: 'ctr', label: 'CTR', render: (row) => pct(ratio(row.clicks, row.impressions)) },
-                  { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) }
+                  { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) },
+                  ...(canManage ? [{ key: 'action', label: '', render: (row) => (
+                    <span className="page-actions">
+                      <button className="btn" type="button" onClick={() => editGroup(row)}>Edit</button>
+                      {statusButton('ad_group', row.id, row.status, row.name)}
+                    </span>
+                  ) }] : [])
                 ]} rows={groups} />
               ) : null}
               {tab === 'Keywords' ? (
@@ -988,10 +1383,17 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose }
                   { key: 'text', label: 'Keyword' },
                   { key: 'match', label: 'Match', render: (row) => label(String(row.matchType || '').toLowerCase()) || '—' },
                   { key: 'group', label: 'Ad group', render: (row) => groupName.get(row.groupId) || '—' },
+                  { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.status)} /> },
                   { key: 'spend', label: 'Spend', render: (row) => money(row.spend, currency) },
                   { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.clicks) },
                   { key: 'ctr', label: 'CTR', render: (row) => pct(ratio(row.clicks, row.impressions)) },
-                  { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) }
+                  { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) },
+                  ...(canManage ? [{ key: 'action', label: '', render: (row) => (
+                    <span className="page-actions">
+                      {statusButton('keyword', row.id, row.status, row.text)}
+                      <button className="btn-ghost" type="button" disabled={Boolean(saving)} onClick={() => removeKeyword(row)}>Remove</button>
+                    </span>
+                  ) }] : [])
                 ]} rows={keywords} />
               ) : null}
             </div>
@@ -1837,7 +2239,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           <header>
             <div>
               <h2>Edit campaign</h2>
-              <p>Changes are sent to Meta Ads.</p>
+              <p>Changes are sent to Meta Ads. To change ad sets, targeting, or ad text, open the campaign row and use Edit there.</p>
             </div>
           </header>
           <div className="ads-step is-three">
@@ -1915,7 +2317,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         </div>
       )}
       </section>
-      {opened ? <CampaignDrawer brand="meta" connectionId={id} campaign={opened} initialRange={range} onClose={() => setOpened(null)} /> : null}
+      {opened ? <CampaignDrawer brand="meta" connectionId={id} campaign={opened} initialRange={range} onClose={() => setOpened(null)} canManage={canManage} onChanged={reload} /> : null}
     </div>
   );
 }
@@ -2494,7 +2896,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           <header>
             <div>
               <h2>Edit campaign</h2>
-              <p>Changes are sent to Google Ads.</p>
+              <p>Changes are sent to Google Ads. To change bidding, locations, ad groups, keywords, or ad text, open the campaign row and use Edit there.</p>
             </div>
           </header>
           <div className="ads-step is-three">
@@ -2619,7 +3021,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
         </div>
       ) : null}
       </section>
-      {opened ? <CampaignDrawer brand="google" connectionId={id} campaign={opened} initialRange={range} onClose={() => setOpened(null)} /> : null}
+      {opened ? <CampaignDrawer brand="google" connectionId={id} campaign={opened} initialRange={range} onClose={() => setOpened(null)} canManage={canManage} onChanged={reload} /> : null}
     </div>
   );
 }

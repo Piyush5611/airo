@@ -390,13 +390,15 @@ export async function googleCampaignDetail(input, campaignId, range) {
   const id = entityId(campaignId, 'campaign');
   const during = `campaign.id = ${id} AND segments.date DURING ${range}`;
   const queries = {
-    campaign: `SELECT campaign.id, campaign.name, campaign.status, campaign.primary_status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.start_date, campaign.end_date, campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${id}`,
+    campaign: `SELECT campaign.id, campaign.name, campaign.status, campaign.primary_status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.start_date_time, campaign.end_date_time, campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${id}`,
     daily: `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE ${during} ORDER BY segments.date`,
     groups: `SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.cpc_bid_micros FROM ad_group WHERE campaign.id = ${id} AND ad_group.status != 'REMOVED'`,
     groupStats: `SELECT ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM ad_group WHERE ${during}`,
     ads: `SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group_ad.status, ad_group_ad.policy_summary.approval_status, ad_group.id FROM ad_group_ad WHERE campaign.id = ${id} AND ad_group_ad.status != 'REMOVED'`,
     adStats: `SELECT ad_group_ad.ad.id, ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM ad_group_ad WHERE ${during}`,
-    keywords: `SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM keyword_view WHERE ${during} ORDER BY metrics.cost_micros DESC LIMIT 100`
+    keywords: `SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id FROM ad_group_criterion WHERE campaign.id = ${id} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE AND ad_group_criterion.status != 'REMOVED' LIMIT 300`,
+    keywordStats: `SELECT ad_group_criterion.criterion_id, ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM keyword_view WHERE ${during}`,
+    locations: `SELECT campaign_criterion.criterion_id, campaign_criterion.location.geo_target_constant FROM campaign_criterion WHERE campaign.id = ${id} AND campaign_criterion.type = 'LOCATION' AND campaign_criterion.negative = FALSE`
   };
   const keys = Object.keys(queries);
   const settled = await Promise.allSettled(keys.map((key) => search(ctx, queries[key], 2)));
@@ -412,6 +414,20 @@ export async function googleCampaignDetail(input, campaignId, range) {
     .filter(Boolean);
   const groupStats = new Map(pick('groupStats').map((row) => [String(row.adGroup?.id), row.metrics]));
   const adStats = new Map(pick('adStats').map((row) => [`${row.adGroup?.id}~${row.adGroupAd?.ad?.id}`, row.metrics]));
+  const keywordStats = new Map(pick('keywordStats').map((row) => [`${row.adGroup?.id}~${row.adGroupCriterion?.criterionId}`, row.metrics]));
+  const geoNames = pick('locations')
+    .map((row) => String(row.campaignCriterion?.location?.geoTargetConstant || ''))
+    .filter((name) => /^geoTargetConstants\/\d{1,20}$/.test(name));
+  let locations = geoNames.map((name) => ({ id: name.split('/')[1], name: name.split('/')[1] }));
+  if (geoNames.length) {
+    try {
+      const named = await search(ctx, `SELECT geo_target_constant.id, geo_target_constant.canonical_name FROM geo_target_constant WHERE geo_target_constant.resource_name IN (${geoNames.map((name) => `'${name}'`).join(', ')})`, 1);
+      const names = new Map(named.map((row) => [String(row.geoTargetConstant?.id), String(row.geoTargetConstant?.canonicalName || '')]));
+      locations = locations.map((item) => ({ id: item.id, name: names.get(item.id) || item.id }));
+    } catch {
+      // Ids still identify the locations.
+    }
+  }
   const campaign = campaignRow.campaign;
   return {
     range,
@@ -424,9 +440,10 @@ export async function googleCampaignDetail(input, campaignId, range) {
       delivery: campaign.primaryStatus || '',
       channel: campaign.advertisingChannelType || '',
       bidding: campaign.biddingStrategyType || '',
-      startDate: campaign.startDate || '',
-      endDate: campaign.endDate || '',
-      budget: major(campaignRow.campaignBudget?.amountMicros)
+      startDate: String(campaign.startDateTime || campaign.startDate || '').slice(0, 10),
+      endDate: String(campaign.endDateTime || campaign.endDate || '').slice(0, 10),
+      budget: major(campaignRow.campaignBudget?.amountMicros),
+      locations
     },
     daily: pick('daily').map((row) => ({ date: row.segments?.date || '', ...reportRow(row.metrics) })),
     groups: pick('groups').map((row) => ({
@@ -460,8 +477,8 @@ export async function googleCampaignDetail(input, campaignId, range) {
       text: String(row.adGroupCriterion?.keyword?.text || ''),
       matchType: row.adGroupCriterion?.keyword?.matchType || '',
       status: row.adGroupCriterion?.status || '',
-      ...reportRow(row.metrics)
-    }))
+      ...reportRow(keywordStats.get(`${row.adGroup?.id}~${row.adGroupCriterion?.criterionId}`))
+    })).sort((a, b) => Number(b.spend || 0) - Number(a.spend || 0))
   };
 }
 
@@ -607,6 +624,122 @@ export async function setGoogleCampaignStatus(input) {
     ...ctx,
     body: { operations: [{ update: { resourceName: `customers/${ctx.customerId}/campaigns/${id}`, status: input.status }, updateMask: 'status' }] }
   });
+}
+
+function pairId(value, label) {
+  const [group, item] = String(value || '').split('~');
+  return [entityId(group, 'ad group'), entityId(item, label)];
+}
+
+function statusField(status) {
+  return status === 'ENABLED' || status === 'PAUSED' ? status : '';
+}
+
+async function mutate(ctx, service, operations) {
+  await call(`customers/${ctx.customerId}/${service}:mutate`, { ...ctx, body: { operations } });
+}
+
+const BIDDING_UPDATE = {
+  MAXIMIZE_CLICKS: [{ targetSpend: {} }, 'target_spend'],
+  MAXIMIZE_CONVERSIONS: [{ maximizeConversions: {} }, 'maximize_conversions'],
+  MANUAL_CPC: [{ manualCpc: { enhancedCpcEnabled: false } }, 'manual_cpc.enhanced_cpc_enabled']
+};
+
+async function editGoogleCampaignFull(input, ctx, campaignId, changes) {
+  const id = entityId(campaignId, 'campaign');
+  const resourceName = `customers/${ctx.customerId}/campaigns/${id}`;
+  if (changes.budget || changes.name || statusField(changes.status)) {
+    await editGoogleCampaign({ ...input, campaignId: id, name: changes.name, dailyBudget: changes.budget, status: statusField(changes.status) });
+  }
+  const update = { resourceName };
+  const mask = [];
+  if (changes.endDate != null) {
+    update.endDateTime = changes.endDate ? dateTime(changes.endDate, true) : '2037-12-30 23:59:59';
+    mask.push('end_date_time');
+  }
+  if (changes.bidding) {
+    const [fields, path] = BIDDING_UPDATE[changes.bidding] || [];
+    if (!fields) throw new ApiError(422, 'Choose a bidding strategy.', 'validation_error');
+    Object.assign(update, fields);
+    mask.push(path);
+  }
+  if (mask.length) await mutate(ctx, 'campaigns', [{ update, updateMask: mask.join(',') }]);
+  if (Array.isArray(changes.locations)) {
+    const wanted = [...new Set(changes.locations.map((item) => entityId(item, 'location')))];
+    const rows = await search(ctx, `SELECT campaign_criterion.resource_name, campaign_criterion.location.geo_target_constant FROM campaign_criterion WHERE campaign.id = ${id} AND campaign_criterion.type = 'LOCATION' AND campaign_criterion.negative = FALSE`, 1);
+    const current = new Map(rows.map((row) => [String(row.campaignCriterion?.location?.geoTargetConstant || '').split('/')[1], row.campaignCriterion?.resourceName]));
+    const operations = [
+      ...[...current.entries()].filter(([geo]) => !wanted.includes(geo)).map(([, name]) => ({ remove: name })),
+      ...wanted.filter((geo) => !current.has(geo)).map((geo) => ({ create: { campaign: resourceName, location: { geoTargetConstant: `geoTargetConstants/${geo}` } } }))
+    ];
+    if (operations.length) await mutate(ctx, 'campaignCriteria', operations);
+  }
+}
+
+export async function editGoogleItem(input, kind, itemId, changes) {
+  const ctx = context(input);
+  const cid = ctx.customerId;
+  if (kind === 'campaign') return editGoogleCampaignFull(input, ctx, itemId, changes);
+  if (kind === 'ad_group') {
+    const id = entityId(itemId, 'ad group');
+    const update = { resourceName: `customers/${cid}/adGroups/${id}` };
+    const mask = [];
+    if (changes.name) { update.name = String(changes.name).slice(0, 255); mask.push('name'); }
+    if (statusField(changes.status)) { update.status = changes.status; mask.push('status'); }
+    if (changes.cpcBid) {
+      const bid = Math.round(Number(changes.cpcBid) * 1000000);
+      if (!Number.isFinite(bid) || bid < 10000) throw new ApiError(422, 'Enter a max CPC bid.', 'validation_error');
+      update.cpcBidMicros = String(bid);
+      mask.push('cpc_bid_micros');
+    }
+    if (!mask.length) throw new ApiError(422, 'Nothing to update.', 'validation_error');
+    return mutate(ctx, 'adGroups', [{ update, updateMask: mask.join(',') }]);
+  }
+  if (kind === 'keyword') {
+    const [group, criterion] = pairId(itemId, 'keyword');
+    const resourceName = `customers/${cid}/adGroupCriteria/${group}~${criterion}`;
+    if (changes.status === 'REMOVED') return mutate(ctx, 'adGroupCriteria', [{ remove: resourceName }]);
+    if (!statusField(changes.status)) throw new ApiError(422, 'Nothing to update.', 'validation_error');
+    return mutate(ctx, 'adGroupCriteria', [{ update: { resourceName, status: changes.status }, updateMask: 'status' }]);
+  }
+  if (kind === 'keywords') {
+    const group = entityId(itemId, 'ad group');
+    const keywords = [...new Map((changes.keywords || []).map((item) => [`${String(item.text).trim().toLowerCase()}|${item.matchType}`, item])).values()];
+    if (!keywords.length) throw new ApiError(422, 'Add at least one keyword.', 'validation_error');
+    return mutate(ctx, 'adGroupCriteria', keywords.map((item) => ({
+      create: { adGroup: `customers/${cid}/adGroups/${group}`, status: 'ENABLED', keyword: { text: String(item.text).trim(), matchType: item.matchType } }
+    })));
+  }
+  if (kind === 'ad') {
+    const [group, adId] = pairId(itemId, 'ad');
+    let changed = false;
+    if (statusField(changes.status)) {
+      await mutate(ctx, 'adGroupAds', [{ update: { resourceName: `customers/${cid}/adGroupAds/${group}~${adId}`, status: changes.status }, updateMask: 'status' }]);
+      changed = true;
+    }
+    const update = { resourceName: `customers/${cid}/ads/${adId}` };
+    const mask = [];
+    const rsa = {};
+    if (changes.headlines) { rsa.headlines = changes.headlines.map((text) => ({ text: String(text).trim() })); mask.push('responsive_search_ad.headlines'); }
+    if (changes.descriptions) { rsa.descriptions = changes.descriptions.map((text) => ({ text: String(text).trim() })); mask.push('responsive_search_ad.descriptions'); }
+    if (changes.path1 != null) { rsa.path1 = String(changes.path1).trim(); mask.push('responsive_search_ad.path1'); }
+    if (changes.path2 != null) { rsa.path2 = String(changes.path2).trim(); mask.push('responsive_search_ad.path2'); }
+    if (Object.keys(rsa).length) update.responsiveSearchAd = rsa;
+    if (changes.finalUrl) {
+      let url;
+      try { url = new URL(changes.finalUrl); } catch { throw new ApiError(422, 'Enter a valid website link.', 'validation_error'); }
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new ApiError(422, 'Enter a valid website link.', 'validation_error');
+      update.finalUrls = [url.toString()];
+      mask.push('final_urls');
+    }
+    if (mask.length) {
+      await mutate(ctx, 'ads', [{ update, updateMask: mask.join(',') }]);
+      changed = true;
+    }
+    if (!changed) throw new ApiError(422, 'Nothing to update.', 'validation_error');
+    return undefined;
+  }
+  throw new ApiError(422, 'Unknown Google Ads item.', 'validation_error');
 }
 
 export async function editGoogleCampaign(input) {

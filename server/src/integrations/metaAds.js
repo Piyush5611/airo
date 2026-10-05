@@ -414,6 +414,8 @@ function creativeOf(creative = {}) {
   const video = spec.video_data || {};
   const cta = link.call_to_action?.type || video.call_to_action?.type || creative.call_to_action_type || '';
   return {
+    editable: Boolean(spec.link_data || spec.video_data),
+    leadForm: Boolean(link.call_to_action?.value?.lead_gen_form_id),
     headline: String(creative.title || link.name || video.title || '').slice(0, 200),
     text: String(creative.body || link.message || video.message || '').slice(0, 1000),
     link: String(link.link || video.call_to_action?.value?.link || '').slice(0, 500),
@@ -436,7 +438,20 @@ function targetingOf(targeting = {}) {
     gender: genders,
     places: places.slice(0, 12),
     interests: interests.slice(0, 12),
-    advantage: targeting.targeting_automation?.advantage_audience === 1
+    advantage: targeting.targeting_automation?.advantage_audience === 1,
+    edit: {
+      ageMin: targeting.age_min || 18,
+      ageMax: targeting.age_max || 65,
+      gender: genders === 'Men' ? 'men' : genders === 'Women' ? 'women' : 'all',
+      cities: (geo.cities || []).map((item) => ({
+        key: String(item.key),
+        name: String(item.name || item.key),
+        radius: item.radius || 0,
+        distanceUnit: item.distance_unit || 'kilometer'
+      })),
+      otherPlaces: [...(geo.regions || []).map((item) => item.name), ...(geo.countries || [])].filter(Boolean),
+      interests: (targeting.flexible_spec || []).flatMap((item) => item.interests || []).map((item) => ({ id: String(item.id), name: String(item.name || item.id) }))
+    }
   };
 }
 
@@ -454,7 +469,7 @@ export async function metaCampaignDetail({ apiKey, accountId }, campaignId, rang
   const currency = account.currency || '';
   const stats = 'spend,impressions,clicks,reach,actions';
   const parts = {
-    adsets: list(`${id}/adsets`, apiKey, { fields: 'id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,destination_type,targeting' }),
+    adsets: list(`${id}/adsets`, apiKey, { fields: 'id,name,status,effective_status,daily_budget,lifetime_budget,end_time,optimization_goal,billing_event,destination_type,targeting' }),
     ads: list(`${id}/ads`, apiKey, { fields: 'id,name,status,effective_status,adset_id,creative{id,title,body,image_url,thumbnail_url,call_to_action_type,object_story_spec}' }),
     daily: list(`${id}/insights`, apiKey, { date_preset: preset, time_increment: '1', fields: stats }),
     adsetStats: list(`${id}/insights`, apiKey, { date_preset: preset, level: 'adset', fields: `adset_id,${stats}` }),
@@ -495,6 +510,7 @@ export async function metaCampaignDetail({ apiKey, accountId }, campaignId, rang
       delivery: row.effective_status || '',
       budget: major(row.daily_budget || row.lifetime_budget, currency),
       budgetKind: row.daily_budget ? 'daily' : row.lifetime_budget ? 'lifetime' : '',
+      endTime: row.end_time || '',
       goal: row.optimization_goal || '',
       destination: row.destination_type || '',
       targeting: targetingOf(row.targeting),
@@ -1142,6 +1158,124 @@ export async function editMetaCampaign({ apiKey, accountId, campaignId, name, da
   }
   if (!Object.keys(params).length) throw new ApiError(422, 'Nothing to update.', 'validation_error');
   await graph(String(campaignId), apiKey, params, 'POST');
+}
+
+async function ownedMetaObject(apiKey, act, id, fields) {
+  if (!/^\d{5,25}$/.test(String(id || ''))) throw new ApiError(422, 'Unknown Meta item.', 'validation_error');
+  const row = await graph(String(id), apiKey, { fields: `account_id,${fields}` });
+  if (String(row.account_id || '') !== act) throw new ApiError(404, 'This item is not in the connected ad account.', 'not_found');
+  return row;
+}
+
+async function budgetParams(apiKey, act, row, amount, missing) {
+  if (amount == null || amount === '') return {};
+  if (!row.daily_budget && !row.lifetime_budget) throw new ApiError(422, missing, 'validation_error');
+  const account = await graph(`act_${act}`, apiKey, { fields: 'currency' });
+  const minor = Math.round(Number(amount) * (OFFSET[account.currency] || 100));
+  if (!Number.isFinite(minor) || minor < 1) throw new ApiError(422, 'Enter a budget.', 'validation_error');
+  return { [row.daily_budget ? 'daily_budget' : 'lifetime_budget']: String(minor) };
+}
+
+function editedTargeting(current = {}, changes) {
+  const targeting = { ...current };
+  if (changes.ageMin != null) targeting.age_min = Number(changes.ageMin);
+  if (changes.ageMax != null) targeting.age_max = Number(changes.ageMax);
+  if (targeting.age_min && targeting.age_max && targeting.age_min > targeting.age_max) {
+    throw new ApiError(422, 'Minimum age must be below maximum age.', 'validation_error');
+  }
+  if (changes.gender === 'men') targeting.genders = [1];
+  if (changes.gender === 'women') targeting.genders = [2];
+  if (changes.gender === 'all') delete targeting.genders;
+  if (Array.isArray(changes.cities)) {
+    const geo = { ...(targeting.geo_locations || {}) };
+    const cities = changes.cities.map((city) => {
+      const item = { key: String(city.key) };
+      if (Number(city.radius) > 0) {
+        item.radius = Math.min(80, Math.max(1, Number(city.radius)));
+        item.distance_unit = city.distanceUnit === 'mile' ? 'mile' : 'kilometer';
+      }
+      return item;
+    });
+    if (cities.length) geo.cities = cities;
+    else delete geo.cities;
+    if (!geo.cities && !geo.regions?.length && !geo.countries?.length && !geo.custom_locations?.length && !geo.zips?.length) geo.countries = ['IN'];
+    targeting.geo_locations = geo;
+  }
+  if (Array.isArray(changes.interests)) {
+    const specs = (targeting.flexible_spec || []).map((spec) => {
+      const { interests, ...rest } = spec;
+      return rest;
+    });
+    if (changes.interests.length) {
+      const first = specs[0] || {};
+      specs[0] = { ...first, interests: changes.interests.map((item) => ({ id: String(item.id), name: item.name })) };
+    }
+    const kept = specs.filter((spec) => Object.keys(spec).length);
+    if (kept.length) targeting.flexible_spec = kept;
+    else delete targeting.flexible_spec;
+  }
+  return targeting;
+}
+
+function editedStory(spec, changes) {
+  const story = JSON.parse(JSON.stringify(spec || {}));
+  const link = story.link_data;
+  const video = story.video_data;
+  if (!link && !video) {
+    throw new ApiError(422, 'This ad uses a dynamic or catalog creative. Change its text in Meta Ads Manager.', 'validation_error');
+  }
+  if (link) {
+    if (changes.headline != null) link.name = String(changes.headline).slice(0, 255);
+    if (changes.text != null) link.message = String(changes.text).slice(0, 2000);
+    if (link.image_hash) delete link.picture;
+    if (changes.link) {
+      if (link.call_to_action?.value?.lead_gen_form_id) throw new ApiError(422, 'Lead form ads open the form, not a website link.', 'validation_error');
+      link.link = changes.link;
+      if (link.call_to_action?.value?.link) link.call_to_action.value.link = changes.link;
+    }
+    if (changes.cta && link.call_to_action) link.call_to_action.type = changes.cta;
+  }
+  if (video) {
+    if (changes.headline != null) video.title = String(changes.headline).slice(0, 255);
+    if (changes.text != null) video.message = String(changes.text).slice(0, 2000);
+    if (video.image_hash) delete video.image_url;
+    if (changes.link && video.call_to_action?.value) video.call_to_action.value.link = changes.link;
+    if (changes.cta && video.call_to_action) video.call_to_action.type = changes.cta;
+  }
+  return story;
+}
+
+export async function editMetaItem({ apiKey, accountId }, kind, itemId, changes) {
+  const act = actId(accountId);
+  const params = {};
+  if (changes.name) params.name = String(changes.name).slice(0, 180);
+  if (changes.status === 'ACTIVE' || changes.status === 'PAUSED') params.status = changes.status;
+  if (kind === 'campaign') {
+    const row = await ownedMetaObject(apiKey, act, itemId, 'daily_budget,lifetime_budget');
+    Object.assign(params, await budgetParams(apiKey, act, row, changes.budget, 'This campaign has no campaign budget. Change the budget on its ad sets.'));
+  } else if (kind === 'adset') {
+    const row = await ownedMetaObject(apiKey, act, itemId, 'daily_budget,lifetime_budget,end_time,targeting');
+    Object.assign(params, await budgetParams(apiKey, act, row, changes.budget, 'This ad set uses the campaign budget. Change the budget on the campaign.'));
+    if (changes.endDate) params.end_time = `${changes.endDate}T23:59:00+0530`;
+    if (['ageMin', 'ageMax', 'gender', 'cities', 'interests'].some((key) => changes[key] != null)) {
+      params.targeting = JSON.stringify(editedTargeting(row.targeting, changes));
+    }
+  } else if (kind === 'ad') {
+    const row = await ownedMetaObject(apiKey, act, itemId, 'creative{id,name,object_story_spec}');
+    if (['headline', 'text', 'link', 'cta'].some((key) => changes[key] != null)) {
+      const story = editedStory(row.creative?.object_story_spec, changes);
+      const created = await graph(`act_${act}/adcreatives`, apiKey, {
+        name: `${String(row.creative?.name || 'Creative').slice(0, 150)} edited`,
+        object_story_spec: JSON.stringify(story)
+      }, 'POST');
+      if (!created.id) throw new ApiError(422, 'Meta Ads did not return an ad creative.', 'validation_error');
+      params.creative = JSON.stringify({ creative_id: String(created.id) });
+    }
+  } else {
+    throw new ApiError(422, 'Unknown Meta item.', 'validation_error');
+  }
+  if (!Object.keys(params).length) throw new ApiError(422, 'Nothing to update.', 'validation_error');
+  await graph(String(itemId), apiKey, params, 'POST');
 }
 
 export async function createMetaAd(input) {

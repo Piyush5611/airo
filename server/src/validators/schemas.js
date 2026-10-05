@@ -44,6 +44,45 @@ export const assignSchema = body({ userId: z.number().int().positive() });
 
 export const idParams = params({ id: z.coerce.number().int().positive() });
 
+const adEditBody = z.object({
+  name: z.string().trim().min(1).max(180).optional(),
+  status: z.enum(['ACTIVE', 'PAUSED', 'ENABLED', 'REMOVED']).optional(),
+  budget: z.coerce.number().positive().max(1000000000).optional(),
+  endDate: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal('')]).optional(),
+  ageMin: z.coerce.number().int().min(13).max(65).optional(),
+  ageMax: z.coerce.number().int().min(13).max(65).optional(),
+  gender: z.enum(['all', 'men', 'women']).optional(),
+  cities: z.array(z.object({
+    key: z.string().regex(/^\d{1,20}$/),
+    name: z.string().max(160).optional(),
+    radius: z.coerce.number().min(0).max(80).optional(),
+    distanceUnit: z.enum(['kilometer', 'mile']).optional()
+  })).max(50).optional(),
+  interests: z.array(z.object({ id: z.string().regex(/^\d{1,25}$/), name: z.string().max(160) })).max(50).optional(),
+  headline: z.string().max(255).optional(),
+  text: z.string().max(2000).optional(),
+  link: z.string().url().max(500).optional(),
+  cta: z.string().regex(/^[A-Z_]{2,40}$/).optional(),
+  cpcBid: z.coerce.number().positive().max(1000000).optional(),
+  bidding: z.enum(['MAXIMIZE_CLICKS', 'MAXIMIZE_CONVERSIONS', 'MANUAL_CPC']).optional(),
+  locations: z.array(z.string().regex(/^\d{1,20}$/)).max(50).optional(),
+  headlines: z.array(z.string().trim().min(1).max(30)).min(3).max(15).optional(),
+  descriptions: z.array(z.string().trim().min(1).max(90)).min(2).max(4).optional(),
+  finalUrl: z.string().url().max(500).optional(),
+  path1: z.string().max(15).optional(),
+  path2: z.string().max(15).optional(),
+  keywords: z.array(z.object({ text: z.string().trim().min(1).max(80), matchType: z.enum(['BROAD', 'PHRASE', 'EXACT']) })).min(1).max(50).optional()
+});
+
+const editParams = (kinds) => z.object({
+  id: z.coerce.number().int().positive(),
+  kind: z.enum(kinds),
+  itemId: z.string().regex(/^\d{1,25}(~\d{1,25})?$/)
+});
+
+export const metaItemEdit = z.object({ body: adEditBody, query: z.any(), params: editParams(['campaign', 'adset', 'ad']) });
+export const googleItemEdit = z.object({ body: adEditBody, query: z.any(), params: editParams(['campaign', 'ad_group', 'keyword', 'keywords', 'ad']) });
+
 export const campaignParams = params({ id: z.coerce.number().int().positive(), campaignId: z.string().regex(/^\d{1,25}$/) });
 
 const callEmployee = z.object({

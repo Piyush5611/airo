@@ -198,6 +198,12 @@ client.post('/connections/:id/meta/campaigns', requirePermission('connections.ma
 client.post('/connections/:id/meta/ads', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaAdSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.publishMetaAd(req.auth, req, req.params.id), 201);
 }));
+client.post('/connections/:id/meta/items/:kind/:itemId', requirePermission('connections.manage'), validate(schemas.metaItemEdit), asyncHandler(async (req, res) => {
+  ok(res, await connections.editMetaItemFor(req.auth, req, req.params.id));
+}));
+client.post('/connections/:id/google/items/:kind/:itemId', requirePermission('connections.manage'), validate(schemas.googleItemEdit), asyncHandler(async (req, res) => {
+  ok(res, await connections.editGoogleItemFor(req.auth, req, req.params.id));
+}));
 client.post('/connections/:id/meta/edit', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaEditSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.editMetaAdCampaign(req.auth, req, req.params.id));
 }));

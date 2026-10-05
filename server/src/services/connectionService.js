@@ -1,9 +1,9 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { CATEGORIES } from '../domain/providers.js';
-import { createGoogleSearchCampaign, editGoogleCampaign, exchangeGoogleCode, googleAuthUrl, googleCampaignDetail, googleKeywordIdeas, googleReport, listGoogleAccounts, pullGoogleAds, searchGoogleLanguages, setGoogleCampaignStatus, suggestGoogleLocations, verifyGoogleAccount } from '../integrations/googleAds.js';
+import { createGoogleSearchCampaign, editGoogleCampaign, editGoogleItem, exchangeGoogleCode, googleAuthUrl, googleCampaignDetail, googleKeywordIdeas, googleReport, listGoogleAccounts, pullGoogleAds, searchGoogleLanguages, setGoogleCampaignStatus, suggestGoogleLocations, verifyGoogleAccount } from '../integrations/googleAds.js';
 import { cleanNexcallKey, nexcallBase, nexcallCallReport, nexcallCalls, nexcallFollowups, nexcallLeads, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
-import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, exchangeMetaCode, listAdInstagram, listMetaAdAccounts, listMetaPages, listMetaPixels, listPageInstagram, metaAuthUrl, metaCampaignDetail, metaReport, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, editMetaItem, exchangeMetaCode, listAdInstagram, listMetaAdAccounts, listMetaPages, listMetaPixels, listPageInstagram, metaAuthUrl, metaCampaignDetail, metaReport, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -1007,6 +1007,29 @@ export async function googleReportFor(auth, id, range) {
 export async function googleCampaignFor(auth, id, campaignId, range) {
   const input = await googleSecret(auth, id);
   return googleCampaignDetail(input, campaignId, range);
+}
+
+const EDIT_NOTICE = {
+  campaign: 'Campaign updated.',
+  adset: 'Ad set updated.',
+  ad_group: 'Ad group updated.',
+  ad: 'Ad updated.',
+  keyword: 'Keyword updated.',
+  keywords: 'Keywords added.'
+};
+
+export async function editGoogleItemFor(auth, req, id) {
+  const input = await googleSecret(auth, id);
+  await editGoogleItem(input, req.params.kind, req.params.itemId, req.body);
+  await recordAudit(req, { action: 'connection.google_item_edited', resource: 'connection', resourceId: id, metadata: { kind: req.params.kind, fields: Object.keys(req.body) } });
+  return syncWithNotice(auth, req, id, `${EDIT_NOTICE[req.params.kind] || 'Updated.'} Changes are live in Google Ads.`);
+}
+
+export async function editMetaItemFor(auth, req, id) {
+  const secret = await metaSecret(auth, id);
+  await editMetaItem({ apiKey: secret.apiKey, accountId: secret.accountId }, req.params.kind, req.params.itemId, req.body);
+  await recordAudit(req, { action: 'connection.meta_item_edited', resource: 'connection', resourceId: id, metadata: { kind: req.params.kind, fields: Object.keys(req.body) } });
+  return syncWithNotice(auth, req, id, `${EDIT_NOTICE[req.params.kind] || 'Updated.'} Changes are live in Meta.`);
 }
 
 export async function createGoogleCampaign(auth, req, id) {

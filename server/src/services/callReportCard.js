@@ -11,6 +11,10 @@ const BAR = 10;
 const NAME = 11;
 const CALL_ASK = /\b(call|calls|calling|report|nexcall|yatri|performance|hisab|summary)\b/i;
 const OTHER_ASK = /\b(follow[- ]?ups?|call[- ]?backs?|callbacks?|leads?|campaign|ads?|budget|spend)\b/i;
+const TIME_ASK = /\b(time|timing|timings|samay|waqt|hour|hours|ghante|ghanta|baje|slot)\b/i;
+const ANALYSIS_ASK = /\b(kyu|kyun|kyon|why|kaise|how|compare|suggest|tips?|improve|badha\w*|reason|analy[sz]\w*)\b/i;
+const HOUR = 60 * 60 * 1000;
+const hourCache = new Map();
 const NOT_NAMES = new Set(['call', 'calls', 'report', 'team', 'aaj', 'kal', 'today', 'yesterday', 'week', 'month', 'hafte', 'mahine', 'mera', 'sab', 'all', 'total', 'yatri', 'nexcall']);
 
 function hasWord(text, value) {
@@ -300,7 +304,110 @@ export function wantsCallCard(messages) {
   if (!latest || !CALL_ASK.test(latest)) return '';
   if (OTHER_ASK.test(latest) && !/\bcalls?\b|\bcalling\b/i.test(latest)) return '';
   if (/\b\d{10,13}\b/.test(latest)) return '';
+  if (!TIME_ASK.test(latest) && ANALYSIS_ASK.test(latest)) return '';
   return latest;
+}
+
+function hourName(hour) {
+  return `${hour % 12 || 12} ${hour < 12 || hour === 24 ? 'AM' : 'PM'}`;
+}
+
+function hourDays(text) {
+  const today = reportWindow('aaj').from;
+  if (/\b(aaj|today)\b/i.test(text)) return { days: [today], label: `Today, ${dayLabel(today)}` };
+  if (/\b(kal|yesterday)\b/i.test(text)) {
+    const day = new Date(today.getTime() - DAY);
+    return { days: [day], label: `Yesterday, ${dayLabel(day)}` };
+  }
+  const days = [3, 2, 1].map((back) => new Date(today.getTime() - back * DAY));
+  return { days, label: `Last 3 days (${dayLabel(days[0])} – ${dayLabel(days[2])})` };
+}
+
+async function hourlyTotals(link, days) {
+  const now = Date.now();
+  const slots = days.flatMap((day) => Array.from({ length: 24 }, (_, hour) => new Date(day.getTime() + hour * HOUR))).filter((slot) => slot.getTime() < now);
+  const sums = Array.from({ length: 24 }, () => ({ total: 0, connected: 0 }));
+  let failed = 0;
+  for (let index = 0; index < slots.length; index += 24) {
+    await Promise.all(slots.slice(index, index + 24).map(async (slot) => {
+      const key = `${link.id}|${slot.getTime()}`;
+      const hit = hourCache.get(key);
+      let totals = hit && hit.expires > now ? hit.totals : null;
+      if (!totals) {
+        try {
+          const end = Math.min(slot.getTime() + HOUR - 1000, now);
+          totals = (await readReport(link, slot, new Date(end))).totals;
+          hourCache.set(key, { totals, expires: now + (end < now - HOUR ? 6 * HOUR : 5 * 60 * 1000) });
+          if (hourCache.size > 2000) hourCache.delete(hourCache.keys().next().value);
+        } catch {
+          failed += 1;
+          return;
+        }
+      }
+      const hour = istParts(slot).h;
+      sums[hour].total += n(totals.total_calls);
+      sums[hour].connected += n(totals.connected_calls);
+    }));
+  }
+  return { sums, failed };
+}
+
+function hourLines(sums) {
+  const allCalls = sums.reduce((total, row) => total + row.total, 0);
+  if (!allCalls) return ['No calls were made in this period yet.', ''];
+  const active = sums.map((row, hour) => ({ ...row, hour })).filter((row) => row.total >= Math.max(1, allCalls * 0.005));
+  const first = active[0].hour;
+  const last = active[active.length - 1].hour;
+  const rows = sums.slice(first, last + 1).map((row, index) => ({ ...row, hour: first + index }));
+  const allConnected = sums.reduce((total, row) => total + row.connected, 0);
+  const max = Math.max(...rows.map((row) => row.connected), 1);
+  const lines = [
+    '*⏰ Connected calls by hour*',
+    '```',
+    ...rows.map((row) => `${hourName(row.hour).padStart(5, ' ')} ${bar(row.connected, max)} ${fmt(row.connected)} · ${pct(row.connected, row.total)}%`),
+    '```',
+    `_Bar = connected calls · % = pick-up rate${rows.length < 24 ? ' · quiet hours hidden' : ''}_`,
+    ''
+  ];
+  const most = [...rows].sort((a, b) => b.connected - a.connected)[0];
+  const busy = rows.filter((row) => row.total >= Math.max(20, allCalls * 0.01));
+  const bestRate = [...busy].sort((a, b) => pct(b.connected, b.total) - pct(a.connected, a.total) || b.connected - a.connected)[0];
+  const worstRate = [...busy].sort((a, b) => pct(a.connected, a.total) - pct(b.connected, b.total))[0];
+  let peak = null;
+  for (let index = 0; index + 3 <= rows.length; index += 1) {
+    const connected = rows[index].connected + rows[index + 1].connected + rows[index + 2].connected;
+    if (!peak || connected > peak.connected) peak = { from: rows[index].hour, connected };
+  }
+  lines.push(`🏆 Most connected: *${hourName(most.hour)} – ${hourName(most.hour + 1)}* (${fmt(most.connected)} of ${fmt(most.total)} calls, ${pct(most.connected, most.total)}%)`);
+  if (bestRate) lines.push(`🎯 Best pick-up rate: *${hourName(bestRate.hour)} – ${hourName(bestRate.hour + 1)}* (${pct(bestRate.connected, bestRate.total)}%, ${fmt(bestRate.connected)} of ${fmt(bestRate.total)})`);
+  if (peak && rows.length >= 3) lines.push(`🔥 Peak 3 hours: *${hourName(peak.from)} – ${hourName(peak.from + 3)}* (${pct(peak.connected, allConnected)}% of all connected calls)`);
+  if (worstRate && worstRate !== bestRate) lines.push(`📉 Lowest pick-up: *${hourName(worstRate.hour)} – ${hourName(worstRate.hour + 1)}* (${pct(worstRate.connected, worstRate.total)}%)`);
+  if (bestRate) {
+    const slots = [...new Set([most.hour, bestRate.hour])].map((hour) => `${hourName(hour)} – ${hourName(hour + 1)}`);
+    lines.push('', `💡 Plan important calls in the *${slots.join('* and *')}* slot${slots.length > 1 ? 's' : ''}.`);
+  }
+  lines.push('');
+  return lines;
+}
+
+async function hourCard(link, text, businessName) {
+  const { days, label } = hourDays(text);
+  const { sums, failed } = await hourlyTotals(link, days);
+  const lines = [
+    '📞 *BEST TIME TO CALL*',
+    `🗓️ ${label}`,
+    businessName ? `🏢 ${businessName} · Call Yatri` : '🏢 Call Yatri',
+    '━━━━━━━━━━━━━━━━',
+    '',
+    ...hourLines(sums)
+  ];
+  if (failed) lines.push(`⚠️ ${failed} hour${failed > 1 ? 's' : ''} could not be loaded from Call Yatri, so numbers may be a little low.`, '');
+  lines.push(
+    '━━━━━━━━━━━━━━━━',
+    `_Live from Call Yatri · ${clock(new Date())} IST_`,
+    '💬 Try: *aaj kis time call connect hui*, *kal ka best time*, or *is hafte ka report*'
+  );
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 4000);
 }
 
 export async function callReportCard(organizationId, messages, businessName = '') {
@@ -308,6 +415,7 @@ export async function callReportCard(organizationId, messages, businessName = ''
   if (!text || !organizationId) return null;
   const link = await callYatri(organizationId);
   if (!link) return null;
+  if (TIME_ASK.test(text)) return hourCard(link, text, businessName);
   const window = reportWindow(text);
   const header = [
     '📞 *CALL REPORT*',

@@ -1083,6 +1083,13 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
     });
   }
 
+  const autoEdited = useRef(false);
+  useEffect(() => {
+    if (!campaign.edit || !canManage || !info || autoEdited.current) return;
+    autoEdited.current = true;
+    editCampaign();
+  }, [info, campaign.edit, canManage]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function editAdset(set) {
     const edit = set.targeting.edit || {};
     const fields = [
@@ -1473,7 +1480,6 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
-  const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState('');
   const [range, setRange] = useState('LAST_30_DAYS');
@@ -1481,12 +1487,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [opened, setOpened] = useState(null);
   const { report, busy: reportBusy, error: reportError } = useAdsReport(id, 'meta', range);
   const publishMode = useRef(false);
-  const editRef = useRef(null);
   const steps = ['Campaign', 'Ad set', 'Ad', 'Review'];
-
-  useEffect(() => {
-    if (editing?.id) editRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [editing?.id]);
 
   function loadIdentity() {
     api.get(`/api/connections/${id}/meta/pages`)
@@ -1710,28 +1711,6 @@ function MetaAdsManager({ id, data, canManage, reload }) {
       setStep(0);
       setCreating(false);
       setNotice(saved?.notice || (publishMode.current ? 'Ad published on Meta.' : 'Ad saved on Meta as paused.'));
-      reload();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveEdit(event) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      const saved = await api.post(`/api/connections/${id}/meta/edit`, {
-        campaignId: editing.id,
-        name: editing.name,
-        dailyBudget: Number(editing.budget) >= 1 ? Number(editing.budget) : undefined,
-        status: editing.status
-      });
-      setEditing(null);
-      setNotice(saved?.notice || 'Campaign updated in Meta.');
       reload();
     } catch (err) {
       setError(err.message);
@@ -2234,34 +2213,6 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           </div>
         </>
       ) : null}
-      {editing ? (
-        <form ref={editRef} className="form-grid panel ads-edit" onSubmit={saveEdit}>
-          <header>
-            <div>
-              <h2>Edit campaign</h2>
-              <p>Changes are sent to Meta Ads. To change ad sets, targeting, or ad text, open the campaign row and use Edit there.</p>
-            </div>
-          </header>
-          <div className="ads-step is-three">
-            <label className="stack-field">Name
-              <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} required minLength={2} />
-            </label>
-            <label className="stack-field">Daily budget
-              <input type="number" min="1" step="1" value={editing.budget} onChange={(event) => setEditing({ ...editing, budget: event.target.value })} />
-            </label>
-            <label className="stack-field">Status
-              <select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })}>
-                <option value="PAUSED">Paused</option>
-                <option value="ACTIVE">Active</option>
-              </select>
-            </label>
-          </div>
-          <div className="page-actions ads-actions">
-            <button className="btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
-            <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving' : 'Save'}</button>
-          </div>
-        </form>
-      ) : null}
       <section className="panel">
       <AdsTableHead
         tabs={['Campaigns', 'Ad sets', 'Ads', 'Report']}
@@ -2298,7 +2249,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           { key: 'leads', label: 'Leads', render: (row) => row.fields?.leads == null || row.fields?.leads === '' ? '—' : num(row.fields.leads) },
           { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ACTIVE' || row.fields?.status === 'PAUSED') ? (
             <span className="page-actions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-              <button className="btn" type="button" disabled={busy} onClick={() => setEditing({ id: row.externalId, name: row.name, budget: row.fields?.budget || '', status: row.fields?.status || 'PAUSED' })}>Edit</button>
+              <button className="btn" type="button" disabled={busy} onClick={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })}>Edit</button>
               <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE')}>
                 {row.fields.status === 'ACTIVE' ? 'Pause' : 'Turn on'}
               </button>
@@ -2381,7 +2332,6 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
   const [descriptions, setDescriptions] = useState(['', '']);
   const [path1, setPath1] = useState('');
   const [path2, setPath2] = useState('');
-  const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -2391,11 +2341,6 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState('');
   const publishMode = useRef(false);
-  const editRef = useRef(null);
-
-  useEffect(() => {
-    if (editing?.id) editRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [editing?.id]);
 
   const keywordList = lines(keywordText);
   const negativeList = lines(negativeText);
@@ -2528,28 +2473,6 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
       setStep(0);
       setCreating(false);
       setNotice(saved?.notice || 'Campaign saved on Google Ads.');
-      reload();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveEdit(event) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      const saved = await api.post(`/api/connections/${id}/google/edit`, {
-        campaignId: editing.id,
-        name: editing.name,
-        dailyBudget: Number(editing.budget) >= 1 ? Number(editing.budget) : undefined,
-        status: editing.status
-      });
-      setEditing(null);
-      setNotice(saved?.notice || 'Campaign updated in Google Ads.');
       reload();
     } catch (err) {
       setError(err.message);
@@ -2891,34 +2814,6 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           </div>
         </>
       ) : null}
-      {editing ? (
-        <form ref={editRef} className="form-grid panel ads-edit" onSubmit={saveEdit}>
-          <header>
-            <div>
-              <h2>Edit campaign</h2>
-              <p>Changes are sent to Google Ads. To change bidding, locations, ad groups, keywords, or ad text, open the campaign row and use Edit there.</p>
-            </div>
-          </header>
-          <div className="ads-step is-three">
-            <label className="stack-field">Name
-              <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} required minLength={2} />
-            </label>
-            <label className="stack-field">Daily budget ({currency})
-              <input type="number" min="1" step="1" value={editing.budget} onChange={(event) => setEditing({ ...editing, budget: event.target.value })} />
-            </label>
-            <label className="stack-field">Status
-              <select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })}>
-                <option value="PAUSED">Paused</option>
-                <option value="ENABLED">Enabled</option>
-              </select>
-            </label>
-          </div>
-          <div className="page-actions ads-actions">
-            <button className="btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
-            <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving' : 'Save'}</button>
-          </div>
-        </form>
-      ) : null}
       <section className="panel">
       <AdsTableHead
         tabs={tabs}
@@ -2941,7 +2836,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
             { key: 'conversions', label: 'Conversions', render: (row) => countCell(row.fields?.conversions) },
             { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ENABLED' || row.fields?.status === 'PAUSED') ? (
               <span className="page-actions" onClick={(event) => event.stopPropagation()}>
-                <button className="btn" type="button" disabled={busy} onClick={() => setEditing({ id: row.externalId, name: row.name, budget: row.fields?.budget || '', status: row.fields?.status || 'PAUSED' })}>Edit</button>
+                <button className="btn" type="button" disabled={busy} onClick={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })}>Edit</button>
                 <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ENABLED' ? 'PAUSED' : 'ENABLED')}>
                   {row.fields.status === 'ENABLED' ? 'Pause' : 'Turn on'}
                 </button>

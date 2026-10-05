@@ -347,7 +347,8 @@ export async function googleReport(input, range) {
     daily: `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM customer WHERE segments.date DURING ${range} ORDER BY segments.date`,
     campaigns: `SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.ctr, metrics.average_cpc, metrics.conversions, metrics.cost_per_conversion FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date DURING ${range} ORDER BY metrics.cost_micros DESC LIMIT 100`,
     keywords: `SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group.id, campaign.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM keyword_view WHERE segments.date DURING ${range} ORDER BY metrics.cost_micros DESC LIMIT 50`,
-    searchTerms: `SELECT search_term_view.search_term, campaign.name, ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM search_term_view WHERE segments.date DURING ${range} ORDER BY metrics.clicks DESC LIMIT 50`
+    searchTerms: `SELECT search_term_view.search_term, campaign.name, ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM search_term_view WHERE segments.date DURING ${range} ORDER BY metrics.clicks DESC LIMIT 50`,
+    devices: `SELECT segments.device, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM customer WHERE segments.date DURING ${range}`
   };
   const keys = Object.keys(queries);
   const settled = await Promise.allSettled(keys.map((key) => search(ctx, queries[key], 1)));
@@ -379,6 +380,7 @@ export async function googleReport(input, range) {
     campaign: String(row.campaign?.name || ''),
     ...reportRow(row.metrics)
   }));
+  result.devices = rows(4).map((row) => ({ name: String(row.segments?.device || 'UNKNOWN'), ...reportRow(row.metrics) }));
   return result;
 }
 

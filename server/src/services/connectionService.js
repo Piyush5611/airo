@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { CATEGORIES } from '../domain/providers.js';
 import { createGoogleSearchCampaign, editGoogleCampaign, exchangeGoogleCode, googleAuthUrl, googleKeywordIdeas, googleReport, listGoogleAccounts, pullGoogleAds, searchGoogleLanguages, setGoogleCampaignStatus, suggestGoogleLocations, verifyGoogleAccount } from '../integrations/googleAds.js';
 import { cleanNexcallKey, nexcallBase, nexcallCallReport, nexcallCalls, nexcallFollowups, nexcallLeads, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
-import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, exchangeMetaCode, listAdInstagram, listMetaAdAccounts, listMetaPages, listMetaPixels, listPageInstagram, metaAuthUrl, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, exchangeMetaCode, listAdInstagram, listMetaAdAccounts, listMetaPages, listMetaPixels, listPageInstagram, metaAuthUrl, metaReport, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -574,6 +574,11 @@ async function metaSecret(auth, id) {
   if (!secret?.apiKey || !secret.verified) throw new ApiError(422, 'Connect Meta Ads before managing campaigns.', 'validation_error');
   if (!secret.accountId) throw new ApiError(422, 'Account id is required for Meta Ads.', 'validation_error');
   return secret;
+}
+
+export async function metaReportFor(auth, id, range) {
+  const secret = await metaSecret(auth, id);
+  return metaReport({ apiKey: secret.apiKey, accountId: secret.accountId }, range);
 }
 
 export async function createMetaCampaign(auth, req, id) {

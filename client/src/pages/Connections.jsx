@@ -5,7 +5,7 @@ import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { day, indianDate, inr, label, num, parseIst, when } from '../format.js';
 import { providerLogo } from '../providerLogos.js';
-import { Badge, LineChart, Page, State, Subnav, Table, useSection } from '../ui.jsx';
+import { Badge, Page, State, Subnav, Table, useSection } from '../ui.jsx';
 
 const CONNECTION_SECTIONS = ['Advertising', 'Real Estate Portals', 'Communication', 'Calling', 'CRM', 'Analytics', 'Developer / API'];
 const CATEGORY_KEY = {
@@ -311,12 +311,381 @@ function total(rows, key) {
   return values.reduce((sum, value) => sum + Number(value), 0);
 }
 
+function ratio(part, whole) {
+  if (part == null || !Number(whole)) return null;
+  return Number(part) / Number(whole);
+}
+
+function pct(value) {
+  return value == null ? '—' : `${(value * 100).toFixed(2)}%`;
+}
+
+function AdsHeader({ brand, title, account, job, counts, canManage, creating, onCreate, createLabel }) {
+  const failed = job?.status === 'failed';
+  return (
+    <section className={`panel ads-hero is-${brand}`}>
+      <div className="ads-hero-main">
+        <span className={`ads-mark is-${brand}`} aria-hidden="true">{brand === 'google' ? 'G' : 'M'}</span>
+        <div>
+          <p className="eyebrow">{title}</p>
+          <h2>{account || title}</h2>
+          <p className={failed ? 'delta-down' : 'quiet'}>
+            {job ? `${failed ? 'Last sync failed: ' : 'Last sync: '}${job.summary || '—'} · ${when(job.startedAt)}` : 'No sync has run yet. Press Sync to read this account.'}
+          </p>
+        </div>
+      </div>
+      <div className="ads-hero-side">
+        <div className="ads-counts">
+          {counts.map(([text, value, tone]) => (
+            <span key={text} className={tone ? `is-${tone}` : ''}><b>{num(value)}</b>{text}</span>
+          ))}
+        </div>
+        {canManage ? (
+          <button className={creating ? 'btn' : 'btn-primary'} type="button" onClick={onCreate}>{creating ? 'Close' : createLabel}</button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function AdsAlerts({ notice, error }) {
+  if (!notice && !error) return null;
+  return (
+    <>
+      {notice ? <p className="ads-alert is-good">{notice}</p> : null}
+      {error ? <p className="ads-alert is-bad">{error}</p> : null}
+    </>
+  );
+}
+
+function SpendBars({ rows, currency, resultKey, resultLabel }) {
+  const ranked = rows
+    .map((row) => ({ id: row.id, name: row.name, spend: Number(row.fields?.spend || 0), clicks: row.fields?.clicks, result: row.fields?.[resultKey] }))
+    .filter((row) => row.spend > 0)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, 6);
+  const max = Math.max(...ranked.map((row) => row.spend), 1);
+  if (!ranked.length) return <p className="quiet">No campaign has spend in this range.</p>;
+  return (
+    <div className="spend-bars">
+      {ranked.map((row) => (
+        <div className="spend-row" key={row.id}>
+          <span className="spend-name" title={row.name}>{row.name}</span>
+          <span className="spend-track"><span style={{ width: `${(row.spend / max) * 100}%` }} /></span>
+          <strong>{money(row.spend, currency)}</strong>
+          <em>{row.result == null || row.result === '' ? `${countCell(row.clicks)} clicks` : `${countCell(row.result)} ${resultLabel}`}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusMix({ rows, active }) {
+  const on = rows.filter((row) => row.fields?.status === active).length;
+  const paused = rows.filter((row) => row.fields?.status === 'PAUSED').length;
+  const other = Math.max(rows.length - on - paused, 0);
+  return (
+    <SplitBar parts={[
+      { label: 'Active', value: on, tone: 'good' },
+      { label: 'Paused', value: paused, tone: 'warn' },
+      { label: 'Other', value: other, tone: 'muted' }
+    ]} />
+  );
+}
+
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const CHART_COLORS = ['#5b4dff', '#12b76a', '#f79009', '#36bffa', '#ee46bc', '#98a2b3'];
+
+function shortDate(iso) {
+  const parsed = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return String(iso || '');
+  return `${parsed.getUTCDate()} ${MONTHS_SHORT[parsed.getUTCMonth()]}`;
+}
+
+function sumOf(rows, key) {
+  return rows.reduce((sum, row) => sum + Number(row[key] || 0), 0);
+}
+
+function niceMax(value) {
+  if (value <= 0) return 1;
+  const power = 10 ** Math.floor(Math.log10(value));
+  const step = [1, 2, 2.5, 5, 10].find((item) => item * power >= value) || 10;
+  return step * power;
+}
+
+function useAdsReport(id, brand, range) {
+  const [state, setState] = useState({ report: null, busy: true, error: '' });
+  useEffect(() => {
+    let active = true;
+    setState((current) => ({ ...current, busy: true, error: '' }));
+    api.get(`/api/connections/${id}/${brand}/report?range=${range}`)
+      .then((report) => { if (active) setState({ report, busy: false, error: '' }); })
+      .catch((err) => { if (active) setState({ report: null, busy: false, error: err.message }); });
+    return () => { active = false; };
+  }, [id, brand, range]);
+  return state;
+}
+
+function Sparkline({ values }) {
+  if (values.length < 2) return <span className="spark is-empty" />;
+  const max = Math.max(...values, 1);
+  const points = values.map((value, index) => `${(index / (values.length - 1)) * 100},${28 - (value / max) * 26}`).join(' ');
+  return (
+    <svg className="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+      <polygon points={`0,30 ${points} 100,30`} />
+      <polyline points={points} />
+    </svg>
+  );
+}
+
+function KpiCards({ items }) {
+  return (
+    <div className="kpi-cards">
+      {items.map((item) => (
+        <div className={`kpi-card${item.tone ? ` is-${item.tone}` : ''}`} key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+          {item.spark ? <Sparkline values={item.spark} /> : null}
+          <em>{item.hint}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TrendChart({ points, field, format, tooltip }) {
+  const [hover, setHover] = useState(null);
+  const W = 640;
+  const H = 240;
+  const left = 54;
+  const right = 12;
+  const top = 12;
+  const bottom = 28;
+  const values = points.map((point) => Number(point[field] || 0));
+  const max = niceMax(Math.max(...values, 0));
+  const span = W - left - right;
+  const x = (index) => left + (points.length > 1 ? (index * span) / (points.length - 1) : span / 2);
+  const y = (value) => top + (H - top - bottom) * (1 - value / max);
+  const line = values.map((value, index) => `${x(index)},${y(value)}`).join(' ');
+  const every = Math.max(1, Math.ceil(points.length / 7));
+  const hovered = hover == null ? null : points[hover];
+  return (
+    <div className="trend-chart" onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${label(field)} by day`}>
+        <defs>
+          <linearGradient id={`fill-${field}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#5b4dff" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#5b4dff" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, 0.25, 0.5, 0.75, 1].map((step) => (
+          <g key={step}>
+            <line className="grid" x1={left} x2={W - right} y1={y(max * step)} y2={y(max * step)} />
+            <text className="axis" x={left - 8} y={y(max * step) + 4} textAnchor="end">{format(max * step, true)}</text>
+          </g>
+        ))}
+        {points.map((point, index) => (index % every === 0 || index === points.length - 1 ? (
+          <text key={point.date} className="axis" x={x(index)} y={H - 8} textAnchor="middle">{shortDate(point.date)}</text>
+        ) : null))}
+        <polygon points={`${x(0)},${y(0)} ${line} ${x(points.length - 1)},${y(0)}`} fill={`url(#fill-${field})`} />
+        <polyline className="trend-line" points={line} />
+        {hovered ? (
+          <>
+            <line className="cursor" x1={x(hover)} x2={x(hover)} y1={top} y2={H - bottom} />
+            <circle className="trend-dot" cx={x(hover)} cy={y(values[hover])} r="5" />
+          </>
+        ) : null}
+        {points.map((point, index) => (
+          <rect key={`hit-${point.date}`} className="hit" x={x(index) - span / Math.max(points.length - 1, 1) / 2} y={top} width={span / Math.max(points.length - 1, 1)} height={H - top - bottom} onMouseEnter={() => setHover(index)} />
+        ))}
+      </svg>
+      {hovered ? (
+        <div className="trend-tip" style={{ left: `${(x(hover) / W) * 100}%` }}>
+          <b>{day(hovered.date)}</b>
+          {tooltip(hovered).map(([name, value]) => <span key={name}>{name}<strong>{value}</strong></span>)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Donut({ parts, center, sub, format }) {
+  const totalValue = parts.reduce((sum, part) => sum + part.value, 0);
+  const radius = 42;
+  const length = 2 * Math.PI * radius;
+  let offset = 0;
+  return (
+    <div className="donut-wrap">
+      <svg className="donut" viewBox="0 0 120 120" aria-hidden="true">
+        <circle cx="60" cy="60" r={radius} className="donut-bg" />
+        {totalValue > 0 ? parts.map((part, index) => {
+          const size = (part.value / totalValue) * length;
+          const segment = (
+            <circle key={part.label} cx="60" cy="60" r={radius} stroke={CHART_COLORS[index % CHART_COLORS.length]}
+              strokeDasharray={`${size} ${length - size}`} strokeDashoffset={-offset} />
+          );
+          offset += size;
+          return segment;
+        }) : null}
+        <text x="60" y="58" textAnchor="middle" className="donut-center">{center}</text>
+        <text x="60" y="74" textAnchor="middle" className="donut-sub">{sub}</text>
+      </svg>
+      <ul className="donut-legend">
+        {parts.map((part, index) => (
+          <li key={part.label}>
+            <i style={{ background: CHART_COLORS[index % CHART_COLORS.length] }} />
+            <span>{part.label}</span>
+            <strong>{format(part.value)}</strong>
+            <em>{totalValue ? `${Math.round((part.value / totalValue) * 100)}%` : '—'}</em>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FunnelSteps({ steps }) {
+  return (
+    <div className="ads-funnel">
+      {steps.map((item, index) => {
+        const previous = steps[index - 1];
+        const rate = previous && Number(previous.value) ? (Number(item.value) / Number(previous.value)) * 100 : null;
+        return (
+          <div key={item.label} className="ads-funnel-step">
+            {rate != null ? <span className="ads-funnel-rate">{rate.toFixed(rate < 1 ? 2 : 1)}% {item.rateLabel}</span> : null}
+            <div className="ads-funnel-bar" style={{ width: `${100 - index * (60 / Math.max(steps.length - 1, 1))}%` }}>
+              <span>{item.label}</span>
+              <strong>{num(item.value)}</strong>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AudienceBars({ rows, metric, format }) {
+  const ages = [...new Set(rows.map((row) => row.age))].filter(Boolean).sort();
+  const byAge = ages.map((age) => {
+    const group = rows.filter((row) => row.age === age);
+    const pick = (gender) => sumOf(group.filter((row) => row.gender === gender), metric);
+    return { age, male: pick('male'), female: pick('female'), other: sumOf(group.filter((row) => row.gender !== 'male' && row.gender !== 'female'), metric) };
+  });
+  const max = Math.max(...byAge.map((row) => row.male + row.female + row.other), 1);
+  if (!byAge.length) return <p className="quiet">Meta returned no age and gender split for this range.</p>;
+  return (
+    <div className="audience-bars">
+      {byAge.map((row) => {
+        const sum = row.male + row.female + row.other;
+        return (
+          <div className="audience-row" key={row.age}>
+            <span>{row.age}</span>
+            <span className="audience-track" style={{ width: `${(sum / max) * 100}%` }}>
+              <i className="is-male" style={{ flex: row.male }} />
+              <i className="is-female" style={{ flex: row.female }} />
+              <i className="is-other" style={{ flex: row.other }} />
+            </span>
+            <strong>{format(sum)}</strong>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AdsPerformance({ brand, report, busy, error, range, onRange, fallbackCurrency, resultKey, resultLabel }) {
+  const [field, setField] = useState('spend');
+  const currency = report?.currency || fallbackCurrency;
+  const daily = report?.daily || [];
+  const spend = sumOf(daily, 'spend');
+  const impressions = sumOf(daily, 'impressions');
+  const clicks = sumOf(daily, 'clicks');
+  const results = sumOf(daily, resultKey);
+  const reach = brand === 'meta' ? sumOf(daily, 'reach') : null;
+  const fmt = {
+    spend: (value, short) => (short ? `${currency === 'INR' || !currency ? '₹' : ''}${compact(Math.round(value))}` : money(value, currency)),
+    impressions: (value, short) => (short ? compact(Math.round(value)) : num(value)),
+    clicks: (value, short) => (short ? compact(Math.round(value)) : num(value)),
+    [resultKey]: (value, short) => (short ? compact(Math.round(value)) : num(value))
+  };
+  const metrics = [['spend', 'Spend'], ['impressions', 'Impressions'], ['clicks', 'Clicks'], [resultKey, label(resultLabel)]];
+  const series = (key) => daily.map((row) => Number(row[key] || 0));
+  const dailyRatio = (a, b) => daily.map((row) => (Number(row[b]) ? Number(row[a]) / Number(row[b]) : 0));
+  const cards = [
+    { label: 'Spend', value: money(spend, currency), spark: series('spend'), hint: `${money(ratio(spend, daily.length), currency)} a day` },
+    { label: 'Impressions', value: num(impressions), spark: series('impressions'), hint: reach ? `${num(reach)} reach (daily sum)` : `${money(ratio(spend * 1000, impressions), currency)} CPM` },
+    { label: 'Clicks', value: num(clicks), spark: series('clicks'), hint: `${money(ratio(spend, clicks), currency)} per click` },
+    { label: 'CTR', value: pct(ratio(clicks, impressions)), spark: dailyRatio('clicks', 'impressions'), hint: 'Clicks ÷ impressions', tone: 'info' },
+    { label: label(resultLabel), value: num(results), spark: series(resultKey), hint: `${pct(ratio(results, clicks))} of clicks`, tone: 'good' },
+    { label: `Cost per ${resultKey === 'leads' ? 'lead' : 'conversion'}`, value: money(ratio(spend, results), currency), spark: dailyRatio('spend', resultKey), hint: results ? `${num(results)} ${resultLabel}` : `No ${resultLabel} yet`, tone: 'warn' }
+  ];
+
+  return (
+    <section className="panel ads-performance">
+      <header>
+        <div>
+          <h2>Performance</h2>
+          <p>{daily.length ? `${day(daily[0].date)} to ${day(daily[daily.length - 1].date)} · live from ${brand === 'meta' ? 'Meta' : 'Google Ads'}` : `Live from ${brand === 'meta' ? 'Meta' : 'Google Ads'}`}</p>
+        </div>
+        <div className="tabs ads-range">
+          {GOOGLE_RANGES.map(([key, text]) => (
+            <button key={key} type="button" className={range === key ? 'is-on' : ''} onClick={() => onRange(key)}>{text}</button>
+          ))}
+        </div>
+      </header>
+      {error ? <p className="ads-alert is-bad">The report could not be loaded: {error}</p> : null}
+      {report?.notes?.length ? <p className="quiet">Some parts did not load: {report.notes.join(' · ')}</p> : null}
+      {busy && !report ? <div className="skeleton-block" aria-busy="true" /> : null}
+      {report ? (
+        <div className={busy ? 'is-loading' : ''}>
+          <KpiCards items={cards} />
+          <div className="trend-head">
+            <h3>Daily trend</h3>
+            <div className="chip-tabs">
+              {metrics.map(([key, text]) => (
+                <button key={key} type="button" className={field === key ? 'is-on' : ''} onClick={() => setField(key)}>{text}</button>
+              ))}
+            </div>
+          </div>
+          {daily.length > 1 ? (
+            <TrendChart
+              points={daily}
+              field={field}
+              format={(value, short) => fmt[field](value, short)}
+              tooltip={(row) => [
+                ['Spend', money(row.spend, currency)],
+                ['Impressions', num(row.impressions)],
+                ['Clicks', num(row.clicks)],
+                [label(resultLabel), num(row[resultKey])]
+              ]}
+            />
+          ) : <p className="quiet">Not enough daily rows in this range to draw a trend.</p>}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function AdsTableHead({ tabs, view, onView, counts, query, onQuery, found }) {
+  return (
+    <div className="cy-tab-head">
+      <div className="tabs" role="tablist">
+        {tabs.map((item) => (
+          <button key={item} type="button" role="tab" aria-selected={view === item} className={view === item ? 'is-on' : ''} onClick={() => onView(item)}>
+            {item}{counts[item] != null ? ` · ${num(counts[item])}` : ''}
+          </button>
+        ))}
+      </div>
+      {onQuery ? <SearchBox value={query} onChange={onQuery} placeholder={`Search ${view.toLowerCase()}`} count={found} /> : null}
+    </div>
+  );
+}
+
 function MetaAdsManager({ id, data, canManage, reload }) {
   const campaigns = (data.records || []).filter((row) => row.type === 'campaign' && row.origin === 'api');
   const adsets = (data.records || []).filter((row) => row.type === 'adset' && row.origin === 'api');
   const ads = (data.records || []).filter((row) => row.type === 'ad' && row.origin === 'api');
   const currency = campaigns.find((row) => row.fields?.currency)?.fields.currency || 'INR';
-  const failed = data.jobs?.[0]?.status === 'failed' ? data.jobs[0].summary : '';
   const [view, setView] = useState('Campaigns');
   const [name, setName] = useState('');
   const [objective, setObjective] = useState('OUTCOME_LEADS');
@@ -367,8 +736,18 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
   const [editing, setEditing] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState('');
+  const [range, setRange] = useState('LAST_30_DAYS');
+  const [audienceMetric, setAudienceMetric] = useState('spend');
+  const { report, busy: reportBusy, error: reportError } = useAdsReport(id, 'meta', range);
   const publishMode = useRef(false);
+  const editRef = useRef(null);
   const steps = ['Campaign', 'Ad set', 'Ad', 'Review'];
+
+  useEffect(() => {
+    if (editing?.id) editRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [editing?.id]);
 
   function loadIdentity() {
     api.get(`/api/connections/${id}/meta/pages`)
@@ -590,6 +969,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
       setHeadlineB('');
       setMessageB('');
       setStep(0);
+      setCreating(false);
       setNotice(saved?.notice || (publishMode.current ? 'Ad published on Meta.' : 'Ad saved on Meta as paused.'));
       reload();
     } catch (err) {
@@ -646,22 +1026,58 @@ function MetaAdsManager({ id, data, canManage, reload }) {
     ['Ad creative', Boolean(imageBase64 && headline.trim() && message.trim())],
     ['Website', /^https:\/\//i.test(link.trim())]
   ];
-  const rows = view === 'Ad sets' ? adsets : view === 'Ads' ? ads : campaigns;
+  const rangeRows = (report?.campaigns || []).map((row) => ({ id: row.id, name: row.name, fields: row }));
+  const allRows = view === 'Ad sets' ? adsets : view === 'Ads' ? ads : view === 'Report' ? rangeRows : campaigns;
+  const rows = allRows.filter((row) => matches(query, row.name, row.fields?.status, row.fields?.objective));
+  const spend = total(campaigns, 'spend');
+  const impressions = total(campaigns, 'impressions');
+  const clicks = total(campaigns, 'clicks');
+  const leads = total(campaigns, 'leads');
+  const cpc = ratio(spend, clicks);
+  const cpl = ratio(spend, leads);
+  const reportCurrency = report?.currency || currency;
+  const reportDaily = report?.daily || [];
+  const platformNames = { facebook: 'Facebook', instagram: 'Instagram', audience_network: 'Audience Network', messenger: 'Messenger', threads: 'Threads' };
+  const platforms = (report?.platforms || [])
+    .map((row) => ({ label: platformNames[row.name] || label(row.name), value: Number(row.spend || 0), clicks: Number(row.clicks || 0) }))
+    .sort((a, b) => b.value - a.value);
+  const rangeCampaigns = rangeRows;
+  const audienceFormat = audienceMetric === 'spend' ? (value) => money(value, reportCurrency) : (value) => num(value);
 
   return (
     <div className="stack">
-      {failed ? <p className="delta-down">{failed}</p> : data.jobs?.[0]?.summary ? <p className="quiet">{data.jobs[0].summary}</p> : null}
-      {notice ? <p>{notice}</p> : null}
-      {error ? <p className="delta-down">{error}</p> : null}
-      <div className="metric-strip">
-        <div className="metric"><span>Spend, 30 days</span><strong>{money(total(campaigns, 'spend'), currency)}</strong></div>
-        <div className="metric"><span>Impressions</span><strong>{total(campaigns, 'impressions') == null ? '—' : num(total(campaigns, 'impressions'))}</strong></div>
-        <div className="metric"><span>Clicks</span><strong>{total(campaigns, 'clicks') == null ? '—' : num(total(campaigns, 'clicks'))}</strong></div>
-        <div className="metric"><span>Leads</span><strong>{total(campaigns, 'leads') == null ? '—' : num(total(campaigns, 'leads'))}</strong></div>
-      </div>
-      {canManage ? (
-        <form className="form-grid panel" onSubmit={createAd}>
-          <h2>Create ad</h2>
+      <AdsHeader
+        brand="meta"
+        title="Meta Ads"
+        account={data.accountLabel}
+        job={data.jobs?.[0]}
+        counts={[
+          ['campaigns', campaigns.length],
+          ['active', campaigns.filter((row) => row.fields?.status === 'ACTIVE').length, 'good'],
+          ['ads', ads.length]
+        ]}
+        canManage={canManage}
+        creating={creating}
+        onCreate={() => { setCreating((current) => !current); setError(''); }}
+        createLabel="Create ad"
+      />
+      <AdsAlerts notice={notice} error={error} />
+      {reportError ? (
+        <Tiles items={[
+          { label: 'Spend · 30 days', value: money(spend, currency), hint: cpc == null ? 'No clicks yet' : `${money(cpc, currency)} per click` },
+          { label: 'Impressions', value: impressions == null ? '—' : num(impressions), hint: `Across ${num(campaigns.length)} campaigns` },
+          { label: 'Clicks', value: clicks == null ? '—' : num(clicks), hint: `CTR ${pct(ratio(clicks, impressions))}` },
+          { label: 'Leads', value: leads == null ? '—' : num(leads), hint: cpl == null ? 'No leads yet' : `${money(cpl, currency)} per lead` }
+        ]} />
+      ) : null}
+      {canManage && creating ? (
+        <form className="form-grid panel ads-wizard" onSubmit={createAd}>
+          <header>
+            <div>
+              <h2>Create ad</h2>
+              <p>Step {step + 1} of {steps.length} · Ads are saved paused unless you press Publish.</p>
+            </div>
+          </header>
           <div className="ad-steps" aria-label="Ad steps">
             {steps.map((item, index) => (
               <span key={item} className={index === step ? 'is-on' : index < step ? 'is-done' : ''}>
@@ -670,7 +1086,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
             ))}
           </div>
           {step === 0 ? (
-            <>
+            <div className="ads-step">
               <label className="stack-field">Campaign name
                 <input value={name} onChange={(event) => setName(event.target.value)} maxLength={180} />
               </label>
@@ -692,10 +1108,10 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                 </select>
               </label>
               <Switch checked={abTest} onChange={setAbTest} label="A/B test" hint="Creates two ad sets and splits the budget. One uses Advantage+ audience, the other does not." />
-            </>
+            </div>
           ) : null}
           {step === 1 ? (
-            <>
+            <div className="ads-step">
               {objective === 'OUTCOME_LEADS' ? (
                 <label className="stack-field">Conversion
                   <select value={conversion} onChange={(event) => setConversion(event.target.value)}>
@@ -877,7 +1293,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                 </select>
               </label>
               <p className="quiet">{pixels.length ? 'A selected pixel is sent when the ad goes to the website.' : 'Meta did not return a pixel for this ad account.'}</p>
-            </>
+            </div>
           ) : null}
           {step === 2 ? (
             <div className="ad-studio">
@@ -964,7 +1380,8 @@ function MetaAdsManager({ id, data, canManage, reload }) {
             </div>
           ) : null}
           {step === 3 ? (
-            <>
+            <div className="ad-studio">
+              <div className="stack">
               <p className="quiet">Setup check is what you filled in. Meta calculates the campaign score in Ads Manager after the ad is published.</p>
               <ul className="check-list">
                 {setup.map(([item, done]) => <li key={item} className={done ? 'is-done' : ''}>{done ? 'Ready' : 'Missing'} · {item}</li>)}
@@ -983,16 +1400,19 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                 <div><dt>Identity</dt><dd>{pageName} · {instagramName}</dd></div>
                 <div><dt>Creative</dt><dd>{headline}{dynamicCreative ? ' · Dynamic creative' : ''}{creativeTest ? ' · Creative test' : ''}</dd></div>
               </dl>
+              </div>
               <aside className="ad-preview">
                 <p>Preview</p>
                 <strong>{pageName}</strong>
-                {imageBase64 ? <img src={imageBase64} alt="" /> : null}
+                <em>{instagramName}</em>
+                {imageBase64 ? <img src={imageBase64} alt="" /> : <div className="ad-preview-empty">Image</div>}
                 <span>{message}</span>
                 <b>{headline}</b>
+                <small>{label(cta.toLowerCase())}</small>
               </aside>
-            </>
+            </div>
           ) : null}
-          <div className="page-actions">
+          <div className="page-actions ads-actions">
             {step > 0 ? <button className="btn" type="button" disabled={busy} onClick={() => { setError(''); setStep((current) => current - 1); }}>Back</button> : null}
             {step < steps.length - 1 ? <button className="btn-primary" type="button" onClick={nextStep}>Next</button> : null}
             {step === steps.length - 1 ? (
@@ -1004,33 +1424,121 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           </div>
         </form>
       ) : null}
+      <AdsPerformance
+        brand="meta"
+        report={report}
+        busy={reportBusy}
+        error={reportError}
+        range={range}
+        onRange={setRange}
+        fallbackCurrency={currency}
+        resultKey="leads"
+        resultLabel="leads"
+      />
+      {report ? (
+        <>
+          <div className="split is-even">
+            <section className="panel">
+              <header>
+                <h2>Funnel</h2>
+                <p>{GOOGLE_RANGES.find(([key]) => key === range)?.[1]}</p>
+              </header>
+              <FunnelSteps steps={[
+                { label: 'Impressions', value: sumOf(reportDaily, 'impressions') },
+                { label: 'Clicks', value: sumOf(reportDaily, 'clicks'), rateLabel: 'CTR' },
+                { label: 'Leads', value: sumOf(reportDaily, 'leads'), rateLabel: 'of clicks' }
+              ]} />
+            </section>
+            <section className="panel">
+              <header>
+                <h2>Spend by platform</h2>
+                <p>Facebook, Instagram, and more</p>
+              </header>
+              {platforms.length ? (
+                <Donut parts={platforms} center={money(sumOf(platforms, 'value'), reportCurrency)} sub="spend" format={(value) => money(value, reportCurrency)} />
+              ) : <p className="quiet">Meta returned no platform split for this range.</p>}
+            </section>
+          </div>
+          <div className="split is-even">
+            <section className="panel">
+              <header>
+                <h2>Audience by age</h2>
+                <div className="chip-tabs">
+                  {[['spend', 'Spend'], ['clicks', 'Clicks'], ['leads', 'Leads']].map(([key, text]) => (
+                    <button key={key} type="button" className={audienceMetric === key ? 'is-on' : ''} onClick={() => setAudienceMetric(key)}>{text}</button>
+                  ))}
+                </div>
+              </header>
+              <p className="chart-legend audience-legend"><span className="dot is-male" />Men <span className="dot is-female" />Women <span className="dot muted" />Unknown</p>
+              <AudienceBars rows={report.audience || []} metric={audienceMetric} format={audienceFormat} />
+            </section>
+            <section className="panel">
+              <header>
+                <h2>Top campaigns by spend</h2>
+                <p>{num(campaigns.filter((row) => row.fields?.status === 'ACTIVE').length)} of {num(campaigns.length)} active</p>
+              </header>
+              <SpendBars rows={rangeCampaigns} currency={reportCurrency} resultKey="leads" resultLabel="leads" />
+              <div className="status-mini">
+                <StatusMix rows={campaigns} active="ACTIVE" />
+              </div>
+            </section>
+          </div>
+        </>
+      ) : null}
       {editing ? (
-        <form className="form-grid panel" onSubmit={saveEdit}>
-          <h2>Edit campaign</h2>
-          <label className="stack-field">Name
-            <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} required minLength={2} />
-          </label>
-          <label className="stack-field">Daily budget
-            <input type="number" min="1" step="1" value={editing.budget} onChange={(event) => setEditing({ ...editing, budget: event.target.value })} />
-          </label>
-          <label className="stack-field">Status
-            <select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })}>
-              <option value="PAUSED">Paused</option>
-              <option value="ACTIVE">Active</option>
-            </select>
-          </label>
-          <div className="page-actions">
+        <form ref={editRef} className="form-grid panel ads-edit" onSubmit={saveEdit}>
+          <header>
+            <div>
+              <h2>Edit campaign</h2>
+              <p>Changes are sent to Meta Ads.</p>
+            </div>
+          </header>
+          <div className="ads-step is-three">
+            <label className="stack-field">Name
+              <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} required minLength={2} />
+            </label>
+            <label className="stack-field">Daily budget
+              <input type="number" min="1" step="1" value={editing.budget} onChange={(event) => setEditing({ ...editing, budget: event.target.value })} />
+            </label>
+            <label className="stack-field">Status
+              <select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })}>
+                <option value="PAUSED">Paused</option>
+                <option value="ACTIVE">Active</option>
+              </select>
+            </label>
+          </div>
+          <div className="page-actions ads-actions">
             <button className="btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
             <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving' : 'Save'}</button>
           </div>
         </form>
       ) : null}
-      <div className="tabs" role="tablist">
-        {['Campaigns', 'Ad sets', 'Ads'].map((item) => (
-          <button key={item} type="button" className={view === item ? 'is-on' : ''} onClick={() => setView(item)}>{item}</button>
-        ))}
-      </div>
-      {rows.length ? (
+      <section className="panel">
+      <AdsTableHead
+        tabs={['Campaigns', 'Ad sets', 'Ads', 'Report']}
+        view={view}
+        onView={setView}
+        counts={{ Campaigns: campaigns.length, 'Ad sets': adsets.length, Ads: ads.length }}
+        query={query}
+        onQuery={setQuery}
+        found={rows.length}
+      />
+      {view === 'Report' ? (
+        <p className="quiet cy-note">Campaign results for {String(GOOGLE_RANGES.find(([key]) => key === range)?.[1] || '').toLowerCase()}, live from Meta. Change the range in Performance above.</p>
+      ) : null}
+      {rows.length && view === 'Report' ? (
+        <Table columns={[
+          { key: 'name', label: 'Campaign' },
+          { key: 'spend', label: 'Spend', render: (row) => money(row.fields.spend, reportCurrency) },
+          { key: 'impressions', label: 'Impr.', render: (row) => countCell(row.fields.impressions) },
+          { key: 'reach', label: 'Reach', render: (row) => countCell(row.fields.reach) },
+          { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.fields.clicks) },
+          { key: 'ctr', label: 'CTR', render: (row) => pct(ratio(row.fields.clicks, row.fields.impressions)) },
+          { key: 'cpc', label: 'CPC', render: (row) => money(ratio(row.fields.spend, row.fields.clicks), reportCurrency) },
+          { key: 'leads', label: 'Leads', render: (row) => countCell(row.fields.leads) },
+          { key: 'cpl', label: 'Cost / lead', render: (row) => money(ratio(row.fields.spend, row.fields.leads), reportCurrency) }
+        ]} rows={rows} />
+      ) : rows.length ? (
         <Table columns={view === 'Campaigns' ? [
           { key: 'name', label: 'Campaign' },
           { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.status || '').toLowerCase()} /> },
@@ -1054,10 +1562,11 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         ]} rows={rows} />
       ) : (
         <div className="empty">
-          <strong>No {view.toLowerCase()} from Meta.</strong>
-          <p className="quiet">Sync reads this account from Meta. Sample campaigns are not listed here.</p>
+          <strong>{query ? `No ${view.toLowerCase()} match "${query}".` : `No ${view.toLowerCase()} from Meta.`}</strong>
+          <p className="quiet">{query ? 'Clear the search to see all of them.' : 'Sync reads this account from Meta. Sample campaigns are not listed here.'}</p>
         </div>
       )}
+      </section>
     </div>
   );
 }
@@ -1090,7 +1599,6 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
   const ads = records.filter((row) => row.type === 'ad');
   const keywordRows = records.filter((row) => row.type === 'keyword');
   const currency = campaigns.find((row) => row.fields?.currency)?.fields.currency || 'INR';
-  const failed = data.jobs?.[0]?.status === 'failed' ? data.jobs[0].summary : '';
   const campaignName = new Map(campaigns.map((row) => [row.externalId, row.name]));
   const groupCampaign = new Map(adGroups.map((row) => [row.externalId, campaignName.get(row.parent) || '—']));
   const groupName = new Map(adGroups.map((row) => [row.externalId, row.name]));
@@ -1127,11 +1635,15 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [range, setRange] = useState('LAST_30_DAYS');
-  const [report, setReport] = useState(null);
-  const [reportBusy, setReportBusy] = useState(false);
-  const [reportError, setReportError] = useState('');
-  const [chartField, setChartField] = useState('spend');
+  const { report, busy: reportBusy, error: reportError } = useAdsReport(id, 'google', range);
+  const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState('');
   const publishMode = useRef(false);
+  const editRef = useRef(null);
+
+  useEffect(() => {
+    if (editing?.id) editRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [editing?.id]);
 
   const keywordList = lines(keywordText);
   const negativeList = lines(negativeText);
@@ -1169,18 +1681,6 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
     }, 350);
     return () => clearTimeout(timer);
   }, [id, canManage, languageQuery]);
-
-  useEffect(() => {
-    if (view !== 'Report') return undefined;
-    let active = true;
-    setReportBusy(true);
-    setReportError('');
-    api.get(`/api/connections/${id}/google/report?range=${range}`)
-      .then((result) => { if (active) setReport(result); })
-      .catch((err) => { if (active) { setReport(null); setReportError(err.message); } })
-      .finally(() => { if (active) setReportBusy(false); });
-    return () => { active = false; };
-  }, [id, view, range]);
 
   async function loadIdeas() {
     setIdeaNote('Asking Google…');
@@ -1274,6 +1774,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
       setPath1('');
       setPath2('');
       setStep(0);
+      setCreating(false);
       setNotice(saved?.notice || 'Campaign saved on Google Ads.');
       reload();
     } catch (err) {
@@ -1333,23 +1834,61 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
   );
   const biddingName = { MAXIMIZE_CLICKS: 'Maximize clicks', MAXIMIZE_CONVERSIONS: 'Maximize conversions', MANUAL_CPC: 'Manual CPC' };
   const daily = report?.daily || [];
-  const reportTotal = (key) => (daily.length ? daily.reduce((sum, row) => sum + Number(row[key] || 0), 0) : null);
   const tabs = ['Campaigns', 'Ad groups', 'Keywords', 'Ads', 'Report'];
+  const spend = total(campaigns, 'spend');
+  const impressions = total(campaigns, 'impressions');
+  const clicks = total(campaigns, 'clicks');
+  const conversions = total(campaigns, 'conversions');
+  const cpc = ratio(spend, clicks);
+  const cpa = ratio(spend, conversions);
+  const listed = {
+    Campaigns: campaigns.filter((row) => matches(query, row.name, row.fields?.status, row.fields?.channel)),
+    'Ad groups': adGroups.filter((row) => matches(query, row.name, campaignName.get(row.parent), row.fields?.status)),
+    Keywords: keywordRows.filter((row) => matches(query, row.name, row.fields?.matchType, groupName.get(row.parent), groupCampaign.get(row.parent))),
+    Ads: ads.filter((row) => matches(query, row.name, row.fields?.adType, groupName.get(row.parent), row.fields?.approval))
+  };
+  const reportCurrency = report?.currency || currency;
+  const deviceNames = { MOBILE: 'Mobile', DESKTOP: 'Desktop', TABLET: 'Tablet', CONNECTED_TV: 'TV screens', OTHER: 'Other' };
+  const devices = (report?.devices || [])
+    .map((row) => ({ label: deviceNames[row.name] || label(String(row.name).toLowerCase()), value: Number(row.spend || 0) }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const rangeCampaigns = (report?.campaigns || []).map((row) => ({ id: row.id, name: row.name, fields: row }));
 
   return (
     <div className="stack">
-      {failed ? <p className="delta-down">{failed}</p> : data.jobs?.[0]?.summary ? <p className="quiet">{data.jobs[0].summary}</p> : null}
-      {notice ? <p>{notice}</p> : null}
-      {error ? <p className="delta-down">{error}</p> : null}
-      <div className="metric-strip">
-        <div className="metric"><span>Spend, 30 days</span><strong>{money(total(campaigns, 'spend'), currency)}</strong></div>
-        <div className="metric"><span>Impressions</span><strong>{total(campaigns, 'impressions') == null ? '—' : num(total(campaigns, 'impressions'))}</strong></div>
-        <div className="metric"><span>Clicks</span><strong>{total(campaigns, 'clicks') == null ? '—' : num(total(campaigns, 'clicks'))}</strong></div>
-        <div className="metric"><span>Conversions</span><strong>{total(campaigns, 'conversions') == null ? '—' : num(total(campaigns, 'conversions'))}</strong></div>
-      </div>
-      {canManage ? (
-        <form className="form-grid panel" onSubmit={createCampaign}>
-          <h2>Create Search campaign</h2>
+      <AdsHeader
+        brand="google"
+        title="Google Ads"
+        account={data.accountLabel}
+        job={data.jobs?.[0]}
+        counts={[
+          ['campaigns', campaigns.length],
+          ['enabled', campaigns.filter((row) => row.fields?.status === 'ENABLED').length, 'good'],
+          ['keywords', keywordRows.length]
+        ]}
+        canManage={canManage}
+        creating={creating}
+        onCreate={() => { setCreating((current) => !current); setError(''); }}
+        createLabel="Create campaign"
+      />
+      <AdsAlerts notice={notice} error={error} />
+      {reportError ? (
+        <Tiles items={[
+          { label: 'Spend · 30 days', value: money(spend, currency), hint: cpc == null ? 'No clicks yet' : `${money(cpc, currency)} avg. CPC` },
+          { label: 'Impressions', value: countCell(impressions), hint: `Across ${num(campaigns.length)} campaigns` },
+          { label: 'Clicks', value: countCell(clicks), hint: `CTR ${pct(ratio(clicks, impressions))}` },
+          { label: 'Conversions', value: countCell(conversions), hint: cpa == null ? 'No conversions yet' : `${money(cpa, currency)} per conversion` }
+        ]} />
+      ) : null}
+      {canManage && creating ? (
+        <form className="form-grid panel ads-wizard" onSubmit={createCampaign}>
+          <header>
+            <div>
+              <h2>Create Search campaign</h2>
+              <p>Step {step + 1} of {steps.length} · Campaigns are saved paused unless you press Publish.</p>
+            </div>
+          </header>
           <div className="ad-steps" aria-label="Campaign steps">
             {steps.map((item, index) => (
               <span key={item} className={index === step ? 'is-on' : index < step ? 'is-done' : ''}>
@@ -1358,7 +1897,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
             ))}
           </div>
           {step === 0 ? (
-            <>
+            <div className="ads-step">
               <label className="stack-field">Campaign name
                 <input value={name} onChange={(event) => setName(event.target.value)} maxLength={180} />
               </label>
@@ -1384,10 +1923,10 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
                 <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
               </label>
               <Switch checked={searchPartners} onChange={setSearchPartners} label="Google search partners" hint="Also show ads on partner search sites." />
-            </>
+            </div>
           ) : null}
           {step === 1 ? (
-            <>
+            <div className="ads-step">
               <label className="stack-field">Locations
                 <input value={locationQuery} onChange={(event) => setLocationQuery(event.target.value)} placeholder="Search a city or area, e.g. Pune, Noida" />
               </label>
@@ -1442,11 +1981,11 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
                   ))}
                 </div>
               ) : <p className="quiet">No language selected, so Google includes all languages.</p>}
-            </>
+            </div>
           ) : null}
           {step === 2 ? (
-            <>
-              <label className="stack-field">Keywords, one per line
+            <div className="ads-step">
+              <label className="stack-field wide">Keywords, one per line
                 <textarea rows={6} value={keywordText} onChange={(event) => setKeywordText(event.target.value)} placeholder={'3 bhk flats in pune\nready to move flats pune'} />
               </label>
               <label className="stack-field">Match type
@@ -1470,10 +2009,10 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
                   { key: 'add', label: '', render: (row) => <button type="button" className="btn" disabled={keywordList.some((item) => item.toLowerCase() === row.text.toLowerCase())} onClick={() => addKeyword(row.text)}>Add</button> }
                 ]} rows={ideas.map((row) => ({ ...row, id: row.text }))} />
               ) : null}
-              <label className="stack-field">Negative keywords, one per line
+              <label className="stack-field wide">Negative keywords, one per line
                 <textarea rows={3} value={negativeText} onChange={(event) => setNegativeText(event.target.value)} placeholder={'free\nrent\njobs'} />
               </label>
-            </>
+            </div>
           ) : null}
           {step === 3 ? (
             <div className="ad-studio">
@@ -1506,7 +2045,8 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
             </div>
           ) : null}
           {step === 4 ? (
-            <>
+            <div className="ad-studio">
+              <div className="stack">
               <dl className="review-list">
                 <div><dt>Campaign</dt><dd>{name}</dd></div>
                 <div><dt>Budget</dt><dd>{money(dailyBudget, currency)} per day</dd></div>
@@ -1518,11 +2058,12 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
                 <div><dt>Keywords</dt><dd>{keywordList.length} · {label(matchType.toLowerCase())} match{negativeList.length ? ` · ${negativeList.length} negative` : ''}</dd></div>
                 <div><dt>Ad</dt><dd>{filledHeadlines.length} headlines · {filledDescriptions.length} descriptions · {finalUrl}</dd></div>
               </dl>
-              {preview}
               <p className="quiet">Save paused creates everything in Google Ads without spending. Publish turns the campaign on. Google reviews the ad before it shows.</p>
-            </>
+              </div>
+              {preview}
+            </div>
           ) : null}
-          <div className="page-actions">
+          <div className="page-actions ads-actions">
             {step > 0 ? <button className="btn" type="button" disabled={busy} onClick={() => { setError(''); setStep((current) => current - 1); }}>Back</button> : null}
             {step < steps.length - 1 ? <button className="btn-primary" type="button" onClick={nextStep}>Next</button> : null}
             {step === steps.length - 1 ? (
@@ -1534,34 +2075,105 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           </div>
         </form>
       ) : null}
+      <AdsPerformance
+        brand="google"
+        report={report}
+        busy={reportBusy}
+        error={reportError}
+        range={range}
+        onRange={setRange}
+        fallbackCurrency={currency}
+        resultKey="conversions"
+        resultLabel="conversions"
+      />
+      {report ? (
+        <>
+          <div className="split is-even">
+            <section className="panel">
+              <header>
+                <h2>Funnel</h2>
+                <p>{GOOGLE_RANGES.find(([key]) => key === range)?.[1]}</p>
+              </header>
+              <FunnelSteps steps={[
+                { label: 'Impressions', value: sumOf(daily, 'impressions') },
+                { label: 'Clicks', value: sumOf(daily, 'clicks'), rateLabel: 'CTR' },
+                { label: 'Conversions', value: sumOf(daily, 'conversions'), rateLabel: 'conv. rate' }
+              ]} />
+            </section>
+            <section className="panel">
+              <header>
+                <h2>Spend by device</h2>
+                <p>Mobile, desktop, and tablet</p>
+              </header>
+              {devices.length ? (
+                <Donut parts={devices} center={money(sumOf(devices, 'value'), reportCurrency)} sub="spend" format={(value) => money(value, reportCurrency)} />
+              ) : <p className="quiet">Google returned no device split for this range.</p>}
+            </section>
+          </div>
+          <div className="split is-even">
+            <section className="panel">
+              <header>
+                <h2>Top campaigns by spend</h2>
+                <p>{GOOGLE_RANGES.find(([key]) => key === range)?.[1]}</p>
+              </header>
+              <SpendBars rows={rangeCampaigns} currency={reportCurrency} resultKey="conversions" resultLabel="conv." />
+            </section>
+            <section className="panel">
+              <header>
+                <h2>Campaign status</h2>
+                <p>{num(campaigns.length)} campaigns</p>
+              </header>
+              <StatusMix rows={campaigns} active="ENABLED" />
+              <ul className="split-legend top-terms">
+                {(report.searchTerms || []).slice(0, 5).map((row) => (
+                  <li key={row.id}><span>{row.term}</span><strong>{countCell(row.clicks)}</strong><em>clicks</em></li>
+                ))}
+              </ul>
+              {(report.searchTerms || []).length ? <p className="quiet">Top search terms by clicks</p> : null}
+            </section>
+          </div>
+        </>
+      ) : null}
       {editing ? (
-        <form className="form-grid panel" onSubmit={saveEdit}>
-          <h2>Edit campaign</h2>
-          <label className="stack-field">Name
-            <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} required minLength={2} />
-          </label>
-          <label className="stack-field">Daily budget ({currency})
-            <input type="number" min="1" step="1" value={editing.budget} onChange={(event) => setEditing({ ...editing, budget: event.target.value })} />
-          </label>
-          <label className="stack-field">Status
-            <select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })}>
-              <option value="PAUSED">Paused</option>
-              <option value="ENABLED">Enabled</option>
-            </select>
-          </label>
-          <div className="page-actions">
+        <form ref={editRef} className="form-grid panel ads-edit" onSubmit={saveEdit}>
+          <header>
+            <div>
+              <h2>Edit campaign</h2>
+              <p>Changes are sent to Google Ads.</p>
+            </div>
+          </header>
+          <div className="ads-step is-three">
+            <label className="stack-field">Name
+              <input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} required minLength={2} />
+            </label>
+            <label className="stack-field">Daily budget ({currency})
+              <input type="number" min="1" step="1" value={editing.budget} onChange={(event) => setEditing({ ...editing, budget: event.target.value })} />
+            </label>
+            <label className="stack-field">Status
+              <select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })}>
+                <option value="PAUSED">Paused</option>
+                <option value="ENABLED">Enabled</option>
+              </select>
+            </label>
+          </div>
+          <div className="page-actions ads-actions">
             <button className="btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
             <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving' : 'Save'}</button>
           </div>
         </form>
       ) : null}
-      <div className="tabs" role="tablist">
-        {tabs.map((item) => (
-          <button key={item} type="button" className={view === item ? 'is-on' : ''} onClick={() => setView(item)}>{item}</button>
-        ))}
-      </div>
+      <section className="panel">
+      <AdsTableHead
+        tabs={tabs}
+        view={view}
+        onView={setView}
+        counts={{ Campaigns: campaigns.length, 'Ad groups': adGroups.length, Keywords: keywordRows.length, Ads: ads.length }}
+        query={query}
+        onQuery={view === 'Report' ? null : setQuery}
+        found={listed[view]?.length}
+      />
       {view === 'Campaigns' ? (
-        campaigns.length ? (
+        listed.Campaigns.length ? (
           <Table columns={[
             { key: 'name', label: 'Campaign' },
             { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> },
@@ -1578,11 +2190,11 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
                 </button>
               </span>
             ) : null }
-          ]} rows={campaigns} />
+          ]} rows={listed.Campaigns} />
         ) : (
           <div className="empty">
-            <strong>No campaigns from Google Ads.</strong>
-            <p className="quiet">Sync reads this account from Google. Sample campaigns are not listed here.</p>
+            <strong>{query ? `No campaigns match "${query}".` : 'No campaigns from Google Ads.'}</strong>
+            <p className="quiet">{query ? 'Clear the search to see all of them.' : 'Sync reads this account from Google. Sample campaigns are not listed here.'}</p>
           </div>
         )
       ) : null}
@@ -1591,7 +2203,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           { key: 'name', label: 'Ad group' },
           { key: 'campaign', label: 'Campaign', render: (row) => campaignName.get(row.parent) || '—' },
           { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> }
-        ]} rows={adGroups} />
+        ]} rows={listed['Ad groups']} />
       ) : null}
       {view === 'Keywords' ? (
         <Table columns={[
@@ -1600,7 +2212,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           { key: 'group', label: 'Ad group', render: (row) => groupName.get(row.parent) || '—' },
           { key: 'campaign', label: 'Campaign', render: (row) => groupCampaign.get(row.parent) || '—' },
           { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> }
-        ]} rows={keywordRows} />
+        ]} rows={listed.Keywords} />
       ) : null}
       {view === 'Ads' ? (
         <Table columns={[
@@ -1609,39 +2221,15 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           { key: 'group', label: 'Ad group', render: (row) => groupName.get(row.parent) || '—' },
           { key: 'approval', label: 'Review', render: (row) => label(String(row.fields?.approval || '').toLowerCase()) || '—' },
           { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> }
-        ]} rows={ads} />
+        ]} rows={listed.Ads} />
       ) : null}
       {view === 'Report' ? (
         <div className="stack">
-          <div className="page-actions">
-            <select value={range} onChange={(event) => setRange(event.target.value)} aria-label="Report range">
-              {GOOGLE_RANGES.map(([key, text]) => <option key={key} value={key}>{text}</option>)}
-            </select>
-            <select value={chartField} onChange={(event) => setChartField(event.target.value)} aria-label="Chart metric">
-              <option value="spend">Spend</option>
-              <option value="clicks">Clicks</option>
-              <option value="impressions">Impressions</option>
-              <option value="conversions">Conversions</option>
-            </select>
-          </div>
+          <p className="quiet cy-note">Results for {String(GOOGLE_RANGES.find(([key]) => key === range)?.[1] || '').toLowerCase()}, live from Google Ads. Change the range in Performance above.</p>
           {reportBusy ? <p className="quiet">Reading the report from Google Ads…</p> : null}
-          {reportError ? <p className="delta-down">{reportError}</p> : null}
-          {report?.notes?.length ? <p className="quiet">{report.notes.join(' ')}</p> : null}
+          {reportError ? <p className="ads-alert is-bad">{reportError}</p> : null}
           {report && !reportBusy ? (
             <>
-              <div className="metric-strip">
-                <div className="metric"><span>Spend</span><strong>{money(reportTotal('spend'), report.currency || currency)}</strong></div>
-                <div className="metric"><span>Impressions</span><strong>{countCell(reportTotal('impressions'))}</strong></div>
-                <div className="metric"><span>Clicks</span><strong>{countCell(reportTotal('clicks'))}</strong></div>
-                <div className="metric"><span>Conversions</span><strong>{countCell(reportTotal('conversions'))}</strong></div>
-              </div>
-              {daily.length > 1 ? (
-                <section className="panel">
-                  <h3>{label(chartField)} by day</h3>
-                  <LineChart points={daily} field={chartField} />
-                  <p className="quiet">{day(daily[0].date)} to {day(daily[daily.length - 1].date)}</p>
-                </section>
-              ) : <p className="quiet">Google returned no daily rows for this range.</p>}
               <h3>Campaigns</h3>
               <Table columns={[
                 { key: 'name', label: 'Campaign' },
@@ -1674,6 +2262,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           ) : null}
         </div>
       ) : null}
+      </section>
     </div>
   );
 }

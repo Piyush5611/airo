@@ -358,6 +358,56 @@ export async function verifyMetaAccount({ apiKey, accountId }) {
   }
 }
 
+const REPORT_PRESETS = {
+  LAST_7_DAYS: 'last_7d',
+  LAST_14_DAYS: 'last_14d',
+  LAST_30_DAYS: 'last_30d',
+  THIS_MONTH: 'this_month',
+  LAST_MONTH: 'last_month'
+};
+
+function insightRow(row = {}) {
+  return {
+    spend: row.spend == null ? '0' : Number(row.spend).toFixed(2),
+    impressions: String(Number(row.impressions || 0)),
+    clicks: String(Number(row.clicks || 0)),
+    reach: row.reach == null ? null : String(Number(row.reach || 0)),
+    leads: leads(row.actions) || '0'
+  };
+}
+
+export async function metaReport({ apiKey, accountId }, range) {
+  const preset = REPORT_PRESETS[range];
+  if (!preset) throw new ApiError(422, 'Choose a report range.', 'validation_error');
+  const act = actId(accountId);
+  const base = { date_preset: preset, fields: 'spend,impressions,clicks,reach,actions' };
+  const queries = {
+    daily: { ...base, level: 'account', time_increment: '1' },
+    campaigns: { date_preset: preset, level: 'campaign', fields: 'campaign_id,campaign_name,spend,impressions,clicks,reach,actions' },
+    platforms: { date_preset: preset, level: 'account', breakdowns: 'publisher_platform', fields: 'spend,impressions,clicks,actions' },
+    audience: { date_preset: preset, level: 'account', breakdowns: 'age,gender', fields: 'spend,impressions,clicks,actions' }
+  };
+  const keys = Object.keys(queries);
+  const [account, ...settled] = await Promise.allSettled([
+    graph(`act_${act}`, apiKey, { fields: 'currency' }),
+    ...keys.map((key) => list(`act_${act}/insights`, apiKey, queries[key]))
+  ]);
+  const result = { range, currency: account.status === 'fulfilled' ? account.value.currency || '' : '', notes: [] };
+  settled.forEach((outcome, index) => {
+    if (outcome.status === 'rejected') result.notes.push(`${keys[index]}: ${outcome.reason?.message || 'failed'}`);
+  });
+  const rows = (index) => (settled[index].status === 'fulfilled' ? settled[index].value : []);
+  result.daily = rows(0)
+    .map((row) => ({ date: row.date_start || '', ...insightRow(row) }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  result.campaigns = rows(1)
+    .map((row) => ({ id: String(row.campaign_id || ''), name: String(row.campaign_name || ''), ...insightRow(row) }))
+    .sort((a, b) => Number(b.spend) - Number(a.spend));
+  result.platforms = rows(2).map((row) => ({ name: String(row.publisher_platform || 'unknown'), ...insightRow(row) }));
+  result.audience = rows(3).map((row) => ({ age: String(row.age || ''), gender: String(row.gender || ''), ...insightRow(row) }));
+  return result;
+}
+
 export async function pullMetaAds({ apiKey, accountId }) {
   const act = actId(accountId);
   const account = await graph(`act_${act}`, apiKey, { fields: 'id,name,currency' });

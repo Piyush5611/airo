@@ -177,6 +177,9 @@ client.get('/connections/:id/meta/pages', requirePermission('connections.manage'
 client.post('/connections/:id/meta/pages', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.connectMetaPages(req.auth, req.params.id));
 }));
+client.get('/connections/:id/meta/report', requirePermission('connections.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.metaReportFor(req.auth, req.params.id, String(req.query.range || 'LAST_30_DAYS')));
+}));
 client.get('/connections/:id/meta/audience', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.metaAudienceSearch(req.auth, req.params.id, req.query.kind, req.query.q));
 }));

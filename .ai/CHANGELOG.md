@@ -2,6 +2,40 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (AI Ads Agent, phase 7)
+
+- **Change:** Experiments and scaling. Migration `019_ad_level_metrics.sql` adds `campaign_external_id` and `adset_external_id` to `ad_metrics_daily`. The Meta sync also saves ad-level daily rows (`metaAdDailyStats`, own paging up to about 5,500 rows, saved in chunks of 500). Every campaign query still filters `level = 'campaign'`.
+- **Change (same day):** `experimentGroups` (monitorRules.js) compares ads running in the same ad set over 14 days, using a two-proportion z-test on leads per impression (10+ leads) or click rate. A winner needs at least 1,000 impressions, half the minimum spend and 3 days per ad, at least 20% lift, and z ≥ 1.96. The weaker ad becomes an `experiment_winner` decision (ad level, pause). Applying it uses `editMetaItem(..., 'ad', id, { status: 'PAUSED' })`, which checks that the ad belongs to the account.
+- **Change (same day):** `scaleFindings` produces a `scale_winner` budget increase (at most 20%, never above the percent limit) for a campaign whose 7-day cost per result is ≤60% of the account average for the same platform and currency. It needs 10+ results, a steady last 3 days and no other flag in the same run. It is skipped when the profile has a target cost (the target rule covers that case) or when tracked lead quality is under 15% qualified.
+- **Change (same day):** Repeat check: budget decisions (`budget_increase|budget_decrease|scale_winner`) share one 72h window per campaign, and `applied` now counts, so Auto mode cannot stack budget changes every run. Route `GET /api/ads-agent/experiments` (`campaigns.view`). UI: A/B tests tab, plus the new types in the Decision log with Approve & apply.
+- **Migration/API impact:** Run `npm run migrate` (019). Client rebuild needed.
+
+### 2026-10-06 (AI Ads Agent, phase 6)
+
+- **Change:** Lead quality and revenue attribution. Migration `018_ad_leads.sql` adds `leads.deal_value_inr` and `ad_lead_imports` (one row per Meta lead id: lead, campaign, ad and form ids, outcome `created|matched|skipped`, submitted time).
+- **Change (same day):** `metaFormLeads` (integrations/metaAds.js) finds lead form ads and reads their leads since a time, falling back to the Page token. `services/adsAgent/leadImport.js` is a new `ads.lead_import` job (every 30 min; 30 days on the first run, then 3).
+  - A phone that already exists in Leads (last 10 digits) gets an activity instead of a duplicate lead.
+  - Leads without a phone are skipped.
+  - New leads get the "Meta Lead Ads" source and a `campaigns` row (`meta:<campaign id>`).
+  - Phones and names are never written to audit or job summaries.
+- **Change (same day):** `GET /api/ads-agent/quality?days=` (`campaigns.view`) joins synced spend with CRM outcomes of the leads each campaign's form created (first touch). It returns leads, qualified (qualified/site visit/negotiation/booked), booked, revenue (deal value of booked leads), cost per lead, per qualified lead and per booking, and ROAS (INR campaigns only). `POST /api/ads-agent/leads/import` (`campaigns.update`, 5-min cooldown, audited).
+- **Change (same day):** A new monitor rule `low_quality` (≥10 CRM leads in 14 days, ≤10% qualified, at least half unqualified or lost; no action). The lead update schema accepts `dealValueInr`, and the lead detail page shows a deal value box when the status is booked; changes are logged as lead activity. The AI Ads Agent page has a Lead quality tab (`pages/AdsQuality.jsx`). Google Ads leads are not linked yet.
+- **Migration/API impact:** Run `npm run migrate` (018). Client rebuild needed.
+
+### 2026-10-06 (AI Ads Agent, phase 5)
+
+- **Change:** Approve and Auto modes apply pause and budget recommendations on the live ad account. `services/adsAgent/applyService.js` claims the decision atomically (`proposed|blocked → approved`, so it can't be applied twice) and reads the current budget from the API. Meta uses `metaCampaignBudgets`: the campaign daily budget, or the daily budgets of active ad sets; lifetime budgets are refused. Google uses `googleCampaignBudget`; shared budgets are refused. The guardrail is re-checked with the real totals, and then `setMetaCampaignStatus` / `setMetaDailyBudget` / `setGoogleCampaignStatus` / `editGoogleCampaign` make the change. The result is `applied` (with before/after budgets in `outcome`), `blocked` (with reasons) or `failed` (with the error), and every result is audited.
+- **Change (same day):** In Auto mode the monitor applies at most one action per campaign per run, only when the guardrail allows it. Raising a budget on its own also needs a daily or monthly spend cap. Budget amounts round toward the current value so a change never passes the percent limit. The daily action limit now counts only agent actions (pause/budget), not owner launches.
+- **Change (same day):** Route `POST /api/ads-agent/decisions/:id/apply` (`campaigns.update` + `connections.manage`; returns 422 in Off or Recommend mode). UI: "Approve & apply" with a confirm dialog on open pause and budget recommendations, plus the applied result or error in the Decision log.
+- **Migration/API impact:** No migration. Client rebuild needed.
+
+### 2026-10-06 (AI Ads Agent, phase 4)
+
+- **Change:** Monitoring and recommendations, recommend only (nothing changes on ad accounts). `services/adsAgent/monitorRules.js` holds pure rules over synced daily campaign rows. It compares the last 3 full days with the 7 before them and covers: pause (spend ≥ minimum with 0 results after earlier results), no results recorded (a note only, because Meta reports 0 leads for non-lead campaigns), cost per result up ≥50%, click rate down ≥40%, above or well under the profile's target cost (same currency only), and monthly pacing vs the spend cap or profile budget. Every finding stores its evidence.
+- **Change (same day):** `services/adsAgent/monitorService.js` writes findings to `ai_decisions` with a guardrail check (`proposed` or `blocked`) and skips repeats of the same type and campaign within 72h. Budget suggestions are checked by percent and caps only, because current budgets are not synced. A new `ads.monitor` job runs every 6 hours. Routes: `POST /api/ads-agent/monitor` (run now, 2-min cooldown) and `POST /api/ads-agent/decisions/:id/dismiss` (proposed/blocked → rejected), both need `campaigns.update` and are audited.
+- **Change (same day):** In WhatsApp, recognized business numbers asking for ads recommendations or suggestions get the open recommendations (rules text, no LLM). Nothing is pushed. UI: Decision log has Check now, type labels and Dismiss.
+- **Migration/API impact:** No migration. Client rebuild needed.
+
 ### 2026-10-06 (AI Ads Agent, phase 3)
 
 - **Change:** Creatives and launch from the approved strategy. Migration `017_ad_launches.sql` (`ad_launches`: `draft → created → published`, or `cancelled`; creative JSON, settings JSON, external campaign id, error, who created/published). `services/adsAgent/launchService.js`: the model writes platform copy (`metaCreativeSchema`: 2–3 variants, headline ≤40, text ≤300; `googleCreativeSchema`: 8–15 unique headlines ≤30, 2–4 descriptions ≤90); Meta cities and interests and Google locations are looked up through the real APIs (`searchMetaAudience`, `suggestGoogleLocations`), and anything not found is listed as a note, never guessed; the daily budget comes from the strategy budget plan.

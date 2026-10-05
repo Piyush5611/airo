@@ -258,11 +258,22 @@ export function LeadDetail() {
   const [status, setStatus] = useState('');
   const [message, setMessage] = useState('');
 
+  const [dealValue, setDealValue] = useState(null);
+  const shownStatus = status || data?.status;
+  const shownValue = dealValue ?? (data?.dealValueInr == null ? '' : String(Number(data.dealValueInr)));
+
   async function saveStatus(event) {
     event.preventDefault();
-    await api.patch(`/api/leads/${id}`, { status });
-    setMessage('Status updated.');
-    reload();
+    const body = { status: shownStatus };
+    if (shownStatus === 'booked') body.dealValueInr = shownValue === '' ? null : Number(shownValue);
+    try {
+      await api.patch(`/api/leads/${id}`, body);
+      setMessage('Lead updated.');
+      setDealValue(null);
+      reload();
+    } catch (err) {
+      setMessage(err.message);
+    }
   }
 
   return (
@@ -274,13 +285,16 @@ export function LeadDetail() {
               <section className="panel">
                 <header><h2>Score {data.score}</h2><Badge value={data.intent} /></header>
                 <p>{data.notesSummary || data.scores?.[0]?.reason || 'No scoring note yet.'}</p>
-                <p className="quiet">{data.phone} · {data.email || 'No email'} · Budget {data.budgetInr ? inr(data.budgetInr) : 'open'}</p>
+                <p className="quiet">{data.phone} · {data.email || 'No email'} · Budget {data.budgetInr ? inr(data.budgetInr) : 'open'}{data.dealValueInr != null ? ` · Deal value ${inr(data.dealValueInr)}` : ''}</p>
                 {can('leads.update') ? (
                   <form className="filters" onSubmit={saveStatus}>
-                    <select value={status || data.status} onChange={(event) => setStatus(event.target.value)} aria-label="Lead status">
+                    <select value={shownStatus} onChange={(event) => setStatus(event.target.value)} aria-label="Lead status">
                       {['new', 'contacted', 'qualified', 'site_visit', 'negotiation', 'booked', 'lost', 'unqualified'].map((item) => <option key={item} value={item}>{label(item)}</option>)}
                     </select>
-                    <button className="btn-primary" type="submit">Update status</button>
+                    {shownStatus === 'booked' ? (
+                      <input type="number" min="0" step="1" placeholder="Deal value (₹)" aria-label="Deal value in rupees" value={shownValue} onChange={(event) => setDealValue(event.target.value)} />
+                    ) : null}
+                    <button className="btn-primary" type="submit">Update</button>
                   </form>
                 ) : null}
                 {message ? <p>{message}</p> : null}

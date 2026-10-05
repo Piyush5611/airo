@@ -42,6 +42,8 @@ export function upsertMetrics(rows) {
     row.level,
     row.externalId,
     row.name,
+    row.campaignExternalId || null,
+    row.adsetExternalId || null,
     row.date,
     row.currency,
     row.spend,
@@ -52,9 +54,11 @@ export function upsertMetrics(rows) {
   ]);
   return run(
     `INSERT INTO ad_metrics_daily
-       (organization_id, connection_id, platform, level, external_id, name, metric_date, currency, spend, impressions, clicks, leads, conversions)
+       (organization_id, connection_id, platform, level, external_id, name, campaign_external_id, adset_external_id,
+        metric_date, currency, spend, impressions, clicks, leads, conversions)
      VALUES ?
-     ON DUPLICATE KEY UPDATE name = VALUES(name), currency = VALUES(currency), spend = VALUES(spend),
+     ON DUPLICATE KEY UPDATE name = VALUES(name), campaign_external_id = VALUES(campaign_external_id),
+       adset_external_id = VALUES(adset_external_id), currency = VALUES(currency), spend = VALUES(spend),
        impressions = VALUES(impressions), clicks = VALUES(clicks), leads = VALUES(leads), conversions = VALUES(conversions)`,
     [values]
   );
@@ -131,7 +135,9 @@ export function decisions(organizationId, limit) {
 export function actionsToday(organizationId) {
   return one(
     `SELECT COUNT(*) AS total FROM ai_decisions
-     WHERE organization_id = ? AND status = 'applied' AND updated_at >= CURDATE()`,
+     WHERE organization_id = ? AND status = 'applied'
+       AND decision_type IN ('pause', 'budget_decrease', 'budget_increase', 'scale_winner', 'experiment_winner')
+       AND updated_at >= CURDATE()`,
     [organizationId]
   );
 }
@@ -267,6 +273,103 @@ export function setDecisionStatus(organizationId, id, status, extra = {}) {
   );
 }
 
+export function decision(organizationId, id) {
+  return one(
+    `SELECT id, connection_id AS connectionId, platform, decision_type AS type, target_level AS targetLevel, target_external_id AS targetExternalId,
+            target_name AS targetName, proposed_change AS proposedChange, status
+     FROM ai_decisions WHERE organization_id = ? AND id = ?`,
+    [organizationId, id]
+  );
+}
+
+export async function claimDecision(organizationId, id, userId) {
+  const result = await run(
+    `UPDATE ai_decisions SET status = 'approved', decided_by = ?, error = NULL
+     WHERE organization_id = ? AND id = ? AND status IN ('proposed', 'blocked')`,
+    [userId, organizationId, id]
+  );
+  return result.affectedRows === 1;
+}
+
+export function finishDecision(organizationId, id, status, { guardrail, outcome, error } = {}) {
+  return run(
+    `UPDATE ai_decisions SET status = ?, guardrail = COALESCE(?, guardrail), outcome = ?, error = ? WHERE organization_id = ? AND id = ?`,
+    [
+      status,
+      guardrail ? JSON.stringify(guardrail) : null,
+      outcome ? JSON.stringify(outcome) : null,
+      error ? String(error).slice(0, 300) : null,
+      organizationId,
+      id
+    ]
+  );
+}
+
+export function campaignDaily(organizationId, days) {
+  return many(
+    `SELECT platform, connection_id AS connectionId, external_id AS externalId, name, currency,
+            DATE_FORMAT(metric_date, '%Y-%m-%d') AS date, spend, impressions, clicks, leads, conversions
+     FROM ad_metrics_daily
+     WHERE organization_id = ? AND level = 'campaign' AND metric_date >= (CURDATE() - INTERVAL ? DAY)
+     ORDER BY metric_date`,
+    [organizationId, days]
+  );
+}
+
+export function monthSpendByCurrency(organizationId) {
+  return many(
+    `SELECT currency, SUM(spend) AS spend FROM ad_metrics_daily
+     WHERE organization_id = ? AND level = 'campaign' AND metric_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+     GROUP BY currency`,
+    [organizationId]
+  );
+}
+
+export function organizationsWithMetrics() {
+  return many(`SELECT DISTINCT organization_id AS organizationId FROM ad_metrics_daily WHERE metric_date >= (CURDATE() - INTERVAL 10 DAY)`);
+}
+
+export async function recentDecisionExists(organizationId, types, targetExternalId, hours) {
+  const row = await one(
+    `SELECT id FROM ai_decisions
+     WHERE organization_id = ? AND decision_type IN (?) AND (target_external_id <=> ?)
+       AND status IN ('proposed', 'blocked', 'approved', 'applied') AND created_at >= (NOW() - INTERVAL ? HOUR)
+     LIMIT 1`,
+    [organizationId, [].concat(types), targetExternalId, hours]
+  );
+  return Boolean(row);
+}
+
+export function adWindow(organizationId, days) {
+  return many(
+    `SELECT connection_id AS connectionId, external_id AS externalId, MAX(name) AS name,
+            campaign_external_id AS campaignId, adset_external_id AS adsetId, currency,
+            SUM(spend) AS spend, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(leads) AS leads,
+            COUNT(*) AS days, DATE_FORMAT(MAX(CASE WHEN spend > 0 THEN metric_date END), '%Y-%m-%d') AS lastSpendDate
+     FROM ad_metrics_daily
+     WHERE organization_id = ? AND level = 'ad' AND platform = 'meta'
+       AND metric_date >= (CURDATE() - INTERVAL ? DAY) AND metric_date < CURDATE()
+     GROUP BY connection_id, external_id, campaign_external_id, adset_external_id, currency`,
+    [organizationId, days]
+  );
+}
+
+export function openDecisions(organizationId, limit) {
+  return many(
+    `SELECT id, platform, decision_type AS type, target_name AS targetName, reason, status, created_at AS createdAt
+     FROM ai_decisions WHERE organization_id = ? AND status IN ('proposed', 'blocked')
+     ORDER BY id DESC LIMIT ?`,
+    [organizationId, limit]
+  );
+}
+
+export function dismissDecision(organizationId, id, userId) {
+  return run(
+    `UPDATE ai_decisions SET status = 'rejected', decided_by = ? WHERE organization_id = ? AND id = ? AND status IN ('proposed', 'blocked')`,
+    [userId, organizationId, id]
+  );
+}
+
 export async function claimJob(jobKey, minutes) {
   await run(`INSERT IGNORE INTO agent_jobs (job_key) VALUES (?)`, [jobKey]);
   const result = await run(
@@ -283,6 +386,60 @@ export function finishJob(jobKey, { status, summary = null, error = null }) {
        last_summary = ?, last_error = ?
      WHERE job_key = ?`,
     [status, summary ? String(summary).slice(0, 300) : null, error ? String(error).slice(0, 300) : null, jobKey]
+  );
+}
+
+export async function claimLeadImport(row) {
+  const result = await run(
+    `INSERT IGNORE INTO ad_lead_imports
+       (organization_id, connection_id, platform, external_lead_id, campaign_external_id, ad_external_id, form_external_id, outcome, submitted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'skipped', ?)`,
+    [row.organizationId, row.connectionId, row.platform, row.externalLeadId, row.campaignExternalId || null, row.adExternalId || null, row.formExternalId || null, row.submittedAt || null]
+  );
+  return result.affectedRows === 1;
+}
+
+export function finishLeadImport(organizationId, platform, externalLeadId, leadId, outcome) {
+  return run(
+    `UPDATE ad_lead_imports SET lead_id = ?, outcome = ? WHERE organization_id = ? AND platform = ? AND external_lead_id = ?`,
+    [leadId, outcome, organizationId, platform, externalLeadId]
+  );
+}
+
+export function releaseLeadImport(organizationId, platform, externalLeadId) {
+  return run(`DELETE FROM ad_lead_imports WHERE organization_id = ? AND platform = ? AND external_lead_id = ? AND lead_id IS NULL`, [organizationId, platform, externalLeadId]);
+}
+
+export async function hasLeadImports(organizationId, connectionId) {
+  return Boolean(await one(`SELECT id FROM ad_lead_imports WHERE organization_id = ? AND connection_id = ? LIMIT 1`, [organizationId, connectionId]));
+}
+
+export function leadByPhone(organizationId, digits) {
+  return one(
+    `SELECT id FROM leads WHERE organization_id = ? AND RIGHT(REGEXP_REPLACE(phone, '[^0-9]', ''), 10) = ? ORDER BY id LIMIT 1`,
+    [organizationId, digits]
+  );
+}
+
+export function campaignIdByExternal(organizationId, externalId) {
+  return one(`SELECT id FROM campaigns WHERE organization_id = ? AND external_id = ?`, [organizationId, externalId]);
+}
+
+// First touch: a lead counts for the campaign whose form created it.
+export function leadQuality(organizationId, days) {
+  return many(
+    `SELECT i.campaign_external_id AS externalId,
+            COUNT(*) AS crmLeads,
+            SUM(l.status IN ('qualified', 'site_visit', 'negotiation', 'booked')) AS qualified,
+            SUM(l.status = 'booked') AS booked,
+            SUM(l.status IN ('unqualified', 'lost')) AS rejected,
+            SUM(CASE WHEN l.status = 'booked' THEN l.deal_value_inr END) AS revenue,
+            SUM(l.status = 'booked' AND l.deal_value_inr IS NULL) AS bookedWithoutValue
+     FROM ad_lead_imports i
+     JOIN leads l ON l.id = i.lead_id AND l.organization_id = i.organization_id
+     WHERE i.organization_id = ? AND i.outcome = 'created' AND i.submitted_at >= (UTC_DATE() - INTERVAL ? DAY)
+     GROUP BY i.campaign_external_id`,
+    [organizationId, days]
   );
 }
 

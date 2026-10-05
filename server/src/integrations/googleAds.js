@@ -754,6 +754,18 @@ export async function editGoogleItem(input, kind, itemId, changes) {
   throw new ApiError(422, 'Unknown Google Ads item.', 'validation_error');
 }
 
+export async function googleCampaignBudget(input, campaignId) {
+  const ctx = context(input);
+  const id = entityId(campaignId, 'campaign');
+  const [row] = await search(ctx, `SELECT campaign.status, campaign_budget.amount_micros, campaign_budget.explicitly_shared FROM campaign WHERE campaign.id = ${id} LIMIT 1`, 1);
+  if (!row) throw new ApiError(404, 'This campaign is not in the connected Google Ads account.', 'not_found');
+  return {
+    status: row.campaign?.status || '',
+    shared: Boolean(row.campaignBudget?.explicitlyShared),
+    daily: Number(major(row.campaignBudget?.amountMicros))
+  };
+}
+
 export async function editGoogleCampaign(input) {
   const ctx = context(input);
   const id = entityId(input.campaignId, 'campaign');

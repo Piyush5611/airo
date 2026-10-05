@@ -1,5 +1,5 @@
 import { googleDailyStats } from '../../integrations/googleAds.js';
-import { metaDailyStats } from '../../integrations/metaAds.js';
+import { metaAdDailyStats, metaDailyStats } from '../../integrations/metaAds.js';
 import { liveConnections } from '../../repositories/connectionRepo.js';
 import * as repo from '../../repositories/adsAgentRepo.js';
 import { decryptJson } from '../../utils/cryptoBox.js';
@@ -55,6 +55,32 @@ export async function syncAll() {
   return syncConnections(connections, 'LAST_7_DAYS');
 }
 
+async function syncMetaAds(connection, range, currency) {
+  const { secret } = connection;
+  const found = await metaAdDailyStats({ apiKey: secret.apiKey, accountId: secret.accountId }, range);
+  const rows = found.map((row) => ({
+    organizationId: connection.organizationId,
+    connectionId: connection.id,
+    platform: 'meta',
+    level: 'ad',
+    externalId: row.id.slice(0, 80),
+    name: row.name.slice(0, 180) || row.id,
+    campaignExternalId: row.campaignId.slice(0, 80) || null,
+    adsetExternalId: row.adsetId.slice(0, 80) || null,
+    date: row.date,
+    currency,
+    spend: number(row.spend) ?? 0,
+    impressions: Math.round(number(row.impressions) ?? 0),
+    clicks: Math.round(number(row.clicks) ?? 0),
+    leads: number(row.leads),
+    conversions: null
+  }));
+  for (let start = 0; start < rows.length; start += 500) {
+    await repo.upsertMetrics(rows.slice(start, start + 500));
+  }
+  return rows.length;
+}
+
 async function syncConnections(connections, range) {
   let saved = 0;
   const notes = [];
@@ -78,6 +104,13 @@ async function syncConnections(connections, range) {
       }));
       await repo.upsertMetrics(rows);
       saved += rows.length;
+      if (connection.platform === 'meta') {
+        try {
+          saved += await syncMetaAds(connection, range, String(report.currency || '').slice(0, 8));
+        } catch (error) {
+          notes.push(`Meta connection ${connection.id} ad level: ${error.message || 'sync failed'}`);
+        }
+      }
     } catch (error) {
       notes.push(`${connection.platform === 'meta' ? 'Meta' : 'Google'} connection ${connection.id}: ${error.message || 'sync failed'}`);
     }

@@ -38,7 +38,8 @@ export const leadUpdateSchema = body({
   score: z.number().int().min(0).max(100).optional(),
   intent: z.enum(['low', 'medium', 'high']).optional(),
   project: z.string().min(2).max(120).optional(),
-  notesSummary: z.string().max(400).optional()
+  notesSummary: z.string().max(400).optional(),
+  dealValueInr: z.union([z.number().nonnegative().max(100000000000), z.null()]).optional()
 });
 
 export const assignSchema = body({ userId: z.number().int().positive() });

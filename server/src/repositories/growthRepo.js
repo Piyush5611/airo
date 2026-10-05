@@ -2,7 +2,7 @@ import { insert, many, one, run } from '../db/sql.js';
 
 const leadSelect = `
   l.id, l.full_name AS fullName, l.phone, l.email, l.project, l.city, l.status, l.score, l.intent,
-  l.budget_inr AS budgetInr, l.configuration, l.notes_summary AS notesSummary,
+  l.budget_inr AS budgetInr, l.deal_value_inr AS dealValueInr, l.configuration, l.notes_summary AS notesSummary,
   l.created_at AS createdAt, l.updated_at AS updatedAt, l.external_id AS externalId,
   s.name AS sourceName, s.provider_key AS providerKey, c.name AS campaignName, c.id AS campaignId,
   u.full_name AS assigneeName, l.assigned_user_id AS assignedUserId
@@ -113,6 +113,7 @@ export function updateLead(organizationId, id, fields) {
     intent: 'intent',
     project: 'project',
     notesSummary: 'notes_summary',
+    dealValueInr: 'deal_value_inr',
     assignedUserId: 'assigned_user_id'
   };
   const sets = [];

@@ -1,5 +1,7 @@
 import * as repo from '../../repositories/adsAgentRepo.js';
+import { importAll } from './leadImport.js';
 import { syncAll } from './metricsSync.js';
+import { monitorAll } from './monitorService.js';
 
 const TICK_MS = 10 * 60 * 1000;
 
@@ -12,6 +14,30 @@ export const JOBS = [
       const result = await syncAll();
       return {
         summary: `${result.rows} rows from ${result.connections} ad accounts.`,
+        error: result.notes.length ? result.notes.join(' | ') : null
+      };
+    }
+  },
+  {
+    key: 'ads.lead_import',
+    everyMinutes: 30,
+    lockMinutes: 15,
+    run: async () => {
+      const result = await importAll();
+      return {
+        summary: `${result.created} new leads, ${result.matched} matched to existing leads, from ${result.connections} Meta accounts.`,
+        error: result.notes.length || result.failed ? [...result.notes, ...(result.failed ? [`${result.failed} leads failed to save.`] : [])].join(' | ') : null
+      };
+    }
+  },
+  {
+    key: 'ads.monitor',
+    everyMinutes: 360,
+    lockMinutes: 20,
+    run: async () => {
+      const result = await monitorAll();
+      return {
+        summary: `${result.created} new recommendations, ${result.applied} applied, across ${result.organizations} organizations.`,
         error: result.notes.length ? result.notes.join(' | ') : null
       };
     }

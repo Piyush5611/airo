@@ -7,6 +7,7 @@ import { listLlmModels, llmProviderName, replyLlm, verifyLlm, WHATSAPP_BRIEF } f
 import { LLM_PURPOSES, purposeLabel } from '../domain/llmPurposes.js';
 import { many, one } from '../db/sql.js';
 import { modelJson } from '../utils/modelJson.js';
+import { adsAdviceReply } from './adsAgent/monitorService.js';
 import * as whatsappRepo from '../repositories/whatsappRepo.js';
 import * as repo from '../repositories/llmRepo.js';
 
@@ -415,6 +416,8 @@ export async function writeAdPlan({ intake, publicAds, english }) {
 
 export async function replyWhatsapp({ organizationId, recognized, businessLabel, messages }) {
   if (recognized && organizationId) {
+    const advice = await adsAdviceReply(organizationId, messages).catch(() => null);
+    if (advice) return { text: advice, image: null, purpose: 'ads_agent', providerName: 'AIRO', model: 'rules' };
     try {
       const org = await one(`SELECT name FROM organizations WHERE id = ?`, [organizationId]);
       const card = await whatsappReportCard(organizationId, messages, org?.name || businessLabel || '');

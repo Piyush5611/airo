@@ -431,6 +431,35 @@ export async function metaDailyStats({ apiKey, accountId }, range = 'LAST_7_DAYS
   };
 }
 
+export async function metaAdDailyStats({ apiKey, accountId }, range = 'LAST_7_DAYS') {
+  const preset = REPORT_PRESETS[range];
+  if (!preset) throw new ApiError(422, 'Choose a report range.', 'validation_error');
+  const act = actId(accountId);
+  const found = [];
+  let page = await graph(`act_${act}/insights`, apiKey, {
+    date_preset: preset,
+    level: 'ad',
+    time_increment: '1',
+    limit: '500',
+    fields: 'ad_id,ad_name,adset_id,campaign_id,spend,impressions,clicks,actions'
+  });
+  found.push(...(page.data || []));
+  for (let guard = 0; page.paging?.next && guard < 10; guard += 1) {
+    page = await graph(page.paging.next, apiKey);
+    found.push(...(page.data || []));
+  }
+  return found
+    .map((row) => ({
+      date: row.date_start || '',
+      id: String(row.ad_id || ''),
+      name: String(row.ad_name || ''),
+      campaignId: String(row.campaign_id || ''),
+      adsetId: String(row.adset_id || ''),
+      ...insightRow(row)
+    }))
+    .filter((row) => row.id && row.date);
+}
+
 function creativeOf(creative = {}) {
   const spec = creative.object_story_spec || {};
   const link = spec.link_data || {};
@@ -1188,6 +1217,91 @@ async function ownedMetaObject(apiKey, act, id, fields) {
   const row = await graph(String(id), apiKey, { fields: `account_id,${fields}` });
   if (String(row.account_id || '') !== act) throw new ApiError(404, 'This item is not in the connected ad account.', 'not_found');
   return row;
+}
+
+export async function metaCampaignBudgets({ apiKey, accountId }, campaignId) {
+  const act = actId(accountId);
+  const [row, account] = await Promise.all([
+    ownedMetaObject(apiKey, act, campaignId, 'status,daily_budget,lifetime_budget'),
+    graph(`act_${act}`, apiKey, { fields: 'currency' })
+  ]);
+  const currency = account.currency || '';
+  if (row.lifetime_budget) return { status: row.status, currency, level: 'campaign', lifetime: true, items: [] };
+  if (row.daily_budget) {
+    return { status: row.status, currency, level: 'campaign', lifetime: false, items: [{ id: String(campaignId), daily: Number(major(row.daily_budget, currency)) }] };
+  }
+  const adsets = (await list(`${campaignId}/adsets`, apiKey, { fields: 'id,status,daily_budget,lifetime_budget' })).filter((item) => item.status === 'ACTIVE');
+  return {
+    status: row.status,
+    currency,
+    level: 'adset',
+    lifetime: adsets.some((item) => item.lifetime_budget && !item.daily_budget),
+    items: adsets.filter((item) => item.daily_budget).map((item) => ({ id: String(item.id), daily: Number(major(item.daily_budget, currency)) }))
+  };
+}
+
+function leadFields(fieldData) {
+  const values = {};
+  for (const item of Array.isArray(fieldData) ? fieldData : []) {
+    values[String(item.name || '').toLowerCase()] = String(item.values?.[0] ?? '').trim();
+  }
+  const name = values.full_name || [values.first_name, values.last_name].filter(Boolean).join(' ');
+  return {
+    name: name.slice(0, 160),
+    phone: (values.phone_number || values.phone || '').slice(0, 32),
+    email: (values.email || '').slice(0, 255),
+    city: (values.city || '').slice(0, 80)
+  };
+}
+
+// Reads lead form submissions since a unix time. Falls back to the Page token when the user token cannot read leads.
+export async function metaFormLeads({ apiKey, accountId }, sinceUnix) {
+  const act = actId(accountId);
+  const ads = await list(`act_${act}/ads`, apiKey, { fields: 'id,campaign_id,campaign{name},creative{object_story_spec}' });
+  const leadAds = ads.filter((ad) => {
+    const spec = ad.creative?.object_story_spec || {};
+    return Boolean((spec.link_data || spec.video_data)?.call_to_action?.value?.lead_gen_form_id);
+  }).slice(0, 50);
+  const pageTokens = new Map();
+  const rows = [];
+  const notes = [];
+  const filtering = JSON.stringify([{ field: 'time_created', operator: 'GREATER_THAN', value: Math.floor(sinceUnix) }]);
+  for (const ad of leadAds) {
+    const params = { fields: 'id,created_time,ad_id,form_id,campaign_id,field_data', filtering };
+    let found;
+    try {
+      found = await list(`${ad.id}/leads`, apiKey, params);
+    } catch {
+      const pageId = ad.creative?.object_story_spec?.page_id;
+      try {
+        if (!pageId) throw new Error('no page');
+        if (!pageTokens.has(pageId)) pageTokens.set(pageId, await pageAccessToken(apiKey, pageId));
+        found = await list(`${ad.id}/leads`, pageTokens.get(pageId), params);
+      } catch {
+        notes.push(`Leads for ad ${ad.id} could not be read. Check leads access on the Facebook Page.`);
+        continue;
+      }
+    }
+    for (const lead of found) {
+      rows.push({
+        id: String(lead.id),
+        createdTime: lead.created_time || null,
+        adId: String(lead.ad_id || ad.id),
+        formId: lead.form_id ? String(lead.form_id) : null,
+        campaignId: String(lead.campaign_id || ad.campaign_id || ''),
+        campaignName: String(ad.campaign?.name || ''),
+        ...leadFields(lead.field_data)
+      });
+    }
+  }
+  return { rows, notes, leadAds: leadAds.length };
+}
+
+export async function setMetaDailyBudget({ apiKey, currency }, itemId, daily) {
+  if (!/^\d{5,25}$/.test(String(itemId || ''))) throw new ApiError(422, 'Unknown Meta item.', 'validation_error');
+  const minor = Math.round(Number(daily) * (OFFSET[currency] || 100));
+  if (!Number.isFinite(minor) || minor < 1) throw new ApiError(422, 'Enter a daily budget.', 'validation_error');
+  await graph(String(itemId), apiKey, { daily_budget: String(minor) }, 'POST');
 }
 
 async function budgetParams(apiKey, act, row, amount, missing) {

@@ -18,6 +18,9 @@ import * as metaWebhook from '../services/metaWebhookService.js';
 import * as adsAgent from '../services/adsAgent/agentService.js';
 import * as adsStrategy from '../services/adsAgent/strategyService.js';
 import * as adsLaunch from '../services/adsAgent/launchService.js';
+import * as adsMonitor from '../services/adsAgent/monitorService.js';
+import * as adsApply from '../services/adsAgent/applyService.js';
+import * as adsQuality from '../services/adsAgent/qualityService.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -142,6 +145,16 @@ client.post('/ads-agent/strategies/:id/approve', requirePermission('campaigns.up
 }));
 client.post('/ads-agent/strategies/:id/archive', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await adsStrategy.setStrategyStatus(req.auth, req, req.params.id, 'archived'));
+}));
+client.post('/ads-agent/monitor', requirePermission('campaigns.update'), asyncHandler(async (req, res) => ok(res, await adsMonitor.monitorNow(req.auth, req))));
+client.post('/ads-agent/decisions/:id/dismiss', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await adsMonitor.dismiss(req.auth, req, req.params.id));
+}));
+client.get('/ads-agent/quality', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsQuality.quality(req.auth, req.query))));
+client.get('/ads-agent/experiments', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsQuality.experiments(req.auth))));
+client.post('/ads-agent/leads/import', requirePermission('campaigns.update'), asyncHandler(async (req, res) => ok(res, await adsQuality.importNow(req.auth, req))));
+client.post('/ads-agent/decisions/:id/apply', requirePermission('campaigns.update', 'connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await adsApply.approve(req.auth, req, req.params.id));
 }));
 client.get('/ads-agent/launches', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsLaunch.listLaunches(req.auth))));
 client.post('/ads-agent/launches', requirePermission('campaigns.update'), validate(schemas.launchCreateSchema), asyncHandler(async (req, res) => {

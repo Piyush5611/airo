@@ -85,7 +85,8 @@ export async function updateLead(auth, req, id) {
     score: req.body.score,
     intent: req.body.intent,
     project: req.body.project,
-    notesSummary: req.body.notesSummary
+    notesSummary: req.body.notesSummary,
+    dealValueInr: req.body.dealValueInr
   });
   if (req.body.status && req.body.status !== existing.status) {
     await repo.addLeadActivity({
@@ -94,6 +95,15 @@ export async function updateLead(auth, req, id) {
       actorUserId: auth.userId,
       activityType: 'status',
       body: `Status moved from ${existing.status.replaceAll('_', ' ')} to ${req.body.status.replaceAll('_', ' ')}.`
+    });
+  }
+  if (req.body.dealValueInr !== undefined && Number(req.body.dealValueInr ?? -1) !== Number(existing.dealValueInr ?? -1)) {
+    await repo.addLeadActivity({
+      organizationId: auth.organizationId,
+      leadId: id,
+      actorUserId: auth.userId,
+      activityType: 'deal_value',
+      body: req.body.dealValueInr == null ? 'Deal value cleared.' : `Deal value set to ₹${Number(req.body.dealValueInr).toLocaleString('en-IN')}.`
     });
   }
   await recordAudit(req, { action: 'lead.updated', resource: 'lead', resourceId: id, metadata: req.body });

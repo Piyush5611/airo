@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkAction, checkLaunch, normalizeSettings } from '../services/adsAgent/guardrails.js';
 import { modelJson } from '../utils/modelJson.js';
+import {
+  budgetTotal, campaignFindings, experimentFindings, experimentGroups, mergeQuality, pacingFindings, qualityFindings,
+  scaleBudgets, scaleFindings, splitWindows, zScore
+} from '../services/adsAgent/monitorRules.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 
 const profile = businessProfileSchema.parse({
@@ -115,4 +119,148 @@ test('model JSON is read from fenced or padded replies', () => {
   assert.deepEqual(modelJson('Here it is: {"a":{"b":2}} thanks'), { a: { b: 2 } });
   assert.equal(modelJson('no json here'), null);
   assert.equal(modelJson('{"a":'), null);
+});
+
+const TODAY = '2026-10-15';
+const rules = normalizeSettings({ mode: 'recommend', minSpendForDecision: 500 });
+
+function days(from, count, row) {
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(`${from}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + index);
+    return { date: date.toISOString().slice(0, 10), ...row };
+  });
+}
+
+test('splitWindows uses the 3 days before today and the 7 before that', () => {
+  const rows = days('2026-10-02', 14, { spend: 100, clicks: 10, impressions: 1000, results: 1 });
+  const { recent, base } = splitWindows(rows, TODAY);
+  assert.equal(recent.days, 3);
+  assert.equal(base.days, 7);
+  assert.equal(recent.spend, 300);
+});
+
+test('pause only when a campaign that brought results stops bringing them', () => {
+  const rows = [
+    ...days('2026-10-05', 7, { spend: 300, clicks: 30, impressions: 3000, results: 2 }),
+    ...days('2026-10-12', 3, { spend: 300, clicks: 30, impressions: 3000, results: 0 })
+  ];
+  const found = campaignFindings({ platform: 'meta', currency: 'INR', rows }, { settings: rules, profile: null, today: TODAY });
+  assert.equal(found[0].type, 'pause');
+  assert.deepEqual(found[0].action, { type: 'pause' });
+});
+
+test('campaigns that never recorded results get a note, not a pause', () => {
+  const rows = days('2026-10-05', 10, { spend: 300, clicks: 30, impressions: 3000, results: 0 });
+  const found = campaignFindings({ platform: 'meta', currency: 'INR', rows }, { settings: rules, profile: null, today: TODAY });
+  assert.equal(found.length, 1);
+  assert.equal(found[0].type, 'no_results');
+  assert.equal(found[0].action, null);
+});
+
+test('rising cost per result and falling click rate are flagged', () => {
+  const rows = [
+    ...days('2026-10-05', 7, { spend: 300, clicks: 60, impressions: 3000, results: 3 }),
+    ...days('2026-10-12', 3, { spend: 300, clicks: 20, impressions: 3000, results: 1 })
+  ];
+  const types = campaignFindings({ platform: 'google', currency: 'INR', rows }, { settings: rules, profile: null, today: TODAY }).map((item) => item.type);
+  assert.deepEqual(types, ['budget_decrease', 'refresh_creative']);
+});
+
+test('target cost rules only apply in the profile currency', () => {
+  const rows = days('2026-10-05', 10, { spend: 1000, clicks: 50, impressions: 3000, results: 4 });
+  const cheap = { targetCpl: 500, currency: 'INR' };
+  const inr = campaignFindings({ platform: 'meta', currency: 'INR', rows }, { settings: rules, profile: cheap, today: TODAY });
+  assert.equal(inr.find((item) => item.type === 'budget_increase')?.action.changePct, 20);
+  const usd = campaignFindings({ platform: 'meta', currency: 'USD', rows }, { settings: rules, profile: cheap, today: TODAY });
+  assert.equal(usd.some((item) => item.type === 'budget_increase'), false);
+  const dear = campaignFindings({ platform: 'meta', currency: 'INR', rows }, { settings: rules, profile: { targetCpl: 100, currency: 'INR' }, today: TODAY });
+  assert.equal(dear.some((item) => item.type === 'above_target'), true);
+});
+
+test('pacing compares the projected month with the cap or budget', () => {
+  const over = pacingFindings({ monthSpend: 70000, profile: { monthlyBudget: 60000 }, settings: rules, today: TODAY });
+  assert.equal(over[0].type, 'pacing_over');
+  const under = pacingFindings({ monthSpend: 10000, profile: { monthlyBudget: 60000 }, settings: rules, today: TODAY });
+  assert.equal(under[0].type, 'pacing_under');
+  assert.deepEqual(pacingFindings({ monthSpend: 10000, profile: null, settings: rules, today: '2026-10-02' }), []);
+});
+
+test('budget scaling keeps each item and the guardrail sees the real total', () => {
+  const before = [{ id: '1', daily: 1000 }, { id: '2', daily: 333.33 }];
+  const after = scaleBudgets(before, 20);
+  assert.deepEqual(after, [{ id: '1', daily: 1200 }, { id: '2', daily: 399.99 }]);
+  const check = checkAction({ type: 'budget', currentBudget: budgetTotal(before), newBudget: budgetTotal(after) }, { settings: { mode: 'approve', maxBudgetChangePct: 20 } });
+  assert.equal(check.allowed, true);
+  assert.equal(check.needsApproval, true);
+  assert.deepEqual(scaleBudgets([{ id: '1', daily: 500 }], -20), [{ id: '1', daily: 400 }]);
+});
+
+test('lead quality joins spend with CRM outcomes and keeps ROAS to INR', () => {
+  const campaigns = [
+    { platform: 'meta', connectionId: 1, externalId: '111', name: 'A', currency: 'INR', spend: '10000', leads: '25' },
+    { platform: 'meta', connectionId: 1, externalId: '222', name: 'B', currency: 'USD', spend: '500', leads: '5' },
+    { platform: 'google', connectionId: 2, externalId: '333', name: 'G', currency: 'INR', spend: '900', leads: null }
+  ];
+  const quality = [
+    { externalId: '111', crmLeads: 20, qualified: 5, booked: 1, rejected: 8, revenue: '50000', bookedWithoutValue: 0 },
+    { externalId: '222', crmLeads: 4, qualified: 2, booked: 1, rejected: 0, revenue: '9000', bookedWithoutValue: 0 }
+  ];
+  const [a, b] = mergeQuality(campaigns, quality);
+  assert.equal(mergeQuality(campaigns, quality).length, 2);
+  assert.equal(a.costPerLead, 500);
+  assert.equal(a.costPerQualifiedLead, 2000);
+  assert.equal(a.qualifiedRate, 25);
+  assert.equal(a.roas, 5);
+  assert.equal(b.roas, null);
+});
+
+test('low lead quality is flagged only with enough leads and many rejections', () => {
+  const row = (crmLeads, qualified, rejected) => mergeQuality(
+    [{ platform: 'meta', externalId: '1', name: 'A', currency: 'INR', spend: 5000, leads: crmLeads }],
+    [{ externalId: '1', crmLeads, qualified, booked: 0, rejected, revenue: null, bookedWithoutValue: 0 }]
+  )[0];
+  assert.equal(qualityFindings(row(12, 1, 8))[0].type, 'low_quality');
+  assert.deepEqual(qualityFindings(row(12, 1, 2)), []);
+  assert.deepEqual(qualityFindings(row(6, 0, 6)), []);
+});
+
+const ad = (id, adsetId, impressions, clicks, leads, extra = {}) => ({
+  connectionId: 1, externalId: id, name: `Ad ${id}`, campaignId: 'c1', adsetId, currency: 'INR',
+  spend: 2000, impressions, clicks, leads, days: 10, lastSpendDate: '2026-10-14', ...extra
+});
+
+test('A/B test needs a clear, confident lift before naming a winner', () => {
+  assert.ok(zScore(60, 10000, 30, 10000) > 1.96);
+  const clear = experimentGroups([ad('a', 's1', 10000, 200, 60), ad('b', 's1', 10000, 190, 30)], { today: TODAY, minSpend: 500 });
+  assert.equal(clear[0].metric, 'leads');
+  assert.equal(clear[0].verdict, 'winner');
+  const found = experimentFindings(clear[0]);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].target.externalId, 'b');
+  assert.deepEqual(found[0].action, { type: 'pause' });
+
+  const close = experimentGroups([ad('a', 's1', 10000, 200, 32), ad('b', 's1', 10000, 190, 30)], { today: TODAY, minSpend: 500 });
+  assert.equal(close[0].verdict, 'no_winner_yet');
+  assert.deepEqual(experimentFindings(close[0]), []);
+});
+
+test('A/B test skips small, stopped and lone ads', () => {
+  const small = experimentGroups([ad('a', 's1', 500, 20, 5), ad('b', 's1', 10000, 100, 5)], { today: TODAY, minSpend: 500 });
+  assert.equal(small[0].verdict, 'learning');
+  const stopped = experimentGroups([ad('a', 's1', 10000, 300, 60), ad('b', 's1', 10000, 100, 10, { lastSpendDate: '2026-10-01' })], { today: TODAY, minSpend: 500 });
+  assert.deepEqual(stopped, []);
+  const separate = experimentGroups([ad('a', 's1', 10000, 300, 60), ad('b', 's2', 10000, 100, 10)], { today: TODAY, minSpend: 500 });
+  assert.deepEqual(separate, []);
+});
+
+test('scaling picks campaigns far cheaper than the account average, never with a target or poor quality', () => {
+  const campaign = (id, results) => ({ platform: 'meta', connectionId: 1, externalId: id, name: id, currency: 'INR', rows: days('2026-10-05', 10, { spend: 1000, clicks: 50, impressions: 5000, results }) });
+  const list = [campaign('cheap', 4), campaign('dear1', 1), campaign('dear2', 1)];
+  const found = scaleFindings(list, { settings: rules, profile: null, today: TODAY });
+  assert.deepEqual(found.map((item) => item.campaign.externalId), ['cheap']);
+  assert.equal(found[0].action.changePct, 20);
+  assert.deepEqual(scaleFindings(list, { settings: rules, profile: { targetCpl: 300, currency: 'INR' }, today: TODAY }), []);
+  const poor = new Map([['cheap', { crmLeads: 20, qualifiedRate: 5 }]]);
+  assert.deepEqual(scaleFindings(list, { settings: rules, profile: null, today: TODAY, quality: poor }), []);
 });

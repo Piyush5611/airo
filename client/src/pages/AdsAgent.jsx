@@ -6,16 +6,46 @@ import { ago, day, num } from '../format.js';
 import { Badge, LineChart, Page, State, Subnav, Table, useSection } from '../ui.jsx';
 import { ProfileForm, StrategyPanel } from './AdsStrategy.jsx';
 import { LaunchPanel } from './AdsLaunch.jsx';
+import { ExperimentsPanel, QualityPanel } from './AdsQuality.jsx';
 
-const SECTIONS = ['Performance', 'Business profile', 'Strategy', 'Launch'];
+const SECTIONS = ['Performance', 'Lead quality', 'A/B tests', 'Business profile', 'Strategy', 'Launch'];
 
 const MODES = [
   { key: 'off', label: 'Off', note: 'The agent does nothing.' },
   { key: 'recommend', label: 'Recommend', note: 'Suggestions only. Nothing changes on the ad account.' },
-  { key: 'approve', label: 'Approve', note: 'A change runs only after an Owner or Admin approves it.' },
-  { key: 'auto', label: 'Auto', note: 'Changes inside the guardrails run on their own. Owner only.' }
+  { key: 'approve', label: 'Approve', note: 'A pause or budget change runs only after someone who manages the ad accounts approves it.' },
+  { key: 'auto', label: 'Auto', note: 'Pauses and budget changes inside the guardrails run on their own. Raising budgets also needs a spend cap. Owner only.' }
 ];
 const PLATFORM = { meta: 'Meta Ads', google: 'Google Ads' };
+const TYPE_LABEL = {
+  pause: 'Pause suggestion',
+  no_results: 'No results recorded',
+  low_quality: 'Low lead quality',
+  scale_winner: 'Scale a winner',
+  experiment_winner: 'A/B test result',
+  budget_decrease: 'Lower budget',
+  budget_increase: 'Raise budget',
+  refresh_creative: 'Refresh ads',
+  above_target: 'Above target cost',
+  pacing_over: 'Overspending pace',
+  pacing_under: 'Underspending pace',
+  campaign_create: 'Campaign created',
+  campaign_publish: 'Campaign published'
+};
+const APPLICABLE = ['pause', 'budget_decrease', 'budget_increase', 'scale_winner', 'experiment_winner'];
+
+function outcomeText(item) {
+  const outcome = item.outcome;
+  if (!outcome) return '';
+  if (outcome.status === 'PAUSED') return outcome.level === 'ad' ? 'Ad paused on the ad account.' : 'Campaign paused on the ad account.';
+  if (Array.isArray(outcome.before) && Array.isArray(outcome.after)) {
+    const total = (rows) => rows.reduce((sum, row) => sum + Number(row.daily || 0), 0).toFixed(2);
+    const verb = item.status === 'applied' ? 'Daily budget changed' : 'Daily budget would change';
+    return `${verb}: ${total(outcome.before)} → ${total(outcome.after)} ${outcome.currency || ''}`.trim();
+  }
+  return '';
+}
+
 const STATUS_TONE = { applied: 'good', approved: 'info', proposed: 'warn', blocked: 'bad', rejected: 'bad', failed: 'bad' };
 
 function money(value, currency) {
@@ -132,7 +162,10 @@ export function AdsAgent() {
   const { data, loading, error, reload } = useResource(`/api/ads-agent?days=${days}`);
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [checkNote, setCheckNote] = useState('');
   const canManage = can('campaigns.update');
+  const canApply = canManage && can('connections.manage') && ['approve', 'auto'].includes(data?.settings?.mode);
   const [section, setSection] = useSection(SECTIONS);
 
   async function sync() {
@@ -146,6 +179,50 @@ export function AdsAgent() {
       setSyncNote(err.message);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function check() {
+    setChecking(true);
+    setCheckNote('');
+    try {
+      const result = await api.post('/api/ads-agent/monitor', {});
+      setCheckNote(result.skipped || `${result.created} new recommendations.`);
+      reload();
+    } catch (err) {
+      setCheckNote(err.message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function apply(item) {
+    const what = item.type === 'experiment_winner' ? `pause the ad "${item.targetName}"`
+      : item.type === 'pause' ? `pause "${item.targetName}"` : `change the daily budget of "${item.targetName}" by ${item.proposedChange?.changePct}%`;
+    if (!window.confirm(`This will ${what} on the live ad account. Continue?`)) return;
+    setChecking(true);
+    setCheckNote('');
+    try {
+      const result = await api.post(`/api/ads-agent/decisions/${item.id}/apply`, {});
+      setCheckNote(result.status === 'applied' ? 'Applied on the ad account.' : `Blocked: ${(result.reasons || []).join(' ')}`);
+      reload();
+    } catch (err) {
+      setCheckNote(err.message);
+      reload();
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function dismiss(id) {
+    setChecking(true);
+    try {
+      await api.post(`/api/ads-agent/decisions/${id}/dismiss`, {});
+      reload();
+    } catch (err) {
+      setCheckNote(err.message);
+    } finally {
+      setChecking(false);
     }
   }
 
@@ -171,6 +248,8 @@ export function AdsAgent() {
       )}
     >
       <Subnav items={SECTIONS} value={section} onChange={setSection} />
+      {section === 'Lead quality' ? <QualityPanel canManage={canManage} /> : null}
+      {section === 'A/B tests' ? <ExperimentsPanel /> : null}
       {section === 'Business profile' ? <ProfileForm canManage={canManage} /> : null}
       {section === 'Strategy' ? <StrategyPanel canManage={canManage} /> : null}
       {section === 'Launch' ? <LaunchPanel canManage={canManage} /> : null}
@@ -202,16 +281,30 @@ export function AdsAgent() {
             <div className="split">
               {canManage ? <SettingsForm settings={data.settings} isOwner={user?.role === 'owner'} onSaved={reload} /> : null}
               <section className="panel">
-                <header><h2>Decision log</h2></header>
-                {data.decisions.length === 0 ? <p className="quiet">The agent has not made any decisions yet. Recommendations start in the next phase.</p> : (
+                <header>
+                  <h2>Decision log</h2>
+                  {canManage ? <button className="btn" onClick={check} disabled={checking}>{checking ? 'Checking…' : 'Check now'}</button> : null}
+                </header>
+                {checkNote ? <p className="quiet">{checkNote}</p> : null}
+                {data.decisions.length === 0 ? <p className="quiet">No recommendations yet. The agent checks synced data every 6 hours. Nothing is changed in your ad accounts.</p> : (
                   <ul className="alert-list">
                     {data.decisions.map((item) => (
                       <li key={item.id}>
                         <strong>{item.targetName || item.type}</strong>
                         <Badge value={item.status} tone={STATUS_TONE[item.status]} />
-                        <p>{item.reason}</p>
+                        <p>{TYPE_LABEL[item.type] ? <strong>{TYPE_LABEL[item.type]}: </strong> : null}{item.reason}</p>
                         {item.guardrail?.reasons?.length ? <p className="quiet">{item.guardrail.reasons.join(' ')}</p> : null}
                         <p className="quiet">{day(item.createdAt)} · {item.mode}</p>
+                        {outcomeText(item) ? <p className="quiet">{outcomeText(item)}</p> : null}
+                        {item.error ? <p className="quiet">{item.error}</p> : null}
+                        {canManage && ['proposed', 'blocked'].includes(item.status) ? (
+                          <p className="page-actions">
+                            {canApply && APPLICABLE.includes(item.type) ? (
+                              <button className="btn-primary" onClick={() => apply(item)} disabled={checking}>Approve &amp; apply</button>
+                            ) : null}
+                            <button className="btn" onClick={() => dismiss(item.id)} disabled={checking}>Dismiss</button>
+                          </p>
+                        ) : null}
                       </li>
                     ))}
                   </ul>

@@ -66,7 +66,7 @@ async function clearDraft(conversationId) {
   await run(`DELETE FROM meta_ad_drafts WHERE conversation_id = ?`, [conversationId]);
 }
 
-async function metaAccount(organizationId) {
+export async function metaAccount(organizationId) {
   const row = await one(
     `SELECT c.id, c.status, c.mode, cred.ciphertext
      FROM integration_connections c

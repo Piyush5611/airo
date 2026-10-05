@@ -146,13 +146,14 @@ export async function receiveWebhook(body) {
       for (const message of messages) {
         const phone = String(message.from || '');
         const image = inboundMedia(message);
-        const text = message.text?.body || image?.caption || (image ? `Photo ${image.mediaId}` : message.type || '');
+        const tapped = message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || message.button?.text || '';
+        const text = message.text?.body || tapped || image?.caption || (image ? `Photo ${image.mediaId}` : message.type || '');
         if (!phone || !text) continue;
         const saved = await storeInbound({
           phone,
           name: contact?.profile?.name || phone,
           body: String(text).slice(0, 2000),
-          reply: Boolean(message.text?.body || image),
+          reply: Boolean(message.text?.body || tapped || image),
           mediaId: image?.mediaId || ''
         });
         if (saved?.reply) {
@@ -394,6 +395,20 @@ async function answerWithModel(saved) {
     messages
   });
   if (!answer?.text) return;
+  if (answer.image?.png) {
+    try {
+      await deliverWhatsappImage({
+        conversationId: saved.conversationId,
+        png: answer.image.png,
+        caption: answer.image.caption,
+        buttons: answer.image.buttons,
+        actionTaken: `Report image · ${answer.image.title || answer.model}`
+      });
+      return;
+    } catch (error) {
+      console.error('WhatsApp report image skipped:', String(error?.message || 'failed').slice(0, 180));
+    }
+  }
   await deliverWhatsapp({
     conversationId: saved.conversationId,
     text: answer.text,
@@ -616,7 +631,7 @@ export async function clientLeadChats(auth, leadId) {
   return { phone: lead.phone, threads };
 }
 
-async function deliverWhatsapp({ conversationId, text, actionTaken }) {
+async function whatsappTarget(conversationId) {
   const row = await repo.conversation(conversationId);
   if (!row) throw new ApiError(404, 'Conversation not found.', 'not_found');
   const bot = await repo.bot();
@@ -632,18 +647,23 @@ async function deliverWhatsapp({ conversationId, text, actionTaken }) {
   }
   const to = String(row.contactPhone || '').replace(/\D/g, '');
   if (to.length < 8 || to.length > 15) throw new ApiError(422, 'This chat has no WhatsApp number.', 'validation_error');
+  return { row, to, token: secret.accessToken, base: `https://graph.facebook.com/${version}/${phoneNumberId}` };
+}
+
+function whatsappError(payload, fallback) {
+  return String(payload?.error?.message || fallback)
+    .replace(/access_token=[^&\s]+/gi, '')
+    .replace(/EAA[A-Za-z0-9]+/g, '')
+    .slice(0, 240);
+}
+
+async function postWhatsapp(target, message) {
   let response;
   try {
-    response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
+    response = await fetch(`${target.base}/messages`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${secret.accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to,
-        type: 'text',
-        text: { preview_url: false, body: text }
-      }),
+      headers: { Authorization: `Bearer ${target.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: target.to, ...message }),
       signal: AbortSignal.timeout(15000)
     });
   } catch {
@@ -651,20 +671,90 @@ async function deliverWhatsapp({ conversationId, text, actionTaken }) {
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.messages?.[0]?.id) {
-    const message = String(payload?.error?.message || 'WhatsApp did not accept this message.')
-      .replace(/access_token=[^&\s]+/gi, '')
-      .slice(0, 240);
-    throw new ApiError(422, message, 'whatsapp_rejected');
+    throw new ApiError(422, whatsappError(payload, 'WhatsApp did not accept this message.'), 'whatsapp_rejected');
   }
-  await repo.insertMessage({
-    conversationId,
-    direction: 'outbound',
-    body: text,
-    actionTaken
-  });
+}
+
+async function uploadWhatsappImage(target, png) {
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', 'image/png');
+  form.append('file', new Blob([png], { type: 'image/png' }), 'report.png');
+  let response;
+  try {
+    response = await fetch(`${target.base}/media`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${target.token}` },
+      body: form,
+      signal: AbortSignal.timeout(30000)
+    });
+  } catch {
+    throw new ApiError(502, 'WhatsApp did not respond to the image upload.', 'whatsapp_unreachable');
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.id) {
+    throw new ApiError(422, whatsappError(payload, 'WhatsApp did not accept the image.'), 'whatsapp_rejected');
+  }
+  return payload.id;
+}
+
+async function saveOutbound(conversationId, body, actionTaken) {
+  await repo.insertMessage({ conversationId, direction: 'outbound', body, actionTaken });
   await repo.touchConversation(conversationId);
   notifyWhatsappMessage(conversationId);
-  return row;
+}
+
+async function deliverWhatsapp({ conversationId, text, actionTaken }) {
+  const target = await whatsappTarget(conversationId);
+  await postWhatsapp(target, { type: 'text', text: { preview_url: false, body: text } });
+  await saveOutbound(conversationId, text, actionTaken);
+  return target.row;
+}
+
+async function deliverWhatsappImage({ conversationId, png, caption, buttons = [], actionTaken }) {
+  const target = await whatsappTarget(conversationId);
+  const mediaId = await uploadWhatsappImage(target, png);
+  const body = String(caption || 'Report').slice(0, 1024);
+  const options = buttons.filter(Boolean).slice(0, 10);
+  const replies = options.length <= 3 ? options.map((title, index) => ({
+    type: 'reply',
+    reply: { id: `report_${index + 1}`, title: String(title).slice(0, 20) }
+  })) : [];
+  if (options.length > 3) {
+    await postWhatsapp(target, { type: 'image', image: { id: mediaId, caption: body } });
+    await saveOutbound(conversationId, `${body}\n\n[Report image]`, actionTaken);
+    try {
+      await postWhatsapp(target, {
+        type: 'interactive',
+        interactive: {
+          type: 'list',
+          body: { text: 'Choose another report 👇' },
+          action: {
+            button: 'More reports',
+            sections: [{ title: 'Reports', rows: options.map((title, index) => ({ id: `report_${index + 1}`, title: String(title).slice(0, 24) })) }]
+          }
+        }
+      });
+    } catch (error) {
+      console.error('WhatsApp report menu skipped:', String(error?.message || 'failed').slice(0, 180));
+    }
+    return target.row;
+  }
+  if (replies.length) {
+    await postWhatsapp(target, {
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        header: { type: 'image', image: { id: mediaId } },
+        body: { text: body },
+        action: { buttons: replies }
+      }
+    });
+  } else {
+    await postWhatsapp(target, { type: 'image', image: { id: mediaId, caption: body } });
+  }
+  await saveOutbound(conversationId, `${body}\n\n[Report image]`, actionTaken);
+  return target.row;
 }
 
 export async function sendMessage(req, conversationId) {

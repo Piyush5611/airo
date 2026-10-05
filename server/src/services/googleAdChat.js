@@ -83,7 +83,7 @@ async function clearMetaDraft(conversationId) {
   }
 }
 
-async function googleAccount(organizationId) {
+export async function googleAccount(organizationId) {
   const row = await one(
     `SELECT c.id, c.status, c.mode, cred.ciphertext
      FROM integration_connections c

@@ -27,15 +27,15 @@ function n(value) {
   return Number.isFinite(amount) ? amount : 0;
 }
 
-function fmt(value) {
+export function fmt(value) {
   return Math.round(n(value)).toLocaleString('en-IN');
 }
 
-function pct(part, whole) {
+export function pct(part, whole) {
   return n(whole) ? Math.round((n(part) * 100) / n(whole)) : 0;
 }
 
-function talk(seconds) {
+export function talk(seconds) {
   const total = Math.round(n(seconds));
   if (!total) return '0m';
   const hours = Math.floor(total / 3600);
@@ -85,7 +85,7 @@ function dayLabel(date) {
 
 function windowTitle(window) {
   let title = String(window.label || '').replace(/\s*\(IST\)\s*/g, '').replace(/^today /, 'Today, ').replace(/ yesterday$/, ' (yesterday)').trim();
-  const trailing = title.match(/^(.*\d)\s+([a-z][a-z ]*)$/i);
+  const trailing = title.match(/^(.*\d{4})\s+([a-z][a-z ]*)$/i);
   if (trailing) title = `${trailing[2]} (${trailing[1].replace(/ to /, ' – ')})`;
   if (!/\d/.test(title) && window.from && window.to) {
     const first = dayLabel(window.from);
@@ -298,6 +298,20 @@ async function dailyRows(link, window) {
   return out;
 }
 
+async function previousTotals(link, window) {
+  const end = Math.min(window.to.getTime(), Date.now());
+  const span = end - window.from.getTime();
+  const shift = span <= DAY ? DAY : span <= 7 * DAY ? 7 * DAY : Math.ceil(span / DAY) * DAY;
+  const days = Math.round(span / DAY);
+  const label = shift === DAY ? 'yesterday' : span > 6 * DAY ? `the previous ${days} days` : 'last week';
+  try {
+    const report = await readReport(link, new Date(window.from.getTime() - shift), new Date(end - shift));
+    return { totals: report.totals, label: end < Date.now() - 60 * 1000 || span > 6 * DAY ? label : `${label} same time` };
+  } catch {
+    return null;
+  }
+}
+
 export function wantsCallCard(messages) {
   const users = (messages || []).filter((row) => row.role === 'user');
   const latest = String(users[users.length - 1]?.content || '').trim();
@@ -308,7 +322,7 @@ export function wantsCallCard(messages) {
   return latest;
 }
 
-function hourName(hour) {
+export function hourName(hour) {
   return `${hour % 12 || 12} ${hour < 12 || hour === 24 ? 'AM' : 'PM'}`;
 }
 
@@ -352,23 +366,14 @@ async function hourlyTotals(link, days) {
   return { sums, failed };
 }
 
-function hourLines(sums) {
+export function hourStats(sums) {
   const allCalls = sums.reduce((total, row) => total + row.total, 0);
-  if (!allCalls) return ['No calls were made in this period yet.', ''];
+  if (!allCalls) return null;
   const active = sums.map((row, hour) => ({ ...row, hour })).filter((row) => row.total >= Math.max(1, allCalls * 0.005));
   const first = active[0].hour;
   const last = active[active.length - 1].hour;
   const rows = sums.slice(first, last + 1).map((row, index) => ({ ...row, hour: first + index }));
   const allConnected = sums.reduce((total, row) => total + row.connected, 0);
-  const max = Math.max(...rows.map((row) => row.connected), 1);
-  const lines = [
-    '*⏰ Connected calls by hour*',
-    '```',
-    ...rows.map((row) => `${hourName(row.hour).padStart(5, ' ')} ${bar(row.connected, max)} ${fmt(row.connected)} · ${pct(row.connected, row.total)}%`),
-    '```',
-    `_Bar = connected calls · % = pick-up rate${rows.length < 24 ? ' · quiet hours hidden' : ''}_`,
-    ''
-  ];
   const most = [...rows].sort((a, b) => b.connected - a.connected)[0];
   const busy = rows.filter((row) => row.total >= Math.max(20, allCalls * 0.01));
   const bestRate = [...busy].sort((a, b) => pct(b.connected, b.total) - pct(a.connected, a.total) || b.connected - a.connected)[0];
@@ -378,10 +383,30 @@ function hourLines(sums) {
     const connected = rows[index].connected + rows[index + 1].connected + rows[index + 2].connected;
     if (!peak || connected > peak.connected) peak = { from: rows[index].hour, connected };
   }
+  return { rows, allCalls, allConnected, most, bestRate, worstRate: worstRate !== bestRate ? worstRate : null, peak: rows.length >= 3 ? peak : null };
+}
+
+export function hourSpan(hour, size = 1) {
+  return `${hourName(hour)} – ${hourName(hour + size)}`;
+}
+
+function hourLines(sums) {
+  const stats = hourStats(sums);
+  if (!stats) return ['No calls were made in this period yet.', ''];
+  const { rows, allConnected, most, bestRate, worstRate, peak } = stats;
+  const max = Math.max(...rows.map((row) => row.connected), 1);
+  const lines = [
+    '*⏰ Connected calls by hour*',
+    '```',
+    ...rows.map((row) => `${hourName(row.hour).padStart(5, ' ')} ${bar(row.connected, max)} ${fmt(row.connected)} · ${pct(row.connected, row.total)}%`),
+    '```',
+    `_Bar = connected calls · % = pick-up rate${rows.length < 24 ? ' · quiet hours hidden' : ''}_`,
+    ''
+  ];
   lines.push(`🏆 Most connected: *${hourName(most.hour)} – ${hourName(most.hour + 1)}* (${fmt(most.connected)} of ${fmt(most.total)} calls, ${pct(most.connected, most.total)}%)`);
   if (bestRate) lines.push(`🎯 Best pick-up rate: *${hourName(bestRate.hour)} – ${hourName(bestRate.hour + 1)}* (${pct(bestRate.connected, bestRate.total)}%, ${fmt(bestRate.connected)} of ${fmt(bestRate.total)})`);
-  if (peak && rows.length >= 3) lines.push(`🔥 Peak 3 hours: *${hourName(peak.from)} – ${hourName(peak.from + 3)}* (${pct(peak.connected, allConnected)}% of all connected calls)`);
-  if (worstRate && worstRate !== bestRate) lines.push(`📉 Lowest pick-up: *${hourName(worstRate.hour)} – ${hourName(worstRate.hour + 1)}* (${pct(worstRate.connected, worstRate.total)}%)`);
+  if (peak) lines.push(`🔥 Peak 3 hours: *${hourName(peak.from)} – ${hourName(peak.from + 3)}* (${pct(peak.connected, allConnected)}% of all connected calls)`);
+  if (worstRate) lines.push(`📉 Lowest pick-up: *${hourName(worstRate.hour)} – ${hourName(worstRate.hour + 1)}* (${pct(worstRate.connected, worstRate.total)}%)`);
   if (bestRate) {
     const slots = [...new Set([most.hour, bestRate.hour])].map((hour) => `${hourName(hour)} – ${hourName(hour + 1)}`);
     lines.push('', `💡 Plan important calls in the *${slots.join('* and *')}* slot${slots.length > 1 ? 's' : ''}.`);
@@ -407,7 +432,9 @@ async function hourCard(link, text, businessName) {
     `_Live from Call Yatri · ${clock(new Date())} IST_`,
     '💬 Try: *aaj kis time call connect hui*, *kal ka best time*, or *is hafte ka report*'
   );
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 4000);
+  const body = lines.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 4000);
+  const hasCalls = sums.some((row) => row.total > 0);
+  return { text: body, visual: hasCalls ? { type: 'hours', label, business: businessName, sums, failed, time: clock(new Date()) } : null };
 }
 
 export async function callReportCard(organizationId, messages, businessName = '') {
@@ -416,7 +443,11 @@ export async function callReportCard(organizationId, messages, businessName = ''
   const link = await callYatri(organizationId);
   if (!link) return null;
   if (TIME_ASK.test(text)) return hourCard(link, text, businessName);
-  const window = reportWindow(text);
+  const window = reportWindow(/\bweekly\b/i.test(text) && !/\bweek\b|\bhafte\b|\d/i.test(text) ? `${text} last 7 days` : text);
+  const mode = /\bdetail/i.test(text) ? 'detailed'
+    : /\b(agent|employee|caller|team)\s*-?\s*wise\b|\ball (agents|callers|employees)\b/i.test(text) ? 'agents'
+      : /\b(missed|miss|not picked|unanswered)\b/i.test(text) ? 'missed'
+        : 'summary';
   const header = [
     '📞 *CALL REPORT*',
     `🗓️ ${windowTitle(window)}`,
@@ -433,7 +464,7 @@ export async function callReportCard(organizationId, messages, businessName = ''
   try {
     report = await readReport(link, window.from, window.to);
   } catch {
-    return [...header, '⚠️ Call Yatri did not send the report right now. Please try again in a few minutes.', '', ...footer].join('\n');
+    return { text: [...header, '⚠️ Call Yatri did not send the report right now. Please try again in a few minutes.', '', ...footer].join('\n'), visual: null };
   }
   const employees = report.employees;
   const head = findHead(text, await teamHeads(link.id));
@@ -441,30 +472,61 @@ export async function callReportCard(organizationId, messages, businessName = ''
   const asked = askedName(text);
   if (!head && !person && asked) {
     const names = employees.map((row) => row.employee_name).filter(Boolean);
-    return [
-      ...header,
-      `❓ No caller named *${asked}* in Call Yatri for this period.`,
-      names.length ? `\nCallers in this report:\n${names.slice(0, 15).map((name) => `• ${name}`).join('\n')}${names.length > 15 ? `\n…and ${names.length - 15} more` : ''}` : '',
-      '',
-      ...footer
-    ].join('\n');
+    return {
+      text: [
+        ...header,
+        `❓ No caller named *${asked}* in Call Yatri for this period.`,
+        names.length ? `\nCallers in this report:\n${names.slice(0, 15).map((name) => `• ${name}`).join('\n')}${names.length > 15 ? `\n…and ${names.length - 15} more` : ''}` : '',
+        '',
+        ...footer
+      ].join('\n'),
+      visual: null
+    };
   }
   const lines = [...header];
+  const visual = { type: 'calls', label: windowTitle(window), business: businessName, time: clock(new Date()), days: [] };
   if (person) {
     lines.splice(2, 0, `👤 ${person.employee_name}`);
     lines.push(...summaryLines(person, []), ...outcomeLines(person), ...directionLines(person), ...personLines(person, employees));
+    const active = employees.filter((row) => n(row.total_calls) > 0);
+    Object.assign(visual, {
+      scope: person.employee_name,
+      totals: person,
+      employees: [],
+      person: {
+        rank: [...employees].sort((a, b) => n(b.total_calls) - n(a.total_calls)).indexOf(person) + 1,
+        of: employees.length,
+        average: active.length ? active.reduce((total, row) => total + n(row.total_calls), 0) / active.length : 0,
+        top: Math.max(...employees.map((row) => n(row.total_calls)), 0)
+      }
+    });
   } else if (head) {
     const members = employees.filter((row) => head.ids.has(String(row.employee_id)));
     const totals = sumRows(members);
     lines.splice(2, 0, `👥 Team of ${head.name} (${members.length} callers)`);
     lines.push(...summaryLines(totals, members), ...outcomeLines(totals), ...directionLines(totals), ...leaderLines(members));
+    Object.assign(visual, { scope: `Team of ${head.name}`, totals, employees: members });
   } else {
-    const days = await dailyRows(link, window);
+    const [days, previous] = await Promise.all([
+      mode === 'detailed' ? dailyRows(link, window) : [],
+      mode === 'summary' || mode === 'missed' ? previousTotals(link, window) : null
+    ]);
     lines.push(...summaryLines(report.totals, employees), ...outcomeLines(report.totals), ...directionLines(report.totals), ...trendLines(days), ...leaderLines(employees));
+    Object.assign(visual, {
+      type: mode === 'detailed' ? 'calls' : `calls-${mode}`,
+      multiDay: Math.min(window.to.getTime(), Date.now()) - window.from.getTime() > DAY,
+      scope: 'All callers',
+      totals: report.totals,
+      employees,
+      previous: previous?.totals || null,
+      previousLabel: previous?.label || '',
+      days: days.filter((row) => row.totals).map((row) => ({ label: dayLabel(row.date), value: n(row.totals.total_calls), connected: n(row.totals.connected_calls) }))
+    });
   }
-  if (!n((person || report.totals).total_calls) && !head) {
+  const empty = !n((person || report.totals).total_calls) && !head;
+  if (empty) {
     lines.push('No calls were made in this period yet.', '');
   }
   lines.push(...footer);
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 4000);
+  return { text: lines.join('\n').replace(/\n{3,}/g, '\n\n').slice(0, 4000), visual: empty || !n(visual.totals?.total_calls) ? null : visual };
 }

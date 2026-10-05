@@ -6,7 +6,7 @@ const SCOPE = 'https://www.googleapis.com/auth/adwords';
 const INDIA = '2356';
 const tokens = new Map();
 
-export const GOOGLE_RANGES = ['LAST_7_DAYS', 'LAST_14_DAYS', 'LAST_30_DAYS', 'THIS_MONTH', 'LAST_MONTH'];
+export const GOOGLE_RANGES = ['TODAY', 'YESTERDAY', 'LAST_7_DAYS', 'LAST_14_DAYS', 'LAST_30_DAYS', 'THIS_MONTH', 'LAST_MONTH'];
 
 function quiet() {
   return new ApiError(422, 'The API did not respond.', 'validation_error');

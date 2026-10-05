@@ -359,6 +359,8 @@ export async function verifyMetaAccount({ apiKey, accountId }) {
 }
 
 const REPORT_PRESETS = {
+  TODAY: 'today',
+  YESTERDAY: 'yesterday',
   LAST_7_DAYS: 'last_7d',
   LAST_14_DAYS: 'last_14d',
   LAST_30_DAYS: 'last_30d',

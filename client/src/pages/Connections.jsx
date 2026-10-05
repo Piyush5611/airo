@@ -995,12 +995,30 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
   const keywords = data?.keywords || [];
   const tabs = meta ? ['Ads', 'Ad sets'] : ['Ads', 'Ad groups', 'Keywords'];
   const counts = { Ads: ads.length, 'Ad sets': groups.length, 'Ad groups': groups.length, Keywords: keywords.length };
+  const adGroupOf = (ad) => String(meta ? ad.adsetId : ad.groupId);
+  const groupIds = new Set(groups.map((row) => String(row.id)));
+  const tree = info ? [
+    { key: 'campaign', level: 0, kind: 'Campaign', name: info.name, status: info.status },
+    ...groups.flatMap((group) => {
+      const keywordCount = keywords.filter((row) => String(row.groupId) === String(group.id)).length;
+      return [
+        { key: `group:${group.id}`, level: 1, kind: meta ? 'Ad set' : 'Ad group', name: group.name, status: group.status },
+        ...(meta ? [] : [{ key: `keywords:${group.id}`, level: 2, kind: 'Keywords', name: `${keywordCount} keyword${keywordCount === 1 ? '' : 's'}`, status: '' }]),
+        ...ads.filter((ad) => adGroupOf(ad) === String(group.id)).map((ad) => ({ key: `ad:${ad.id}`, level: 2, kind: 'Ad', name: ad.name || ad.headlines?.[0] || 'Ad', status: ad.status }))
+      ];
+    }),
+    ...ads.filter((ad) => !groupIds.has(adGroupOf(ad))).map((ad) => ({ key: `ad:${ad.id}`, level: 1, kind: 'Ad', name: ad.name || ad.headlines?.[0] || 'Ad', status: ad.status }))
+  ] : [];
 
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState('');
   const [editError, setEditError] = useState('');
   const [notice, setNotice] = useState('');
+  const [mode, setMode] = useState(campaign.edit && canManage ? 'edit' : 'view');
+  const [selected, setSelected] = useState('campaign');
   const bodyRef = useRef(null);
+  const keepNotice = useRef(false);
+  const lastOpened = useRef({ key: '', data: null });
   const statusOn = meta ? 'ACTIVE' : 'ENABLED';
   const statusOptions = meta ? [['ACTIVE', 'Active'], ['PAUSED', 'Paused']] : [['ENABLED', 'Enabled'], ['PAUSED', 'Paused']];
   const audienceUrl = `/api/connections/${connectionId}/meta/audience`;
@@ -1027,10 +1045,26 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
   }
 
   function openEdit(config) {
+    if (!keepNotice.current) {
+      setEditError('');
+      setNotice('');
+    }
+    setEditing({ ...config, token: Date.now() });
+  }
+
+  function startEdit(key = 'campaign') {
+    setSelected(key);
+    setEditing(null);
     setEditError('');
     setNotice('');
-    setEditing({ ...config, token: Date.now() });
-    bodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    setMode('edit');
+    bodyRef.current?.scrollTo({ top: 0 });
+  }
+
+  function pick(key) {
+    setEditError('');
+    setNotice('');
+    setSelected(key);
   }
 
   function toggleStatus(kind, itemId, status, name) {
@@ -1083,12 +1117,30 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
     });
   }
 
-  const autoEdited = useRef(false);
+  function openItem(key) {
+    const [kind, itemId] = key.split(':');
+    if (kind === 'group') {
+      const group = groups.find((row) => String(row.id) === itemId);
+      if (group) return meta ? editAdset(group) : editGroup(group);
+    }
+    if (kind === 'ad') {
+      const ad = ads.find((row) => String(row.id) === itemId);
+      if (ad) return meta ? editMetaAd(ad) : editGoogleAd(ad);
+    }
+    if (kind === 'keywords' && groups.some((row) => String(row.id) === itemId)) return addKeywords(itemId);
+    if (kind !== 'campaign') setSelected('campaign');
+    return editCampaign();
+  }
+
   useEffect(() => {
-    if (!campaign.edit || !canManage || !info || autoEdited.current) return;
-    autoEdited.current = true;
-    editCampaign();
-  }, [info, campaign.edit, canManage]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (mode !== 'edit' || !info) return;
+    const last = lastOpened.current;
+    if (editing && last.key === selected && last.data === data) return;
+    lastOpened.current = { key: selected, data };
+    keepNotice.current = true;
+    openItem(selected);
+    keepNotice.current = false;
+  }, [mode, selected, data, editing]);
 
   function editAdset(set) {
     const edit = set.targeting.edit || {};
@@ -1189,7 +1241,7 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
     });
   }
 
-  function addKeywords() {
+  function addKeywords(groupId) {
     if (!groups.length) return;
     openEdit({
       title: 'Add keywords',
@@ -1198,7 +1250,7 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
         { key: 'matchType', label: 'Match type', type: 'select', options: [['PHRASE', 'Phrase'], ['EXACT', 'Exact'], ['BROAD', 'Broad']] },
         { key: 'keywords', label: 'Keywords (one per line)', type: 'lines', max: 80, rows: 6 }
       ],
-      initial: { group: groups[0].id, matchType: 'PHRASE', keywords: [] },
+      initial: { group: groupId || groups[0].id, matchType: 'PHRASE', keywords: [] },
       submit: (_changes, values) => {
         const list = editValue({ type: 'lines' }, values.keywords);
         if (!list.length) {
@@ -1240,28 +1292,76 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
   return (
     <div className="drawer-layer" role="dialog" aria-modal="true" aria-label={`${campaign.name} details`}>
       <button type="button" className="drawer-scrim" aria-label="Close" onClick={onClose} />
-      <aside className={`campaign-drawer is-${brand}`}>
+      <aside className={`campaign-drawer is-${brand}${mode === 'edit' ? ' is-editing' : ''}`}>
         <header className="drawer-head">
           <span className={`ads-mark is-${brand}`} aria-hidden="true">{meta ? 'M' : 'G'}</span>
           <div>
-            <p className="eyebrow">{meta ? 'Meta campaign' : 'Google Ads campaign'}</p>
+            <p className="eyebrow">{mode === 'edit' ? `Editing in ${meta ? 'Meta Ads' : 'Google Ads'}` : meta ? 'Meta campaign' : 'Google Ads campaign'}</p>
             <h2>{info?.name || campaign.name}</h2>
           </div>
+          {mode === 'edit' ? (
+            <button type="button" className="btn" onClick={() => { setMode('view'); setEditing(null); setEditError(''); }}>← Back to report</button>
+          ) : null}
           <button type="button" className="drawer-close" onClick={onClose} aria-label="Close">×</button>
         </header>
         <div className="drawer-body" ref={bodyRef}>
           {notice ? <p className="ads-alert is-good">{notice}</p> : null}
           {editError && !editing ? <p className="ads-alert is-bad">{editError}</p> : null}
-          {editing ? (
-            <EditForm
-              key={editing.token}
-              editing={editing}
-              busy={Boolean(saving)}
-              error={editError}
-              onCancel={() => { setEditing(null); setEditError(''); }}
-              onSave={(changes, values) => editing.submit(changes, values)}
-            />
-          ) : null}
+          {mode === 'edit' ? (
+            <div className="ads-editor">
+              <nav className="editor-tree" aria-label="Campaign structure">
+                {tree.map((node) => (
+                  <button
+                    key={node.key}
+                    type="button"
+                    className={`editor-node is-l${node.level}${selected === node.key ? ' is-on' : ''}`}
+                    onClick={() => pick(node.key)}
+                  >
+                    <span className={`editor-dot${node.status === statusOn ? ' is-live' : node.status === 'PAUSED' ? ' is-paused' : ''}`} aria-hidden="true" />
+                    <span className="editor-node-text">
+                      <small>{node.kind}</small>
+                      <b>{node.name}</b>
+                    </span>
+                  </button>
+                ))}
+              </nav>
+              <div className="editor-pane">
+                {!info && loading ? <div className="skeleton-block" aria-busy="true" /> : null}
+                {selected.startsWith('keywords:') ? (
+                  <section className="drawer-section">
+                    <h3>Keywords in {groupName.get(selected.slice(9)) || 'this ad group'}</h3>
+                    {keywords.filter((row) => String(row.groupId) === selected.slice(9)).length ? (
+                      <ul className="editor-keywords">
+                        {keywords.filter((row) => String(row.groupId) === selected.slice(9)).map((row) => (
+                          <li key={row.id}>
+                            <span>
+                              <b>{row.text}</b>
+                              <small>{label(String(row.matchType || '').toLowerCase())} · {googleStatus(row.status)}</small>
+                            </span>
+                            <span className="page-actions">
+                              {statusButton('keyword', row.id, row.status, row.text)}
+                              <button className="btn-ghost" type="button" disabled={Boolean(saving)} onClick={() => removeKeyword(row)}>Remove</button>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : <p className="quiet">No keywords in this ad group yet.</p>}
+                  </section>
+                ) : null}
+                {editing ? (
+                  <EditForm
+                    key={editing.token}
+                    editing={editing}
+                    busy={Boolean(saving)}
+                    error={editError}
+                    onCancel={() => { setEditing(null); setEditError(''); }}
+                    onSave={(changes, values) => editing.submit(changes, values)}
+                  />
+                ) : null}
+              </div>
+            </div>
+          ) : (
+          <>
           {facts.length ? (
             <dl className="drawer-facts">
               {facts.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}
@@ -1269,9 +1369,9 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
           ) : null}
           {canManage && info ? (
             <div className="page-actions drawer-actions">
-              <button className="btn-primary" type="button" onClick={editCampaign}>Edit campaign</button>
+              <button className="btn-primary" type="button" onClick={() => startEdit('campaign')}>Edit campaign</button>
               {statusButton('campaign', info.id, info.status, info.name)}
-              {!meta && groups.length ? <button className="btn" type="button" onClick={addKeywords}>+ Add keywords</button> : null}
+              {!meta && groups.length ? <button className="btn" type="button" onClick={() => startEdit(`keywords:${groups[0].id}`)}>+ Add keywords</button> : null}
             </div>
           ) : null}
           {!meta && info?.locations?.length ? (
@@ -1325,7 +1425,7 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
                     {ads.map((ad) => {
                       const actions = canManage ? (
                         <div className="page-actions ad-card-actions">
-                          <button className="btn" type="button" onClick={() => (meta ? editMetaAd(ad) : editGoogleAd(ad))}>Edit</button>
+                          <button className="btn" type="button" onClick={() => startEdit(`ad:${ad.id}`)}>Edit</button>
                           {statusButton('ad', ad.id, ad.status, ad.name || 'this ad')}
                         </div>
                       ) : null;
@@ -1359,7 +1459,7 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
                         <StatLine row={set} currency={currency} resultKey="leads" resultLabel="leads" />
                         {canManage ? (
                           <div className="page-actions ad-card-actions">
-                            <button className="btn" type="button" onClick={() => editAdset(set)}>Edit</button>
+                            <button className="btn" type="button" onClick={() => startEdit(`group:${set.id}`)}>Edit</button>
                             {statusButton('adset', set.id, set.status, set.name)}
                           </div>
                         ) : null}
@@ -1379,7 +1479,7 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
                   { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) },
                   ...(canManage ? [{ key: 'action', label: '', render: (row) => (
                     <span className="page-actions">
-                      <button className="btn" type="button" onClick={() => editGroup(row)}>Edit</button>
+                      <button className="btn" type="button" onClick={() => startEdit(`group:${row.id}`)}>Edit</button>
                       {statusButton('ad_group', row.id, row.status, row.name)}
                     </span>
                   ) }] : [])
@@ -1405,6 +1505,8 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
               ) : null}
             </div>
           ) : null}
+          </>
+          )}
         </div>
       </aside>
     </div>

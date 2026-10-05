@@ -1,7 +1,7 @@
 import { ApiError } from '../utils/errors.js';
 import { decryptJson, encryptJson } from '../utils/cryptoBox.js';
 import { reportFacts, reportRequest } from './whatsappReport.js';
-import { callReportCard } from './callReportCard.js';
+import { whatsappReportCard } from './whatsappCards.js';
 import { recordAudit } from './auditService.js';
 import { listLlmModels, llmProviderName, replyLlm, verifyLlm, WHATSAPP_BRIEF } from '../integrations/llm.js';
 import { LLM_PURPOSES, purposeLabel } from '../domain/llmPurposes.js';
@@ -365,8 +365,8 @@ export async function replyWhatsapp({ organizationId, recognized, businessLabel,
   if (recognized && organizationId) {
     try {
       const org = await one(`SELECT name FROM organizations WHERE id = ?`, [organizationId]);
-      const card = await callReportCard(organizationId, messages, org?.name || businessLabel || '');
-      if (card) return { text: card, purpose: 'report', providerName: 'AIRO', model: 'Call report card' };
+      const card = await whatsappReportCard(organizationId, messages, org?.name || businessLabel || '');
+      if (card?.text) return { text: card.text, image: card.image || null, purpose: 'report', providerName: 'AIRO', model: card.model };
     } catch {
       // The model reply below still answers with the report facts.
     }

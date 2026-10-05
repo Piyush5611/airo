@@ -50,17 +50,17 @@ export function teamsFor(userId, organizationId) {
   );
 }
 
-export async function saveRefresh({ userId, organizationId, tokenHash, expiresAt, ip, userAgent }) {
+export async function saveRefresh({ userId, organizationId, tokenHash, expiresAt, remember, ip, userAgent }) {
   return insert(
-    `INSERT INTO refresh_tokens (user_id, organization_id, token_hash, expires_at, ip, user_agent)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [userId, organizationId, tokenHash, expiresAt, ip, userAgent]
+    `INSERT INTO refresh_tokens (user_id, organization_id, token_hash, expires_at, remember, ip, user_agent)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [userId, organizationId, tokenHash, expiresAt, remember ? 1 : 0, ip, userAgent]
   );
 }
 
 export function findRefresh(tokenHash) {
   return one(
-    `SELECT id, user_id AS userId, organization_id AS organizationId, expires_at AS expiresAt, revoked_at AS revokedAt
+    `SELECT id, user_id AS userId, organization_id AS organizationId, expires_at AS expiresAt, remember, revoked_at AS revokedAt
      FROM refresh_tokens WHERE token_hash = ?`,
     [tokenHash]
   );

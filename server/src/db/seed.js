@@ -188,7 +188,7 @@ async function seed() {
   const acres = await connectOrg(prestige, '99acres', 'connected', 'Prestige Homes — 99acres');
   await connectOrg(prestige, 'housing', 'connected', 'Prestige Homes — Housing.com');
   await connectOrg(prestige, 'whatsapp', 'connected', 'Prestige Homes — WhatsApp');
-  await connectOrg(prestige, 'nexcall', 'connected', 'Nexcall desk');
+  await connectOrg(prestige, 'nexcall', 'connected', 'Call Yatri desk');
   await connectOrg(prestige, 'google_analytics', 'connected', 'prestigehomes.in');
   const aureliaGoogle = await connectOrg(aurelia, 'google_ads', 'connected', 'Aurelia — Google Ads');
   await connectOrg(aurelia, '99acres', 'connected', 'Aurelia — 99acres');
@@ -427,7 +427,7 @@ async function seed() {
   });
   await insert(conn, 'call_recordings', {
     call_id: call, storage_key: 'dev://nexcall/prestige/call-1', duration_seconds: 740, available: 0,
-    note: 'Playback stays with Nexcall until a live media credential is connected.'
+    note: 'Playback stays with Call Yatri until a live media credential is connected.'
   });
   await insert(conn, 'call_transcripts', {
     call_id: call,

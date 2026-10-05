@@ -9,6 +9,7 @@ import { recordAudit } from './auditService.js';
 
 const ACCESS_TTL = '15m';
 const REFRESH_DAYS = 14;
+const SESSION_DAYS = 1;
 
 function asUtc(value) {
   const text = String(value).replace(' ', 'T');
@@ -31,18 +32,20 @@ function accessToken(user, context) {
   );
 }
 
-async function issueRefresh(res, req, userId, organizationId) {
+async function issueRefresh(res, req, userId, organizationId, remember = true) {
   const token = randomToken();
-  const expires = new Date(Date.now() + REFRESH_DAYS * 24 * 60 * 60 * 1000);
+  const days = remember ? REFRESH_DAYS : SESSION_DAYS;
+  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
   const id = await authRepo.saveRefresh({
     userId,
     organizationId,
     tokenHash: hashToken(token),
     expiresAt: expires.toISOString().slice(0, 19).replace('T', ' '),
+    remember,
     ip: req.ip,
     userAgent: req.get('user-agent')?.slice(0, 255) || null
   });
-  setRefreshCookie(res, token);
+  setRefreshCookie(res, token, remember);
   return id;
 }
 
@@ -129,7 +132,7 @@ export async function login(req, res) {
     context.roleKey = role?.roleKey || null;
   }
 
-  await issueRefresh(res, req, user.id, context.organizationId);
+  await issueRefresh(res, req, user.id, context.organizationId, req.body.remember !== false);
   await authRepo.touchLogin(user.id);
   await authRepo.openSession({ userId: user.id, ip: req.ip, userAgent: req.get('user-agent')?.slice(0, 255) || null });
   const body = await profile(user, context.organizationId);
@@ -164,7 +167,7 @@ export async function refresh(req, res) {
     context = { organizationId: null, workspaceId: null, roleKey: role?.roleKey || null };
   }
 
-  const nextId = await issueRefresh(res, req, user.id, context.organizationId);
+  const nextId = await issueRefresh(res, req, user.id, context.organizationId, Boolean(current.remember));
   await authRepo.revokeRefresh(current.id, nextId);
   return { accessToken: accessToken(user, context), user: await profile(user, context.organizationId) };
 }
@@ -262,11 +265,15 @@ export async function switchOrganization(req, res) {
   const active = memberships.find((item) => item.organizationId === Number(req.body.organizationId));
   if (!active) throw new ApiError(403, 'You are not a member of that organization.', 'forbidden');
   const raw = readCookie(req, 'airo_refresh');
+  let remember = true;
   if (raw) {
     const current = await authRepo.findRefresh(hashToken(raw));
-    if (current) await authRepo.revokeRefresh(current.id);
+    if (current) {
+      remember = Boolean(current.remember);
+      await authRepo.revokeRefresh(current.id);
+    }
   }
-  await issueRefresh(res, req, user.id, active.organizationId);
+  await issueRefresh(res, req, user.id, active.organizationId, remember);
   const context = {
     organizationId: active.organizationId,
     workspaceId: active.workspaceId,

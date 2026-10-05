@@ -1,3 +1,4 @@
+import { pool } from '../config/db.js';
 import { insert, many, one, run } from '../db/sql.js';
 
 export function list(organizationId) {
@@ -126,8 +127,10 @@ export function liveConnections(providerKey) {
 
 export function findByWebhookToken(token) {
   return one(
-    `SELECT id, organization_id AS organizationId, status
-     FROM integration_connections WHERE webhook_token = ?`,
+    `SELECT c.id, c.organization_id AS organizationId, c.status, p.provider_key AS providerKey
+     FROM integration_connections c
+     JOIN integration_providers p ON p.id = c.provider_id
+     WHERE c.webhook_token = ?`,
     [token]
   );
 }
@@ -197,6 +200,44 @@ export function setStatus(organizationId, id, status) {
     `UPDATE integration_connections SET status = ? WHERE organization_id = ? AND id = ?`,
     [status, organizationId, id]
   );
+}
+
+export function callTeamRows(connectionId) {
+  return many(
+    `SELECT h.id, h.head_employee_id AS headEmployeeId, h.head_name AS headName,
+            m.employee_id AS employeeId, m.employee_name AS employeeName
+     FROM call_team_heads h
+     LEFT JOIN call_team_members m ON m.team_head_id = h.id
+     WHERE h.connection_id = ?
+     ORDER BY h.head_name, m.employee_name`,
+    [connectionId]
+  );
+}
+
+export async function replaceCallTeams(organizationId, connectionId, heads) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(`DELETE FROM call_team_heads WHERE connection_id = ?`, [connectionId]);
+    for (const head of heads) {
+      const [result] = await conn.query(
+        `INSERT INTO call_team_heads (organization_id, connection_id, head_employee_id, head_name) VALUES (?, ?, ?, ?)`,
+        [organizationId, connectionId, head.headEmployeeId, head.headName]
+      );
+      for (const member of head.members) {
+        await conn.query(
+          `INSERT INTO call_team_members (connection_id, employee_id, team_head_id, employee_name) VALUES (?, ?, ?, ?)`,
+          [connectionId, member.employeeId, result.insertId, member.employeeName]
+        );
+      }
+    }
+    await conn.commit();
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
 export function resolveErrors(connectionId) {

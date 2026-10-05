@@ -10,12 +10,12 @@ export function readCookie(req, name) {
   return null;
 }
 
-export function setRefreshCookie(res, token) {
+export function setRefreshCookie(res, token, remember = true) {
   res.cookie('airo_refresh', token, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
-    maxAge: 14 * 24 * 60 * 60 * 1000,
+    ...(remember ? { maxAge: 14 * 24 * 60 * 60 * 1000 } : {}),
     path: '/api/auth'
   });
 }

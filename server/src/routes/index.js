@@ -156,6 +156,18 @@ client.patch('/connections/:id', requirePermission('connections.manage'), valida
 client.post('/connections/:id/nexcall-key', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.nexcallKeySchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.saveNexcallKey(req.auth, req, req.params.id));
 }));
+client.get('/connections/:id/call-yatri/stats', requirePermission('connections.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.callYatriStats(req.auth, req.params.id, String(req.query.day || '')));
+}));
+client.get('/connections/:id/call-yatri/records', requirePermission('connections.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.callYatriRecords(req.auth, req.params.id, String(req.query.kind || ''), String(req.query.day || '')));
+}));
+client.get('/connections/:id/call-yatri/teams', requirePermission('connections.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.callYatriTeams(req.auth, req.params.id));
+}));
+client.put('/connections/:id/call-yatri/teams', requirePermission('connections.manage'), validate(schemas.callTeamsSchema), asyncHandler(async (req, res) => {
+  ok(res, await connections.saveCallYatriTeams(req.auth, req, req.params.id));
+}));
 client.post('/connections/:id/sync', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.sync(req.auth, req, req.params.id));
 }));

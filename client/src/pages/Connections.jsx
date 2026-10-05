@@ -3,7 +3,8 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-r
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
-import { inr, label, num, when } from '../format.js';
+import { day, indianDate, inr, label, num, parseIst, when } from '../format.js';
+import { providerLogo } from '../providerLogos.js';
 import { Badge, LineChart, Page, State, Subnav, Table, useSection } from '../ui.jsx';
 
 const CONNECTION_SECTIONS = ['Advertising', 'Real Estate Portals', 'Communication', 'Calling', 'CRM', 'Analytics', 'Developer / API'];
@@ -66,7 +67,15 @@ export function Connections() {
               </header>
               <Table
                 columns={[
-                  { key: 'name', label: 'Provider', render: (row) => row.connection?.linked ? <Link to={`/app/connections/${row.connection.id}`}>{row.name}</Link> : row.name },
+                  {
+                    key: 'name',
+                    label: 'Provider',
+                    render: (row) => {
+                      const logo = providerLogo(row.providerKey);
+                      const name = row.connection?.linked ? <Link to={`/app/connections/${row.connection.id}`}>{row.name}</Link> : row.name;
+                      return logo ? <span className="provider-name"><img src={logo} alt="" />{name}</span> : name;
+                    }
+                  },
                   { key: 'description', label: 'Becomes' },
                   { key: 'state', label: 'Status', render: (row) => <Badge value={row.connection?.linked ? 'connected' : 'not_connected'} /> },
                   { key: 'api', label: 'API', render: (row) => row.providerKey === 'whatsapp' ? 'Platform bot' : row.connection?.linked ? `Live ${row.connection.apiKeyPreview}` : 'Not saved' },
@@ -152,7 +161,7 @@ function ProviderApiForm({ provider, onDone }) {
       )}
       {meta ? null : (
         <label className="stack-field">Base URL
-          <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={nexcall ? 'Blank uses the W-Caller default' : 'Optional'} />
+          <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={nexcall ? 'Blank uses the Call Yatri default' : 'Optional'} />
         </label>
       )}
       <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Checking' : 'Save API key'}</button>
@@ -1630,7 +1639,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
                 <section className="panel">
                   <h3>{label(chartField)} by day</h3>
                   <LineChart points={daily} field={chartField} />
-                  <p className="quiet">{daily[0].date} to {daily[daily.length - 1].date}</p>
+                  <p className="quiet">{day(daily[0].date)} to {day(daily[daily.length - 1].date)}</p>
                 </section>
               ) : <p className="quiet">Google returned no daily rows for this range.</p>}
               <h3>Campaigns</h3>
@@ -1669,6 +1678,734 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
   );
 }
 
+function localTime(value) {
+  if (!value) return '—';
+  const date = parseIst(value);
+  return Number.isNaN(date.getTime()) ? String(value) : indianDate(date);
+}
+
+const DATE_TEXT = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+function fieldText(value) {
+  if (value == null || value === '') return '—';
+  const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (!DATE_TEXT.test(text)) return text;
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? day(text) : localTime(text);
+}
+
+function talkTime(seconds) {
+  const total = Math.round(Number(seconds || 0));
+  if (!total) return '0m';
+  const hours = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  if (hours) return `${hours}h ${mins}m`;
+  return mins ? `${mins}m ${total % 60}s` : `${total}s`;
+}
+
+function percent(part, whole) {
+  return Number(whole) ? Math.round((Number(part || 0) / Number(whole)) * 100) : 0;
+}
+
+function callTone(status) {
+  const text = String(status || '').toLowerCase();
+  if (/miss|reject|fail|busy/.test(text)) return 'bad';
+  if (/not answer|not picked|no answer|pending|cold/.test(text)) return 'warn';
+  if (/connect|answer|complete|done|hot|interested/.test(text)) return 'good';
+  return 'info';
+}
+
+function CallStatus({ value }) {
+  if (!value) return '—';
+  return <span className={`badge ${callTone(value)}`}>{value}</span>;
+}
+
+function Tiles({ items }) {
+  return (
+    <div className="metric-strip">
+      {items.map((item) => (
+        <div className="metric" key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+          <em>{item.hint}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function compact(value) {
+  const amount = Number(value || 0);
+  if (amount >= 100000) return `${(amount / 100000).toFixed(1)}L`;
+  if (amount >= 1000) return `${(amount / 1000).toFixed(amount >= 10000 ? 0 : 1)}k`;
+  return String(amount);
+}
+
+function dayLabel(date, long = false) {
+  const parsed = parseIst(date);
+  if (Number.isNaN(parsed.getTime())) return String(date || '—');
+  if (!long) return new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', timeZone: 'Asia/Kolkata' }).format(parsed);
+  const weekday = new Intl.DateTimeFormat('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' }).format(parsed);
+  return `${weekday}, ${day(date)}`;
+}
+
+function hourLabel(hour) {
+  const suffix = hour < 12 ? 'am' : 'pm';
+  return `${hour % 12 || 12}${suffix}`;
+}
+
+function sumTotals(list) {
+  const out = {};
+  for (const totals of list) {
+    for (const [key, value] of Object.entries(totals || {})) {
+      if (typeof value === 'number') out[key] = (out[key] || 0) + value;
+    }
+  }
+  return out;
+}
+
+function mergeEmployees(days) {
+  const byId = new Map();
+  for (const row of days.flatMap((item) => item.employees || [])) {
+    const key = row.employee_id ?? row.employee_name;
+    const current = byId.get(key) || { employee_id: row.employee_id, employee_name: row.employee_name };
+    for (const [field, value] of Object.entries(row)) {
+      if (typeof value === 'number' && field !== 'employee_id' && field !== 'sno') current[field] = (current[field] || 0) + value;
+    }
+    byId.set(key, current);
+  }
+  return [...byId.values()].map((row) => ({
+    ...row,
+    connected_calls_avg_duration_seconds: Number(row.connected_calls_duration_seconds || 0) / Math.max(Number(row.connected_calls || 0), 1)
+  }));
+}
+
+function ColumnChart({ items, selected, onPick, dense = false }) {
+  const max = Math.max(...items.map((item) => item.total), 1);
+  return (
+    <div className={`col-chart ${dense ? 'is-dense' : ''}`}>
+      {items.map((item, index) => {
+        const height = (item.total / max) * 100;
+        const fill = item.total ? (item.connected / item.total) * 100 : 0;
+        return (
+          <button
+            type="button"
+            key={item.key}
+            className={`col ${selected === item.key ? 'is-on' : ''}`}
+            onClick={onPick ? () => onPick(item.key) : undefined}
+            disabled={!onPick}
+            title={`${item.title || item.label}: ${num(item.total)} calls, ${num(item.connected)} connected`}
+          >
+            {dense ? null : <span className="col-value">{compact(item.total)}</span>}
+            <span className="col-track">
+              <span className="col-bar" style={{ height: `${Math.max(height, item.total ? 2 : 0)}%` }}>
+                <span className="col-fill" style={{ height: `${fill}%` }} />
+              </span>
+            </span>
+            <span className="col-label">{!dense || index % 3 === 0 ? item.label : ''}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SplitBar({ parts }) {
+  const total = parts.reduce((sum, part) => sum + part.value, 0) || 1;
+  return (
+    <div className="split-bar">
+      <div className="split-track">
+        {parts.filter((part) => part.value > 0).map((part) => (
+          <span key={part.label} className={`seg ${part.tone}`} style={{ width: `${(part.value / total) * 100}%` }} title={`${part.label}: ${num(part.value)}`} />
+        ))}
+      </div>
+      <ul className="split-legend">
+        {parts.map((part) => (
+          <li key={part.label}>
+            <span className={`dot ${part.tone}`} />
+            <span>{part.label}</span>
+            <strong>{num(part.value)}</strong>
+            <em>{percent(part.value, total)}%</em>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function matches(query, ...values) {
+  const text = query.trim().toLowerCase();
+  if (!text) return true;
+  return values.some((value) => String(value ?? '').toLowerCase().includes(text));
+}
+
+function SearchBox({ value, onChange, placeholder = 'Search', count }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const type = (text) => {
+    setDraft(text);
+    if (!text) onChange('');
+  };
+  return (
+    <span className="search-box">
+      <input
+        type="search"
+        value={draft}
+        onChange={(event) => type(event.target.value)}
+        onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); onChange(draft); } }}
+        placeholder={placeholder}
+        aria-label={placeholder}
+      />
+      <button className="btn" type="button" onClick={() => onChange(draft)}>Search</button>
+      {value && count != null ? <em>{num(count)} found</em> : null}
+    </span>
+  );
+}
+
+function TeamBars({ rows }) {
+  const [all, setAll] = useState(false);
+  const max = Math.max(...rows.map((row) => Number(row.total_calls || 0)), 1);
+  const shown = all ? rows : rows.slice(0, 12);
+  return (
+    <div className="team-bars">
+      {shown.map((row) => {
+        const total = Number(row.total_calls || 0);
+        const connected = Number(row.connected_calls || 0);
+        return (
+          <div className="team-row" key={row.employee_id ?? row.employee_name}>
+            <span className="team-name" title={row.employee_name}>{row.employee_name || '—'}</span>
+            <span className="team-track">
+              <span className="team-total" style={{ width: `${(total / max) * 100}%` }}>
+                <span className="team-conn" style={{ width: `${total ? (connected / total) * 100 : 0}%` }} />
+              </span>
+            </span>
+            <strong>{num(total)}</strong>
+            <em>{percent(connected, total)}%</em>
+          </div>
+        );
+      })}
+      {rows.length > 12 ? (
+        <button type="button" className="btn-ghost" onClick={() => setAll((value) => !value)}>{all ? 'Show top 12' : `Show all ${rows.length}`}</button>
+      ) : null}
+    </div>
+  );
+}
+
+function headGroups(heads, employees) {
+  const owner = new Map();
+  for (const head of heads) {
+    for (const member of head.members) owner.set(String(member.employeeId), head.id);
+  }
+  const groups = heads.map((head) => ({ id: head.id, name: head.headName, size: head.members.length, rows: [] }));
+  const unassigned = { id: 'unassigned', name: 'Not in a team', size: 0, rows: [] };
+  for (const row of employees) {
+    const headId = owner.get(String(row.employee_id));
+    const group = groups.find((item) => item.id === headId) || unassigned;
+    group.rows.push(row);
+  }
+  unassigned.size = unassigned.rows.length;
+  const all = unassigned.rows.length ? [...groups, unassigned] : groups;
+  return all.map((group) => ({ ...group, totals: sumTotals(group.rows) }))
+    .sort((a, b) => (a.id === 'unassigned') - (b.id === 'unassigned') || Number(b.totals.total_calls || 0) - Number(a.totals.total_calls || 0));
+}
+
+function TeamHeadReport({ heads, employees, canManage, onEdit }) {
+  const [open, setOpen] = useState(null);
+  const [query, setQuery] = useState('');
+  if (!heads.length) {
+    return (
+      <section className="panel">
+        <header>
+          <h2>Team head-wise</h2>
+        </header>
+        <div className="empty">
+          <strong>No team heads set yet.</strong>
+          <p className="quiet">Call Yatri's API does not send team heads or teams, so AIRO cannot group calls by head on its own. Pick each head and their members once; the report groups by them after that.</p>
+          {canManage ? <button className="btn-primary" type="button" onClick={onEdit}>Set up team heads</button> : <p className="quiet">Ask an owner or manager to set up team heads.</p>}
+        </div>
+      </section>
+    );
+  }
+  const groups = headGroups(heads, employees)
+    .filter((group) => matches(query, group.name, ...group.rows.map((row) => row.employee_name)));
+  const opened = groups.find((group) => group.id === open);
+  const openedRows = !opened ? [] : matches(query, opened.name) ? opened.rows : opened.rows.filter((row) => matches(query, row.employee_name));
+  return (
+    <section className="panel">
+      <header>
+        <h2>Team head-wise</h2>
+        <div className="row-actions">
+          <SearchBox value={query} onChange={setQuery} placeholder="Search team head or member" count={groups.length} />
+          {canManage ? <button className="btn" type="button" onClick={onEdit}>Edit team heads</button> : null}
+        </div>
+      </header>
+      <p className="quiet cy-note">Head's own calls count in their team. Teams are set in AIRO.</p>
+      <TeamBars rows={groups.map((group) => ({
+        employee_id: group.id,
+        employee_name: group.id === 'unassigned' ? `${group.name} (${group.size})` : `${group.name} · ${group.size}`,
+        total_calls: group.totals.total_calls || 0,
+        connected_calls: group.totals.connected_calls || 0
+      }))} />
+      <Table
+        columns={[
+          { key: 'name', label: 'Team head', render: (row) => <strong>{row.name}</strong> },
+          { key: 'size', label: 'Members', render: (row) => num(row.size) },
+          { key: 'calls', label: 'Calls', render: (row) => num(row.totals.total_calls) },
+          { key: 'connected', label: 'Connected', render: (row) => `${num(row.totals.connected_calls)} (${percent(row.totals.connected_calls, row.totals.total_calls)}%)` },
+          { key: 'missed', label: 'Missed', render: (row) => num(row.totals.missed_calls) },
+          { key: 'notPicked', label: 'Not picked', render: (row) => num(row.totals.not_picked_calls) },
+          { key: 'talk', label: 'Talk time', render: (row) => talkTime(row.totals.total_duration_seconds) },
+          { key: 'per', label: 'Calls / member', render: (row) => num(Math.round(Number(row.totals.total_calls || 0) / Math.max(row.size, 1))) }
+        ]}
+        rows={groups}
+        onRow={(row) => setOpen((current) => (current === row.id ? null : row.id))}
+      />
+      <p className="quiet">Click a team head to see their members.</p>
+      {opened ? (
+        <div className="cy-members">
+          <h3>{opened.name} · members</h3>
+          <Table
+            columns={[
+              { key: 'employee_name', label: 'Employee', render: (row) => row.employee_name || '—' },
+              { key: 'total_calls', label: 'Calls', render: (row) => num(row.total_calls) },
+              { key: 'connected_calls', label: 'Connected', render: (row) => `${num(row.connected_calls)} (${percent(row.connected_calls, row.total_calls)}%)` },
+              { key: 'missed_calls', label: 'Missed', render: (row) => num(row.missed_calls) },
+              { key: 'talk', label: 'Talk time', render: (row) => talkTime(row.total_duration_seconds) }
+            ]}
+            rows={[...openedRows].sort((a, b) => Number(b.total_calls || 0) - Number(a.total_calls || 0)).map((row) => ({ ...row, id: row.employee_id ?? row.employee_name }))}
+          />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function TeamHeadEditor({ id, heads, people, onDone, onCancel }) {
+  const [draft, setDraft] = useState(() => heads.map((head) => ({
+    headEmployeeId: String(head.headEmployeeId),
+    headName: head.headName,
+    members: head.members.filter((member) => String(member.employeeId) !== String(head.headEmployeeId))
+      .map((member) => ({ employeeId: String(member.employeeId), employeeName: member.employeeName }))
+  })));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const known = new Map(people.map((person) => [String(person.employeeId), person.employeeName]));
+  for (const head of heads) {
+    for (const member of head.members) if (!known.has(String(member.employeeId))) known.set(String(member.employeeId), member.employeeName);
+  }
+  const options = [...known.entries()].map(([employeeId, employeeName]) => ({ employeeId, employeeName }))
+    .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+  const used = new Set(draft.flatMap((head) => [head.headEmployeeId, ...head.members.map((member) => member.employeeId)]));
+  const free = options.filter((option) => !used.has(option.employeeId));
+  const freeShown = free.filter((option) => matches(query, option.employeeName));
+
+  function addHead(employeeId) {
+    const person = options.find((option) => option.employeeId === employeeId);
+    if (!person) return;
+    setDraft((current) => [...current, { headEmployeeId: person.employeeId, headName: person.employeeName, members: [] }]);
+  }
+
+  function addMember(headId, employeeId) {
+    const person = options.find((option) => option.employeeId === employeeId);
+    if (!person) return;
+    setDraft((current) => current.map((head) => (head.headEmployeeId === headId ? { ...head, members: [...head.members, person] } : head)));
+  }
+
+  function removeMember(headId, employeeId) {
+    setDraft((current) => current.map((head) => (head.headEmployeeId === headId ? { ...head, members: head.members.filter((member) => member.employeeId !== employeeId) } : head)));
+  }
+
+  async function save() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.put(`/api/connections/${id}/call-yatri/teams`, { heads: draft });
+      onDone();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel cy-editor">
+      <header>
+        <h2>Set up team heads</h2>
+        <p>{free.length} employees not in a team</p>
+      </header>
+      <p className="quiet">Pick a head from the Call Yatri employees, then add their members. One employee can be in one team only. The head's own calls count in their team.</p>
+      <SearchBox value={query} onChange={setQuery} placeholder="Search employee to add" count={freeShown.length} />
+      <label className="stack-field">Add a team head
+        <select value="" onChange={(event) => addHead(event.target.value)}>
+          <option value="">{query ? `Choose from ${freeShown.length} matching…` : 'Choose an employee…'}</option>
+          {freeShown.map((option) => <option key={option.employeeId} value={option.employeeId}>{option.employeeName}</option>)}
+        </select>
+      </label>
+      <div className="cy-heads">
+        {draft.map((head) => (
+          <article className="cy-head" key={head.headEmployeeId}>
+            <header>
+              <strong>{head.headName}</strong>
+              <span className="quiet">{head.members.length + 1} in team</span>
+              <button type="button" className="btn-ghost" onClick={() => setDraft((current) => current.filter((item) => item.headEmployeeId !== head.headEmployeeId))}>Remove head</button>
+            </header>
+            <div className="cy-chips">
+              <span className="chip is-head">{head.headName} (head)</span>
+              {head.members.map((member) => (
+                <span className="chip" key={member.employeeId}>
+                  {member.employeeName}
+                  <button type="button" aria-label={`Remove ${member.employeeName}`} onClick={() => removeMember(head.headEmployeeId, member.employeeId)}>×</button>
+                </span>
+              ))}
+            </div>
+            <select value="" onChange={(event) => addMember(head.headEmployeeId, event.target.value)}>
+              <option value="">{query ? `Add from ${freeShown.length} matching…` : 'Add a member…'}</option>
+              {freeShown.map((option) => <option key={option.employeeId} value={option.employeeId}>{option.employeeName}</option>)}
+            </select>
+          </article>
+        ))}
+      </div>
+      {error ? <p className="delta-down">{error}</p> : null}
+      <div className="row-actions">
+        <button className="btn-primary" type="button" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save team heads'}</button>
+        <button className="btn-ghost" type="button" disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+    </section>
+  );
+}
+
+function CallYatriReport({ id, canManage, onScope }) {
+  const [day, setDay] = useState('');
+  const [picked, setPicked] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [teamQuery, setTeamQuery] = useState('');
+  const [tableQuery, setTableQuery] = useState('');
+  const { data, loading, error, reload } = useResource(`/api/connections/${id}/call-yatri/stats${day ? `?day=${day}` : ''}`);
+  const teams = useResource(`/api/connections/${id}/call-yatri/teams`);
+
+  if (!data) {
+    if (error) {
+      return (
+        <div className="error-box">
+          <strong>The call report could not be loaded from Call Yatri.</strong>
+          <p className="quiet">{error}</p>
+          <button className="btn" onClick={() => reload()}>Try again</button>
+        </div>
+      );
+    }
+    return (
+      <section className="panel">
+        <p className="quiet">Loading the call report from Call Yatri. The first load takes a few seconds; it is cached for 10 minutes after that.</p>
+        <div className="skeleton-block" aria-busy="true" />
+      </section>
+    );
+  }
+
+  const days = data.days || [];
+  const today = days[days.length - 1]?.date || data.day;
+  const scope = picked || today;
+  const scoped = scope === 'week' ? days : days.filter((item) => item.date === scope);
+  const totals = sumTotals(scoped.map((item) => item.totals));
+  const employees = mergeEmployees(scoped).sort((a, b) => Number(b.total_calls || 0) - Number(a.total_calls || 0));
+  const topCalls = Math.max(...employees.map((row) => Number(row.total_calls || 0)), 1);
+  const connected = Number(totals.connected_calls || 0);
+  const missed = Number(totals.missed_calls || 0);
+  const rejected = Number(totals.rejected_calls || 0);
+  const notPicked = Number(totals.not_picked_calls || 0);
+  const other = Math.max(Number(totals.total_calls || 0) - connected - missed - rejected - notPicked, 0);
+  const outgoing = Number(totals.outgoing_total_calls || 0);
+  const incoming = Number(totals.incoming_total_calls || 0);
+  const busiest = [...(data.hours || [])].sort((a, b) => Number(b.totals?.total_calls || 0) - Number(a.totals?.total_calls || 0))[0];
+  const scopeLabel = scope === 'week'
+    ? `Last 7 days · ${dayLabel(days[0]?.date || data.day)} to ${dayLabel(today)}`
+    : `${scope === today ? 'Today · ' : ''}${dayLabel(scope, true)}`;
+  const teamRows = employees.filter((row) => matches(teamQuery, row.employee_name));
+  const tableRows = employees.filter((row) => matches(tableQuery, row.employee_name));
+
+  function pickDay(date) {
+    setPicked(date);
+    if (date !== 'week') setDay(date === today ? '' : date);
+    onScope?.(date === today ? '' : date);
+  }
+
+  return (
+    <>
+      <div className="cy-report-head">
+        <div>
+          <p className="eyebrow">Call report</p>
+          <h2>{scopeLabel}</h2>
+        </div>
+        <div className="tabs">
+          {[...days].reverse().map((item) => (
+            <button type="button" key={item.date} className={scope === item.date ? 'is-on' : ''} onClick={() => pickDay(item.date)}>
+              {item.date === today ? 'Today' : dayLabel(item.date)}
+            </button>
+          ))}
+          <button type="button" className={scope === 'week' ? 'is-on' : ''} onClick={() => pickDay('week')}>Last 7 days</button>
+        </div>
+      </div>
+      {data.failed?.length ? <p className="delta-down">Some report windows did not load: {data.failed.join('; ')}</p> : null}
+
+      <Tiles items={[
+        { label: 'Total calls', value: num(totals.total_calls), hint: `${num(totals.unique_clients)} unique clients` },
+        { label: 'Connected', value: num(connected), hint: `${percent(connected, totals.total_calls)}% connect rate` },
+        { label: 'Talk time', value: talkTime(totals.total_duration_seconds), hint: `Avg ${talkTime(Number(totals.connected_calls_duration_seconds || 0) / Math.max(connected, 1))} per connected call` },
+        { label: 'Active team', value: num(employees.filter((row) => Number(row.total_calls || 0) > 0).length), hint: `${num(Math.round(Number(totals.total_calls || 0) / Math.max(employees.length, 1)))} calls per person` }
+      ]} />
+
+      <div className="split">
+        <section className="panel">
+          <header>
+            <h2>Day-wise calls</h2>
+            <p className="chart-legend"><span className="dot total" />Total <span className="dot good" />Connected</p>
+          </header>
+          <ColumnChart
+            items={days.map((item) => ({
+              key: item.date,
+              label: dayLabel(item.date),
+              title: dayLabel(item.date, true),
+              total: Number(item.totals?.total_calls || 0),
+              connected: Number(item.totals?.connected_calls || 0)
+            }))}
+            selected={scope}
+            onPick={pickDay}
+          />
+          <p className="quiet">Click a day to see its status, team, and hourly split.</p>
+        </section>
+        <section className="panel">
+          <header>
+            <h2>Status-wise</h2>
+            <p>{num(totals.total_calls)} calls</p>
+          </header>
+          <SplitBar parts={[
+            { label: 'Connected', value: connected, tone: 'good' },
+            { label: 'Not picked', value: notPicked, tone: 'warn' },
+            { label: 'Missed', value: missed, tone: 'bad' },
+            { label: 'Rejected', value: rejected, tone: 'dark' },
+            { label: 'Other', value: other, tone: 'muted' }
+          ]} />
+        </section>
+      </div>
+
+      <div className="split">
+        <section className="panel">
+          <header>
+            <h2>Hour-wise · {dayLabel(data.day, true)}</h2>
+            <p>{busiest?.totals?.total_calls ? `Busiest ${hourLabel(busiest.hour)} (${num(busiest.totals.total_calls)})` : (loading ? 'Loading…' : 'No calls')}</p>
+          </header>
+          <ColumnChart
+            dense
+            items={(data.hours || []).map((item) => ({
+              key: item.hour,
+              label: hourLabel(item.hour),
+              total: Number(item.totals?.total_calls || 0),
+              connected: Number(item.totals?.connected_calls || 0)
+            }))}
+          />
+          {scope === 'week' ? <p className="quiet">Pick a day above to change the hourly view.</p> : null}
+        </section>
+        <section className="panel">
+          <header>
+            <h2>Direction</h2>
+            <p>Outgoing vs incoming</p>
+          </header>
+          <SplitBar parts={[
+            { label: 'Outgoing', value: outgoing, tone: 'accent' },
+            { label: 'Incoming', value: incoming, tone: 'info' }
+          ]} />
+          <ul className="split-legend cy-direction">
+            <li><span>Outgoing connected</span><strong>{num(totals.outgoing_connected_calls)}</strong><em>{percent(totals.outgoing_connected_calls, outgoing)}%</em></li>
+            <li><span>Incoming connected</span><strong>{num(totals.incoming_connected_calls)}</strong><em>{percent(totals.incoming_connected_calls, incoming)}%</em></li>
+          </ul>
+        </section>
+      </div>
+
+      {editing ? (
+        <TeamHeadEditor
+          id={id}
+          heads={teams.data?.heads || []}
+          people={mergeEmployees(days).map((row) => ({ employeeId: String(row.employee_id ?? row.employee_name), employeeName: row.employee_name || `Employee ${row.employee_id}` }))}
+          onCancel={() => setEditing(false)}
+          onDone={() => { setEditing(false); teams.reload(); }}
+        />
+      ) : (
+        <TeamHeadReport heads={teams.data?.heads || []} employees={employees} canManage={canManage} onEdit={() => setEditing(true)} />
+      )}
+
+      <section className="panel">
+        <header>
+          <div>
+            <h2>Team-wise calls</h2>
+            <p className="chart-legend"><span className="dot total" />Total <span className="dot good" />Connected · % is connect rate</p>
+          </div>
+          <SearchBox value={teamQuery} onChange={setTeamQuery} placeholder="Search employee" count={teamRows.length} />
+        </header>
+        <TeamBars rows={teamRows} />
+      </section>
+
+      <section className="panel">
+        <header>
+          <div>
+            <h2>Team performance</h2>
+            <p>Sorted by calls</p>
+          </div>
+          <SearchBox value={tableQuery} onChange={setTableQuery} placeholder="Search employee" count={tableRows.length} />
+        </header>
+        <Table
+          columns={[
+            { key: 'employee_name', label: 'Employee', render: (row) => row.employee_name || '—' },
+            {
+              key: 'total_calls',
+              label: 'Calls',
+              render: (row) => (
+                <span className="cy-bar-cell">
+                  <span className="cy-bar"><span style={{ width: `${(Number(row.total_calls || 0) / topCalls) * 100}%` }} /></span>
+                  {num(row.total_calls)}
+                </span>
+              )
+            },
+            { key: 'connected_calls', label: 'Connected', render: (row) => `${num(row.connected_calls)} (${percent(row.connected_calls, row.total_calls)}%)` },
+            { key: 'missed_calls', label: 'Missed', render: (row) => num(row.missed_calls) },
+            { key: 'not_picked_calls', label: 'Not picked', render: (row) => num(row.not_picked_calls) },
+            { key: 'talk', label: 'Talk time', render: (row) => talkTime(row.total_duration_seconds) },
+            { key: 'avg', label: 'Avg connected', render: (row) => talkTime(row.connected_calls_avg_duration_seconds) }
+          ]}
+          rows={tableRows.map((row) => ({ ...row, id: row.employee_id ?? row.employee_name }))}
+        />
+      </section>
+    </>
+  );
+}
+
+const CALL_YATRI_TABS = ['Calls', 'Follow-ups', 'Leads'];
+
+const CALL_YATRI_KINDS = { Calls: 'calls', 'Follow-ups': 'followups', Leads: 'leads' };
+
+function leadName(row) {
+  return row.name || row.full_name || row.customer_name || row.lead_name || row.phone || row.mobile || '—';
+}
+
+function CallYatriView({ data, canManage }) {
+  const [tab, setTab] = useState(CALL_YATRI_TABS[0]);
+  const [scope, setScope] = useState('');
+  const [queries, setQueries] = useState({});
+  const query = queries[tab] || '';
+  const setQuery = (value) => setQueries((current) => ({ ...current, [tab]: value }));
+  const live = useResource(`/api/connections/${data.id}/call-yatri/records?kind=${CALL_YATRI_KINDS[tab]}${scope ? `&day=${scope}` : ''}`);
+  const rows = (live.data?.kind === CALL_YATRI_KINDS[tab] ? live.data.rows : [])
+    .map((row, index) => ({ ...row, id: `${tab}-${row.id ?? row.followup_id ?? index}` }));
+  const shownRows = tab === 'Calls'
+    ? rows
+      .sort((a, b) => String(b.call_start_time || '').localeCompare(String(a.call_start_time || '')))
+      .filter((row) => matches(query, row.employee_name, row.lead_name, row.phone, row.call_status, row.call_direction, row.remarks, localTime(row.call_start_time)))
+    : tab === 'Follow-ups'
+      ? rows
+        .sort((a, b) => String(a.followup_date || '').localeCompare(String(b.followup_date || '')))
+        .filter((row) => matches(query, row.lead_name, row.lead_phone, row.employee_name, row.type, row.status, row.call_status, row.notes, localTime(row.followup_date)))
+      : rows.filter((row) => matches(query, leadName(row), ...Object.values(row).map(fieldText)));
+  const leadKeys = tab === 'Leads'
+    ? [...new Set(rows.flatMap((row) => Object.keys(row)))]
+      .filter((key) => !['id', 'name', 'full_name', 'customer_name', 'lead_name'].includes(key)).slice(0, 5)
+    : [];
+  const ready = !live.error && !live.loading && live.data?.kind === CALL_YATRI_KINDS[tab];
+  const total = ready ? live.data.total : null;
+  const scopeText = scope === 'week' ? 'last 7 days' : scope ? dayLabel(scope, true) : 'today';
+  const lastJob = data.jobs?.[0];
+  const warnings = (data.logs || []).filter((row) => lastJob && row.jobId === lastJob.id && row.level === 'warning');
+  const hints = { Calls: 'Search employee, contact, phone, status, remarks', 'Follow-ups': 'Search lead, phone, employee, status, notes', Leads: 'Search leads' };
+
+  return (
+    <div className="stack">
+      <section className="panel cy-status">
+        <header>
+          <div className="cy-brand">
+            <img src={providerLogo('nexcall')} alt="Call Yatri" />
+            <div>
+              <h2>Sync status</h2>
+              <p>{data.credentialPreview}</p>
+            </div>
+          </div>
+          {lastJob ? <Badge value={lastJob.status} /> : <Badge value="pending" tone="warn" />}
+        </header>
+        {lastJob ? (
+          <p className={lastJob.status === 'failed' ? 'delta-down' : 'quiet'}>
+            {lastJob.status === 'failed' ? 'Last sync failed: ' : 'Last sync: '}{lastJob.summary || '—'} · {when(lastJob.startedAt)}
+          </p>
+        ) : <p className="quiet">Data on this page is read live from Call Yatri. Press Sync to check the API and refresh the report.</p>}
+        {warnings.length ? (
+          <ul className="cy-warnings">
+            {warnings.map((row) => <li key={`${row.jobId}-${row.message}`}>{row.message}</li>)}
+          </ul>
+        ) : null}
+      </section>
+
+      <CallYatriReport id={data.id} canManage={canManage} onScope={setScope} />
+
+      <section className="panel">
+        <div className="cy-tab-head">
+          <div className="tabs" role="tablist">
+            {CALL_YATRI_TABS.map((item) => (
+              <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? 'is-on' : ''} onClick={() => setTab(item)}>
+                {item}{tab === item && total != null ? ` · ${num(total)}` : ''}
+              </button>
+            ))}
+          </div>
+          <SearchBox value={query} onChange={setQuery} placeholder={hints[tab]} count={shownRows.length} />
+        </div>
+        <p className="quiet cy-note">
+          Live from Call Yatri for {scopeText}. Nothing here is saved in AIRO.
+          {total != null && total > rows.length ? ` Showing the first ${num(rows.length)} of ${num(total)}.` : ''}
+        </p>
+        {live.error ? (
+          <div className="error-box">
+            <strong>{tab} could not be loaded from Call Yatri.</strong>
+            <p className="quiet">{live.error}</p>
+            <button className="btn" type="button" onClick={() => live.reload()}>Try again</button>
+          </div>
+        ) : null}
+        {!live.error && !ready ? <p className="quiet">Loading {tab.toLowerCase()} from Call Yatri…</p> : null}
+        {ready && tab === 'Calls' ? (
+          <Table
+            columns={[
+              { key: 'time', label: 'Time', render: (row) => localTime(row.call_start_time || row.created_at) },
+              { key: 'employee', label: 'Employee', render: (row) => row.employee_name || '—' },
+              { key: 'contact', label: 'Contact', render: (row) => row.lead_name || row.phone || '—' },
+              { key: 'direction', label: 'Direction', render: (row) => label(row.call_direction) || '—' },
+              { key: 'status', label: 'Status', render: (row) => <CallStatus value={row.call_status} /> },
+              { key: 'duration', label: 'Duration', render: (row) => talkTime(row.call_duration) },
+              { key: 'remarks', label: 'Remarks', render: (row) => row.remarks || '—' }
+            ]}
+            rows={shownRows}
+          />
+        ) : null}
+        {ready && tab === 'Follow-ups' ? (
+          <Table
+            columns={[
+              { key: 'due', label: 'Due', render: (row) => localTime(row.followup_date) },
+              { key: 'lead', label: 'Lead', render: (row) => row.lead_name || row.lead_phone || '—' },
+              { key: 'employee', label: 'Employee', render: (row) => row.employee_name || '—' },
+              { key: 'type', label: 'Type', render: (row) => label(row.type) || '—' },
+              { key: 'status', label: 'Status', render: (row) => <CallStatus value={row.status || row.call_status} /> },
+              { key: 'notes', label: 'Notes', render: (row) => row.notes || '—' }
+            ]}
+            rows={shownRows}
+          />
+        ) : null}
+        {ready && tab === 'Leads' ? (
+          <Table
+            columns={[
+              { key: 'name', label: 'Name', render: (row) => leadName(row) },
+              ...leadKeys.map((key) => ({ key, label: label(key), render: (row) => fieldText(row[key]) }))
+            ]}
+            rows={shownRows}
+          />
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 export function ConnectionDetail() {
   const { id } = useParams();
   const { data, loading, error, reload } = useResource(id ? `/api/connections/${id}` : null);
@@ -1676,6 +2413,7 @@ export function ConnectionDetail() {
   const [busy, setBusy] = useState(false);
   const metaOnly = data?.providerKey === 'meta_ads';
   const google = data?.providerKey === 'google_ads';
+  const callYatri = data?.providerKey === 'nexcall';
   const meta = metaOnly || google;
   const records = metaOnly
     ? (data?.records || []).filter((row) => row.type !== 'campaign' && row.type !== 'adset' && row.type !== 'ad')
@@ -1701,10 +2439,11 @@ export function ConnectionDetail() {
       title={data?.name || 'Connection'}
       lede={google
         ? 'Create Search campaigns, manage them, and read reports for the connected Google Ads account.'
-        : metaOnly ? 'Create the campaign, ad set, and ad here, then publish them to the connected Meta account.' : 'Only records returned by this tool\'s API or posted to its webhook.'}
+        : metaOnly ? 'Create the campaign, ad set, and ad here, then publish them to the connected Meta account.'
+          : callYatri ? 'Calls, follow-ups, leads, and the team call report, read live from Call Yatri. Nothing is saved in AIRO.' : 'Only records returned by this tool\'s API or posted to its webhook.'}
       actions={can('connections.manage') && data ? (
         <>
-          <button className="btn" disabled={busy} onClick={() => act(`/api/connections/${id}/sync`)}>Sync</button>
+          <button className="btn" disabled={busy} onClick={() => act(`/api/connections/${id}/sync`)}>{busy ? 'Syncing…' : 'Sync'}</button>
           <button className="btn-ghost" disabled={busy} onClick={() => act(`/api/connections/${id}/disconnect`)}>Disconnect</button>
         </>
       ) : null}
@@ -1716,37 +2455,31 @@ export function ConnectionDetail() {
             <p><Badge value={data.status} /> <span className="quiet">Last sync {when(data.lastSyncAt)}.</span></p>
             {data.tokenExpiresAt ? (
               <p className={new Date(data.tokenExpiresAt).getTime() - Date.now() < 10 * 86400000 ? 'delta-down' : 'quiet'}>
-                The Facebook login expires on {data.tokenExpiresAt.slice(0, 10)}. Use Connect with Facebook again before then.
+                The Facebook login expires on {day(data.tokenExpiresAt)}. Use Connect with Facebook again before then.
               </p>
             ) : null}
-            {data.providerKey === 'nexcall' ? (
-              <section className="panel">
-                <h2>Connected</h2>
-                <p>W-Caller verified this key. It is saved for this business.</p>
-                <p className="quiet">{data.credentialPreview}</p>
-              </section>
-            ) : null}
+            {callYatri ? <CallYatriView key={data.lastSyncAt || 'never'} data={data} canManage={can('connections.manage')} /> : null}
             {metaOnly ? <MetaAdsManager id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
             {google ? <GoogleAdsManager id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
-            {!meta && data.webhookPath ? (
+            {!meta && !callYatri && data.webhookPath ? (
               <section className="panel">
                 <h2>Webhook</h2>
                 <p className="quiet">POST JSON here. Each object from the webhook is listed below.</p>
                 <p><code>{`${window.location.origin}${data.webhookPath}`}</code></p>
               </section>
             ) : null}
-            {!meta && records.length ? (
+            {!meta && !callYatri && records.length ? (
               <Table columns={[
                 { key: 'origin', label: 'Source', render: (row) => label(row.origin) },
                 { key: 'type', label: 'Type', render: (row) => label(row.type) },
                 { key: 'name', label: 'Name' },
-                ...fieldKeys.map((key) => ({ key, label: label(key), render: (row) => row.fields?.[key] || '—' }))
+                ...fieldKeys.map((key) => ({ key, label: label(key), render: (row) => fieldText(row.fields?.[key]) }))
               ]} rows={records} />
             ) : null}
-            {!meta && !records.length ? (
+            {!meta && !callYatri && !records.length ? (
               <div className="empty">
-                <strong>{data.providerKey === 'nexcall' ? 'No call records yet.' : 'No API or webhook records.'}</strong>
-                <p className="quiet">{data.providerKey === 'nexcall' ? 'The API key is already saved. Press Sync when you want the calls from W-Caller.' : `This page stays empty until ${data.name} returns data. Sample campaigns, leads, and spend are not listed here.`}</p>
+                <strong>No API or webhook records.</strong>
+                <p className="quiet">{`This page stays empty until ${data.name} returns data. Sample campaigns, leads, and spend are not listed here.`}</p>
               </div>
             ) : null}
           </div>

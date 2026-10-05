@@ -2,6 +2,17 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-05
+
+- **Change:** Nexcall is shown as **Call Yatri** everywhere users see it (provider name, WhatsApp report lines, LLM prompt, errors). The provider key, routes, and function names stay `nexcall`. The Call Yatri connection page (`CallYatriView` in `Connections.jsx`) shows sync status with skipped parts, the 7-day call report tiles, team performance, and Calls / Follow-ups / Leads tabs.
+- **Change (same day):** `pullNexcall` uses `Promise.allSettled`: one failing endpoint no longer fails the sync; skipped parts are logged as warnings. The call report is stored as a `report` object (`last_7_days`, employee emails dropped) and returned as `callReport` on connection detail.
+- **Change (same day):** Call Yatri report charts. New `GET /api/connections/:id/call-yatri/stats?day=YYYY-MM-DD` (`connections.view`) calls the Call Yatri report API once per IST day (last 7) and once per hour of the chosen day, cached in memory for 10 minutes. The page shows day-wise, hour-wise, status-wise, direction, and team-wise charts (plain SVG/CSS, no chart library) before the tables.
+- **Change (same day):** Team head-wise Call Yatri report. The Call Yatri external API has no teams or heads (checked: no endpoint, report ignores team filters), so heads and members are set in AIRO. Migration `012_call_team_heads.sql` (`call_team_heads`, `call_team_members`; one team per employee, head counted in own team). `GET/PUT /api/connections/:id/call-yatri/teams` (view/manage). UI: `TeamHeadReport` + `TeamHeadEditor` in `Connections.jsx`. Switch to API data if Call Yatri adds team heads.
+- **Change (same day):** Call Yatri data is no longer stored. Calls / Follow-ups / Leads tabs read live from new `GET /api/connections/:id/call-yatri/records?kind=calls|followups|leads&day=YYYY-MM-DD|week` (first 100 rows, employee emails dropped). Sync only checks the API, clears the stats cache, and deletes any stored Call Yatri objects; it no longer saves rows or `callReport`. The Call Yatri webhook is rejected. WhatsApp reports no longer look up stored calls. Migration `013_call_yatri_live_only.sql` deletes existing Call Yatri rows from `integration_objects`.
+- **Change (same day):** "Remember me" on the login page. Migration `011_refresh_remember.sql` adds `refresh_tokens.remember`; unchecked logins get a session cookie and a 1-day refresh token.
+- **Affected areas:** `nexcall.js`, `connectionService`, `providers.js`, `migrate.js`, `whatsappReport.js`, `llm.js`, `authService`, `authRepo`, `cookies.js`, `schemas.js`, `Login.jsx`, `auth.jsx`, `Connections.jsx`, `styles.css`.
+- **Migration/API impact:** Run `npm run migrate` (011, 012, 013 + provider rename). Client rebuild needed.
+
 ### 2026-10-03
 
 - **Change:** Live Google Ads integration: `server/src/integrations/googleAds.js`, Google OAuth connect + account picker, sync, Search campaign create/edit/status, keyword ideas, live report. New env names `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `GOOGLE_ADS_API_VERSION`. `liveRecord` now also returns `parent`.

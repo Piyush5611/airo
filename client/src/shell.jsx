@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api } from './api.js';
 import { useAuth } from './auth.jsx';
 import { when } from './format.js';
+import { providerLogo } from './providerLogos.js';
 
 function Mark() {
   return (
@@ -114,6 +115,7 @@ export function Shell({ kicker, nav, home }) {
           ...tools.map((tool) => ({
             to: `/app/connections/${tool.id}`,
             label: tool.name,
+            logo: providerLogo(tool.providerKey),
             nested: true,
             end: true
           }))
@@ -193,7 +195,7 @@ export function Shell({ kicker, nav, home }) {
               <p className="nav-label">{group.label}</p>
               {group.items.map((item) => (
                 <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `nav-link ${item.nested ? 'is-nested' : ''} ${isActive ? 'is-active' : ''}`} onClick={() => setOpen(false)}>
-                  {item.nested ? null : <NavIcon name={item.label} />}
+                  {item.logo ? <img className="nav-logo" src={item.logo} alt="" /> : item.nested ? null : <NavIcon name={item.label} />}
                   <span>{item.label}</span>
                 </NavLink>
               ))}

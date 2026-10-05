@@ -5,7 +5,8 @@ const params = (shape) => z.object({ body: z.any(), query: z.any(), params: z.ob
 
 export const loginSchema = body({
   email: z.string().email(),
-  password: z.string().min(8).max(200)
+  password: z.string().min(8).max(200),
+  remember: z.boolean().optional()
 });
 
 export const forgotSchema = body({ email: z.string().email() });
@@ -42,6 +43,23 @@ export const leadUpdateSchema = body({
 export const assignSchema = body({ userId: z.number().int().positive() });
 
 export const idParams = params({ id: z.coerce.number().int().positive() });
+
+const callEmployee = z.object({
+  employeeId: z.union([z.string(), z.number()]).transform(String).pipe(z.string().min(1).max(40)),
+  employeeName: z.string().trim().min(1).max(160)
+});
+
+export const callTeamsSchema = z.object({
+  params: z.object({ id: z.coerce.number().int().positive() }),
+  query: z.any(),
+  body: z.object({
+    heads: z.array(z.object({
+      headEmployeeId: z.union([z.string(), z.number()]).transform(String).pipe(z.string().min(1).max(40)),
+      headName: z.string().trim().min(1).max(160),
+      members: z.array(callEmployee).max(500)
+    })).max(100)
+  })
+});
 
 export const taskSchema = body({
   title: z.string().min(2).max(180),

@@ -46,11 +46,11 @@ function istDate(y, m, d) {
   return new Date(Date.UTC(y, m, d) - IST);
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 function istLabel(date) {
   const ist = new Date(date.getTime() + IST);
-  const month = String(ist.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(ist.getUTCDate()).padStart(2, '0');
-  return `${ist.getUTCFullYear()}-${month}-${day}`;
+  return `${ist.getUTCDate()} ${MONTHS[ist.getUTCMonth()]} ${ist.getUTCFullYear()}`;
 }
 
 function hasWord(text, value) {
@@ -333,7 +333,7 @@ async function airoCounts(organizationId, window, scope, extra) {
     callParams
   );
   const lines = [
-    `AIRO workspace records, separate from Nexcall: leads ${Number(leads?.total || 0)}, qualified ${Number(leads?.qualified || 0)}, booked ${Number(leads?.booked || 0)}, high intent ${Number(leads?.highIntent || 0)}, calls ${Number(calls?.total || 0)}, missed ${Number(calls?.missed || 0)}, completed ${Number(calls?.completed || 0)}.`
+    `AIRO workspace records, separate from Call Yatri: leads ${Number(leads?.total || 0)}, qualified ${Number(leads?.qualified || 0)}, booked ${Number(leads?.booked || 0)}, high intent ${Number(leads?.highIntent || 0)}, calls ${Number(calls?.total || 0)}, missed ${Number(calls?.missed || 0)}, completed ${Number(calls?.completed || 0)}.`
   ];
   if (scope.kind !== 'person') {
     const groupedIds = peopleClause('l.assigned_user_id', scope.userIds);
@@ -355,27 +355,8 @@ async function airoCounts(organizationId, window, scope, extra) {
   return lines.join(' ');
 }
 
-function asObject(value) {
-  if (!value) return {};
-  if (typeof value === 'string') {
-    try { return JSON.parse(value); } catch { return {}; }
-  }
-  if (Buffer.isBuffer(value)) {
-    try { return JSON.parse(value.toString('utf8')); } catch { return {}; }
-  }
-  return typeof value === 'object' ? value : {};
-}
-
 function employeeOf(row) {
   return String(row?.employee_name || row?.employee || row?.user_name || row?.agent_name || '').trim();
-}
-
-function nameHits(row, name) {
-  const employee = employeeOf(row);
-  const wanted = String(name || '').trim();
-  if (!wanted) return true;
-  if (!employee) return false;
-  return hasWord(employee, wanted) || hasWord(wanted, employee);
 }
 
 function nexcallKind(text) {
@@ -444,7 +425,7 @@ function formatReport(window, parts, employeeName, alreadyFiltered) {
   const rows = userRows(parts.byUser).filter((row) => !row.phone && !row.call_start_time && !row.recording_url);
   const chosen = employeeName ? rows.filter((row) => hasWord(userLabel(row), employeeName) || hasWord(employeeName, userLabel(row))) : rows;
   const who = employeeName ? `${employeeName}, ` : '';
-  const lines = [`Nexcall call report for ${who}${window.label}.`];
+  const lines = [`Call Yatri call report for ${who}${window.label}.`];
   const totals = figureText(parts.totals);
   const types = figureText(parts.byType);
   if ((!employeeName || alreadyFiltered) && totals) lines.push(`Totals: ${totals}.`);
@@ -454,7 +435,7 @@ function formatReport(window, parts, employeeName, alreadyFiltered) {
     return {
       matched: false,
       names,
-      text: `Nexcall call report has no employee named ${employeeName}.${names.length ? ` Employees in this report: ${names.join(', ')}.` : ''}`
+      text: `Call Yatri call report has no employee named ${employeeName}.${names.length ? ` Employees in this report: ${names.join(', ')}.` : ''}`
     };
   }
   const shown = [...(employeeName ? chosen : rows)].sort((a, b) => (callCount(b) || 0) - (callCount(a) || 0));
@@ -465,23 +446,9 @@ function formatReport(window, parts, employeeName, alreadyFiltered) {
     }).join(', ')}.`);
   }
   if (!totals && !types && !shown.length) {
-    return { matched: !employeeName, names: [], text: `Nexcall call report for ${window.label}: the report API returned no totals.` };
+    return { matched: !employeeName, names: [], text: `Call Yatri call report for ${window.label}: the report API returned no totals.` };
   }
   return { matched: true, names: rows.map(userLabel).filter(Boolean), text: lines.join(' ') };
-}
-
-async function storedCalls(organizationId) {
-  const rows = await many(
-    `SELECT o.payload
-     FROM integration_objects o
-     JOIN integration_connections c ON c.id = o.connection_id
-     JOIN integration_providers p ON p.id = c.provider_id
-     WHERE o.organization_id = ? AND p.provider_key = 'nexcall' AND o.object_type = 'call'
-     ORDER BY o.id DESC
-     LIMIT 200`,
-    [organizationId]
-  );
-  return rows.map((row) => asObject(row.payload));
 }
 
 async function readNexcallSecret(organizationId) {
@@ -495,14 +462,14 @@ async function readNexcallSecret(organizationId) {
     [organizationId]
   );
   if (!row?.ciphertext || row.status !== 'connected' || row.mode !== 'live') {
-    return { error: 'Nexcall report: not connected, so the live call API was not called.' };
+    return { error: 'Call Yatri report: not connected, so the live call API was not called.' };
   }
   try {
     const secret = decryptJson(row.ciphertext);
-    if (!secret?.apiKey) return { error: 'Nexcall report: no API key is saved.' };
+    if (!secret?.apiKey) return { error: 'Call Yatri report: no API key is saved.' };
     return { secret };
   } catch {
-    return { error: 'Nexcall report: the saved key could not be read.' };
+    return { error: 'Call Yatri report: the saved key could not be read.' };
   }
 }
 
@@ -531,12 +498,12 @@ function summarizeCallList(window, body, employeeName, direction) {
     return {
       matched: false,
       names,
-      text: `Nexcall calls have no employee named ${employeeName}.${names.length ? ` Employees in this list: ${names.join(', ')}.` : ''}`
+      text: `Call Yatri calls have no employee named ${employeeName}.${names.length ? ` Employees in this list: ${names.join(', ')}.` : ''}`
     };
   }
   const total = chosen.length;
   const who = employeeName ? `${employeeName}, ` : '';
-  const lines = [`Nexcall calls for ${who}${window.label}: ${total}.`];
+  const lines = [`Call Yatri calls for ${who}${window.label}: ${total}.`];
   const status = tally(chosen, (row) => row.call_status);
   const way = tally(chosen, (row) => row.call_direction);
   const people = tally(chosen, employeeOf);
@@ -552,49 +519,39 @@ function cleanError(error) {
 
 async function nexcallSummary(organizationId, window, employeeName, text) {
   const loaded = await readNexcallSecret(organizationId);
-  if (!loaded.secret) return { matched: false, names: [], text: loaded.error || 'Nexcall report: not connected.' };
+  if (!loaded.secret) return { matched: false, names: [], text: loaded.error || 'Call Yatri report: not connected.' };
   const from = istStamp(window.from);
   const to = istStamp(window.to);
   const kind = nexcallKind(text);
-  const stored = employeeName ? await storedCalls(organizationId) : [];
-  const knownUser = stored.find((row) => nameHits(row, employeeName) && row.user_id != null);
   try {
     const auth = { apiKey: loaded.secret.apiKey, baseUrl: loaded.secret.baseUrl, from, to };
     if (kind === 'followups') {
       const body = await nexcallFollowups(auth);
       const rows = Array.isArray(body?.data) ? body.data : [];
-      return { matched: true, names: [], text: `Nexcall follow-ups for ${window.label}: ${rows.length}.` };
+      return { matched: true, names: [], text: `Call Yatri follow-ups for ${window.label}: ${rows.length}.` };
     }
     if (kind === 'leads') {
       const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
       const body = await nexcallLeads({ ...auth, phone });
       const rows = Array.isArray(body?.data) ? body.data : [];
-      return { matched: true, names: [], text: `Nexcall leads for ${window.label}: ${rows.length}.` };
+      return { matched: true, names: [], text: `Call Yatri leads for ${window.label}: ${rows.length}.` };
     }
     if (kind === 'report') {
-      const body = await nexcallCallReport({
-        ...auth,
-        userId: knownUser?.user_id,
-        callType: callTypeOf(text) || undefined
-      });
-      return formatReport(window, reportParts(body), knownUser ? '' : employeeName, Boolean(knownUser?.user_id));
+      const body = await nexcallCallReport({ ...auth, callType: callTypeOf(text) || undefined });
+      return formatReport(window, reportParts(body), employeeName, false);
     }
     const phone = String(text || '').match(/\b\d{10,13}\b/)?.[0] || '';
-    const body = await nexcallCalls({
-      ...auth,
-      phone,
-      userId: knownUser?.user_id
-    });
-    return summarizeCallList(window, body, knownUser ? '' : employeeName, callTypeOf(text));
+    const body = await nexcallCalls({ ...auth, phone });
+    return summarizeCallList(window, body, employeeName, callTypeOf(text));
   } catch (error) {
-    return { matched: false, names: [], text: `Nexcall report could not be loaded: ${cleanError(error)}` };
+    return { matched: false, names: [], text: `Call Yatri report could not be loaded: ${cleanError(error)}` };
   }
 }
 
 async function nexcallLine(organizationId, window, scope, text) {
   const summary = await nexcallSummary(organizationId, window, scope.personName || '', text);
   if (scope.kind === 'team') {
-    return `${summary.text}\nThe Nexcall call report is for the connected account. It is not limited to that AIRO team unless an employee name matches the report.`;
+    return `${summary.text}\nThe Call Yatri call report is for the connected account. It is not limited to that AIRO team unless an employee name matches the report.`;
   }
   return summary.text;
 }
@@ -655,12 +612,12 @@ export async function reportFacts(organizationId, messages) {
   if (scope.missing) {
     const nex = await nexcallSummary(organizationId, window, scope.askedName || '', text);
     if (scope.askedName && nex.matched) {
-      return `Report filter: ${window.label}, Nexcall employee ${scope.askedName}.\n${nex.text}`;
+      return `Report filter: ${window.label}, Call Yatri employee ${scope.askedName}.\n${nex.text}`;
     }
     if (nex.names?.length) {
       return scope.missing.replace(
         'No report numbers were loaded.',
-        `Nexcall employees on the connection page: ${nex.names.join(', ')}. No report numbers were loaded.`
+        `Call Yatri employees on the connection page: ${nex.names.join(', ')}. No report numbers were loaded.`
       );
     }
     return scope.missing;

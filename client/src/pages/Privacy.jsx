@@ -47,7 +47,7 @@ export function Privacy() {
         <h2>Who we share it with</h2>
         <ul>
           <li><strong>Meta Platforms</strong> (Facebook, Instagram, WhatsApp): to send WhatsApp replies and to create or manage ads the business requests. A photo sent for an ad is uploaded to Meta.</li>
-          <li><strong>Calling provider</strong> connected by the business (for example W-Caller): to read the business's own call and lead records.</li>
+          <li><strong>Calling provider</strong> connected by the business (for example Call Yatri): to read the business's own call and lead records.</li>
           <li><strong>AI model providers</strong> (OpenAI, Anthropic, or Google, depending on configuration): the message text needed to write a reply or ad copy.</li>
           <li>Authorities, when the law requires it.</li>
         </ul>

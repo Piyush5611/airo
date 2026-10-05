@@ -9,6 +9,7 @@ export function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('rahul.sharma@prestigehomes.in');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [hints, setHints] = useState(null);
   useTitle('Sign in');
@@ -21,7 +22,7 @@ export function Login() {
     event.preventDefault();
     setError('');
     try {
-      const user = await login(email, password || hints?.password || '');
+      const user = await login(email, password || hints?.password || '', remember);
       navigate(user.realm === 'platform' ? '/platform' : '/app');
     } catch (err) {
       setError(err.message);
@@ -54,6 +55,10 @@ export function Login() {
           </label>
           <label className="stack-field">Password
             <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required={false} autoComplete="current-password" placeholder={hints ? 'Development password is filled on submit if empty' : ''} />
+          </label>
+          <label className="remember-field">
+            <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
+            Remember me
           </label>
           {error ? <p className="delta-down">{error}</p> : null}
           <button className="btn-primary" type="submit">Continue</button>

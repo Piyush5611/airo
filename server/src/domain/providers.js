@@ -17,7 +17,7 @@ export const PROVIDERS = [
   ['communication', 'whatsapp', 'WhatsApp', 'The shared AIRO chatbot. Businesses work in that conversation. Super Admin and Developer/Admin manage the bot.'],
   ['communication', 'email', 'Email', 'Inbound email enquiries and outbound follow-up.'],
   ['communication', 'sms', 'SMS', 'SMS notifications and reply capture.'],
-  ['calling', 'nexcall', 'Nexcall', 'Read-only pull of W-Caller leads, calls, the call report, and follow-ups. Authenticate with x-api-key.'],
+  ['calling', 'nexcall', 'Call Yatri', 'Read-only pull of Call Yatri leads, calls, the call report, and follow-ups. Authenticate with x-api-key.'],
   ['calling', 'other_telephony', 'Other Telephony Providers', 'Alternate calling systems using the same call model.'],
   ['crm', 'salesforce', 'Salesforce', 'CRM accounts and opportunities mapped into the AIRO pipeline.'],
   ['crm', 'hubspot', 'HubSpot', 'HubSpot contacts and deals mapped into leads and pipeline.'],

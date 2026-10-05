@@ -43,9 +43,9 @@ export function AuthProvider({ children }) {
   const value = useMemo(() => ({
     user,
     loading,
-    async login(email, password) {
+    async login(email, password, remember = true) {
       clearSupportToken();
-      const data = await api.post('/api/auth/login', { email, password });
+      const data = await api.post('/api/auth/login', { email, password, remember });
       setAccessToken(data.accessToken);
       setUser({ ...data.user, permissions: data.user.permissions });
       const me = await api.get('/api/auth/me');

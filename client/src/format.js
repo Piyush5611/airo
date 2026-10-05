@@ -24,22 +24,50 @@ export function ago(value) {
   return when(value);
 }
 
+const IST_PARTS = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true
+});
+
+export function indianDate(date, withTime = true) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '—';
+  const part = Object.fromEntries(IST_PARTS.formatToParts(date).map((item) => [item.type, item.value]));
+  const text = `${part.day} ${part.month === 'Sept' ? 'Sep' : part.month} ${part.year}`;
+  return withTime ? `${text}, ${part.hour}:${part.minute} ${String(part.dayPeriod || '').toUpperCase()}` : text;
+}
+
+function parseUtc(value) {
+  if (value instanceof Date) return value;
+  const text = String(value).replace(' ', 'T');
+  return new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(text) ? text : `${text}Z`);
+}
+
+export function parseIst(value) {
+  if (value instanceof Date) return value;
+  const text = String(value).trim().replace(' ', 'T');
+  if (/Z$|[+-]\d{2}:?\d{2}$/.test(text)) return new Date(text);
+  return new Date(/T/.test(text) ? `${text}+05:30` : `${text}T00:00:00+05:30`);
+}
+
 export function when(value) {
   if (!value) return '—';
-  const text = String(value).replace(' ', 'T');
-  const date = new Date(text.endsWith('Z') ? text : `${text}Z`);
-  return new Intl.DateTimeFormat('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(date);
+  return indianDate(parseUtc(value));
+}
+
+export function istWhen(value) {
+  if (!value) return '—';
+  return indianDate(parseIst(value));
 }
 
 export function day(value) {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }).format(new Date(value));
+  const text = String(value);
+  return indianDate(/^\d{4}-\d{2}-\d{2}$/.test(text) ? parseIst(text) : parseUtc(text), false);
 }
 
 export function label(value) {

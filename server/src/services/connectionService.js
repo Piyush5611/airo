@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { CATEGORIES } from '../domain/providers.js';
 import { createGoogleSearchCampaign, editGoogleCampaign, exchangeGoogleCode, googleAuthUrl, googleKeywordIdeas, googleReport, listGoogleAccounts, pullGoogleAds, searchGoogleLanguages, setGoogleCampaignStatus, suggestGoogleLocations, verifyGoogleAccount } from '../integrations/googleAds.js';
-import { cleanNexcallKey, nexcallBase, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
+import { cleanNexcallKey, nexcallBase, nexcallCallReport, nexcallCalls, nexcallFollowups, nexcallLeads, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
 import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, exchangeMetaCode, listAdInstagram, listMetaAdAccounts, listMetaPages, listMetaPixels, listPageInstagram, metaAuthUrl, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
@@ -112,12 +112,147 @@ export async function detail(auth, id) {
     jobs,
     logs,
     errors,
-    records: objects.map(liveRecord).filter(Boolean),
+    records: connection.providerKey === 'nexcall' ? [] : objects.map(liveRecord).filter(Boolean),
     linked: isLinked(connection, storedSecret),
     tokenExpiresAt: storedSecret?.tokenExpiresAt || null,
     webhookPath: canManage && token ? `/api/hooks/${token}` : null,
     tool: connection.providerKey === 'nexcall' ? await nexcallTool(id, connection.mode) : null
   };
+}
+
+const STATS_TTL_MS = 10 * 60 * 1000;
+const statsCache = new Map();
+
+function istDate(offsetDays = 0) {
+  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - offsetDays * 24 * 60 * 60 * 1000);
+  return ist.toISOString().slice(0, 10);
+}
+
+function istHourNow() {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).getUTCHours();
+}
+
+async function cachedReport(id, secret, from, to) {
+  const key = `${id}|${from}|${to}`;
+  const hit = statsCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.value;
+  const body = await nexcallCallReport({ apiKey: secret.apiKey, baseUrl: secret.baseUrl, from, to });
+  const value = {
+    totals: body.data?.summary?.totals || {},
+    employees: (body.data?.employees || []).map(({ employee_email: _email, ...row }) => row)
+  };
+  statsCache.set(key, { value, expires: Date.now() + STATS_TTL_MS });
+  if (statsCache.size > 500) statsCache.delete(statsCache.keys().next().value);
+  return value;
+}
+
+async function inBatches(items, size, task) {
+  const out = [];
+  for (let index = 0; index < items.length; index += size) {
+    out.push(...await Promise.all(items.slice(index, index + size).map(task)));
+  }
+  return out;
+}
+
+export async function callYatriStats(auth, id, requestedDay) {
+  const connection = await repo.getConnection(auth.organizationId, id);
+  if (!connection) throw new ApiError(404, 'Connection not found.', 'not_found');
+  if (connection.providerKey !== 'nexcall') throw new ApiError(422, 'Call stats are only available on Call Yatri.', 'validation_error');
+  const secret = await storedSecret(id);
+  if (!secret?.apiKey) throw new ApiError(422, 'No Call Yatri API key is saved.', 'validation_error');
+
+  const dates = Array.from({ length: 7 }, (_, index) => istDate(6 - index));
+  const day = dates.includes(requestedDay) ? requestedDay : dates[dates.length - 1];
+  const lastHour = day === istDate(0) ? istHourNow() : 23;
+  const hours = Array.from({ length: lastHour + 1 }, (_, hour) => hour);
+  const pad = (value) => String(value).padStart(2, '0');
+  const failed = [];
+
+  const days = await inBatches(dates, 4, async (date) => {
+    try {
+      const report = await cachedReport(id, secret, `${date} 00:00:00`, `${date} 23:59:59`);
+      return { date, ...report };
+    } catch (error) {
+      failed.push(`${date}: ${error.message}`);
+      return { date, totals: null, employees: [] };
+    }
+  });
+  const hourly = await inBatches(hours, 6, async (hour) => {
+    try {
+      const report = await cachedReport(id, secret, `${day} ${pad(hour)}:00:00`, `${day} ${pad(hour)}:59:59`);
+      return { hour, totals: report.totals };
+    } catch (error) {
+      failed.push(`${day} ${pad(hour)}:00: ${error.message}`);
+      return { hour, totals: null };
+    }
+  });
+  return { day, days, hours: hourly, failed: failed.slice(0, 10) };
+}
+
+const RECORD_PULLS = { calls: nexcallCalls, followups: nexcallFollowups, leads: nexcallLeads };
+
+export async function callYatriRecords(auth, id, kind, requestedDay) {
+  const connection = await repo.getConnection(auth.organizationId, id);
+  if (!connection) throw new ApiError(404, 'Connection not found.', 'not_found');
+  if (connection.providerKey !== 'nexcall') throw new ApiError(422, 'Call records are only available on Call Yatri.', 'validation_error');
+  const pullRecords = RECORD_PULLS[kind];
+  if (!pullRecords) throw new ApiError(422, 'Choose calls, followups, or leads.', 'validation_error');
+  const secret = await storedSecret(id);
+  if (!secret?.apiKey) throw new ApiError(422, 'No Call Yatri API key is saved.', 'validation_error');
+
+  const dates = Array.from({ length: 7 }, (_, index) => istDate(6 - index));
+  const week = requestedDay === 'week';
+  const day = dates.includes(requestedDay) ? requestedDay : dates[dates.length - 1];
+  const from = `${week ? dates[0] : day} 00:00:00`;
+  const to = `${week ? dates[dates.length - 1] : day} 23:59:59`;
+  let body;
+  try {
+    body = await pullRecords({ apiKey: secret.apiKey, baseUrl: secret.baseUrl, from, to, page: 1, limit: 100 });
+  } catch (error) {
+    const reason = String(error.message || 'Call Yatri did not respond.').replace(/x-api-key[=:]\s*\S+/gi, '').slice(0, 160);
+    throw new ApiError(502, reason, 'provider_error');
+  }
+  const rows = (Array.isArray(body?.data) ? body.data : []).map(({ employee_email: _email, ...row }) => row);
+  const total = Number(body?.pagination?.total ?? body?.meta?.total ?? body?.total ?? rows.length) || rows.length;
+  return { kind, day: week ? 'week' : day, from, to, total, rows };
+}
+
+async function callYatriConnection(auth, id) {
+  const connection = await repo.getConnection(auth.organizationId, id);
+  if (!connection) throw new ApiError(404, 'Connection not found.', 'not_found');
+  if (connection.providerKey !== 'nexcall') throw new ApiError(422, 'Team heads are only set on Call Yatri.', 'validation_error');
+  return connection;
+}
+
+export async function callYatriTeams(auth, id) {
+  await callYatriConnection(auth, id);
+  const rows = await repo.callTeamRows(id);
+  const heads = new Map();
+  for (const row of rows) {
+    const head = heads.get(row.id) || { id: row.id, headEmployeeId: row.headEmployeeId, headName: row.headName, members: [] };
+    if (row.employeeId != null) head.members.push({ employeeId: row.employeeId, employeeName: row.employeeName });
+    heads.set(row.id, head);
+  }
+  return { heads: [...heads.values()] };
+}
+
+export async function saveCallYatriTeams(auth, req, id) {
+  await callYatriConnection(auth, id);
+  const taken = new Set();
+  const heads = [];
+  for (const head of req.body.heads) {
+    if (heads.some((item) => item.headEmployeeId === head.headEmployeeId)) continue;
+    const members = [{ employeeId: head.headEmployeeId, employeeName: head.headName }, ...head.members]
+      .filter((member) => {
+        if (taken.has(member.employeeId)) return false;
+        taken.add(member.employeeId);
+        return true;
+      });
+    heads.push({ ...head, members });
+  }
+  await repo.replaceCallTeams(auth.organizationId, id, heads);
+  await recordAudit(req, { action: 'connection.call_teams_saved', resource: 'connection', resourceId: id, metadata: { heads: heads.length } });
+  return callYatriTeams(auth, id);
 }
 
 function liveRecord(row) {
@@ -150,6 +285,9 @@ async function ensureHook(connection) {
 export async function ingestWebhook(token, body) {
   const connection = await repo.findByWebhookToken(token);
   if (!connection || connection.status === 'disconnected') throw new ApiError(404, 'Unknown webhook.', 'not_found');
+  if (connection.providerKey === 'nexcall') {
+    throw new ApiError(422, 'Call Yatri data is read live from its API and is not stored in AIRO.', 'validation_error');
+  }
   const items = Array.isArray(body) ? body.slice(0, 50) : [body];
   if (!items.length || items.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) {
     throw new ApiError(422, 'Post a JSON object or a list of objects.', 'validation_error');
@@ -183,7 +321,7 @@ async function credentialPreview(connection) {
     return 'The shared AIRO chatbot is connected on the platform. This workspace does not store a WhatsApp API key.';
   }
   if (connection.providerKey === 'nexcall' && connection.mode === 'live' && preview) {
-    return `Live key ${preview}. Sync calls the W-Caller pull API.`;
+    return `Live key ${preview}. Calls, follow-ups, leads, and the report are read live from Call Yatri and are not stored in AIRO.`;
   }
   if (connection.providerKey === 'meta_ads' && preview) {
     return `Live token ${preview}. Sync reads campaigns, ads, and the last 30 days from Meta.`;
@@ -241,7 +379,7 @@ export async function saveProviderApi(auth, req) {
         .trim()
         .slice(0, 160);
       if (Number(error.status) === 404) {
-        throw new ApiError(422, 'Nexcall calls URL was not found. Leave Base URL blank, or use https://w-caller.workians.com/api/external, then save again.', 'validation_error');
+        throw new ApiError(422, 'Call Yatri calls URL was not found. Leave Base URL blank, or use https://w-caller.workians.com/api/external, then save again.', 'validation_error');
       }
       const rejected = Number(error.status) === 401 || Number(error.status) === 403 || /access denied|invalid (api )?key|unauthorized/i.test(reason);
       throw new ApiError(422, rejected && reason ? `Wrong API. ${reason}` : (reason || 'Wrong API.'), 'validation_error');
@@ -289,7 +427,7 @@ export async function saveProviderApi(auth, req) {
   }
   const saved = await detail(auth, id);
   saved.notice = provider.providerKey === 'nexcall'
-    ? 'Nexcall is connected. The API key is saved for this business.'
+    ? 'Call Yatri is connected. The API key is saved for this business.'
     : `${provider.name} is connected.`;
   saved.linked = true;
   return saved;
@@ -322,7 +460,7 @@ async function nexcallTool(connectionId, mode) {
 export async function saveNexcallKey(auth, req, id) {
   const connection = await repo.getConnection(auth.organizationId, id);
   if (!connection) throw new ApiError(404, 'Connection not found.', 'not_found');
-  if (connection.providerKey !== 'nexcall') throw new ApiError(422, 'An API key is only stored on Nexcall.', 'validation_error');
+  if (connection.providerKey !== 'nexcall') throw new ApiError(422, 'An API key is only stored on Call Yatri.', 'validation_error');
   const apiKey = req.body.apiKey.trim();
   const baseUrl = (req.body.baseUrl || NEXCALL_BASE).trim().replace(/\/$/, '');
   await repo.saveCredential(id, encryptJson({ mode: 'live', provider: 'nexcall', apiKey, baseUrl }));
@@ -392,6 +530,9 @@ export async function sync(auth, req, id) {
     await recordAudit(req, { action: 'connection.sync_failed', resource: 'connection', resourceId: id });
     return detail(auth, id);
   }
+  if (connection.providerKey === 'nexcall') {
+    for (const key of statsCache.keys()) if (key.startsWith(`${id}|`)) statsCache.delete(key);
+  }
   if (result.mode === 'live') {
     if (result.replaceTypes?.length) await repo.deleteObjects(id, result.replaceTypes);
     for (const object of result.objects) {
@@ -408,6 +549,9 @@ export async function sync(auth, req, id) {
   }
   const summary = String(result.summary || '').slice(0, 250);
   await repo.addLog(jobId, 'info', summary);
+  for (const warning of result.warnings || []) {
+    await repo.addLog(jobId, 'warning', String(warning).slice(0, 250));
+  }
   if (connection.status === 'degraded') {
     await repo.addLog(jobId, 'warning', 'Sync completed with delay. The connector is degraded.');
   }

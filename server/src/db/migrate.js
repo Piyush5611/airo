@@ -30,8 +30,12 @@ export async function migrate() {
     await syncPlatformGrants(connection);
     await ensureWhatsapp(connection);
     await connection.query(
-      `UPDATE integration_providers SET description = ? WHERE provider_key = 'nexcall'`,
-      ['Read-only pull of W-Caller leads, calls, the call report, and follow-ups. Authenticate with x-api-key.']
+      `UPDATE integration_providers SET name = 'Call Yatri', description = ? WHERE provider_key = 'nexcall'`,
+      ['Read-only pull of Call Yatri leads, calls, the call report, and follow-ups. Authenticate with x-api-key.']
+    ).catch(() => {});
+    await connection.query(
+      `UPDATE integration_connections c JOIN integration_providers p ON p.id = c.provider_id
+       SET c.account_label = 'Call Yatri' WHERE p.provider_key = 'nexcall' AND c.account_label = 'Nexcall'`
     ).catch(() => {});
     console.log(`Schema ready on ${env.db.name}.`);
   } finally {

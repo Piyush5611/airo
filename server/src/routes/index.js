@@ -15,6 +15,7 @@ import * as platform from '../services/platformService.js';
 import * as whatsapp from '../services/whatsappService.js';
 import * as llm from '../services/llmService.js';
 import * as metaWebhook from '../services/metaWebhookService.js';
+import * as adsAgent from '../services/adsAgent/agentService.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -118,6 +119,13 @@ client.get('/sources', requirePermission('sources.view'), asyncHandler(async (re
 client.get('/campaigns', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await growth.campaigns(req.auth))));
 client.get('/campaigns/:id', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await growth.campaign(req.auth, req.params.id));
+}));
+client.get('/ads-agent', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsAgent.overview(req.auth, req.query.days))));
+client.put('/ads-agent/settings', requirePermission('campaigns.update'), validate(schemas.adsAgentSettingsSchema), asyncHandler(async (req, res) => {
+  ok(res, await adsAgent.saveSettings(req.auth, req));
+}));
+client.post('/ads-agent/sync', requirePermission('campaigns.update'), validate(schemas.adsAgentSyncSchema), asyncHandler(async (req, res) => {
+  ok(res, await adsAgent.syncNow(req.auth, req));
 }));
 client.get('/pipeline', requirePermission('pipeline.view'), asyncHandler(async (req, res) => ok(res, await sales.pipeline(req.auth))));
 client.get('/pipeline/:id', requirePermission('pipeline.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {

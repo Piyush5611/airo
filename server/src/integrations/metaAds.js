@@ -410,6 +410,27 @@ export async function metaReport({ apiKey, accountId }, range) {
   return result;
 }
 
+export async function metaDailyStats({ apiKey, accountId }, range = 'LAST_7_DAYS') {
+  const preset = REPORT_PRESETS[range];
+  if (!preset) throw new ApiError(422, 'Choose a report range.', 'validation_error');
+  const act = actId(accountId);
+  const [account, rows] = await Promise.all([
+    graph(`act_${act}`, apiKey, { fields: 'currency' }).catch(() => ({})),
+    list(`act_${act}/insights`, apiKey, {
+      date_preset: preset,
+      level: 'campaign',
+      time_increment: '1',
+      fields: 'campaign_id,campaign_name,spend,impressions,clicks,actions'
+    })
+  ]);
+  return {
+    currency: account.currency || '',
+    rows: rows
+      .map((row) => ({ date: row.date_start || '', id: String(row.campaign_id || ''), name: String(row.campaign_name || ''), ...insightRow(row) }))
+      .filter((row) => row.id && row.date)
+  };
+}
+
 function creativeOf(creative = {}) {
   const spec = creative.object_story_spec || {};
   const link = spec.link_data || {};

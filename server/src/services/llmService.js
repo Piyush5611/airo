@@ -6,6 +6,7 @@ import { recordAudit } from './auditService.js';
 import { listLlmModels, llmProviderName, replyLlm, verifyLlm, WHATSAPP_BRIEF } from '../integrations/llm.js';
 import { LLM_PURPOSES, purposeLabel } from '../domain/llmPurposes.js';
 import { many, one } from '../db/sql.js';
+import { modelJson } from '../utils/modelJson.js';
 import * as whatsappRepo from '../repositories/whatsappRepo.js';
 import * as repo from '../repositories/llmRepo.js';
 
@@ -272,6 +273,55 @@ async function adModels() {
     }
   }
   return attempts;
+}
+
+export async function structuredLlm({ organizationId = null, schema, system, facts, task }) {
+  const attempts = await adModels();
+  if (!attempts.length) throw new ApiError(422, 'Connect an AI model for Ad writing on Platform AI first.', 'llm_missing');
+  const brief = `${system}\nReply with one JSON object only. No markdown and no text outside the JSON.`;
+  let lastError = null;
+  for (const attempt of attempts) {
+    let messages = [{ role: 'user', content: task }];
+    for (let tries = 0; tries < 2; tries += 1) {
+      let text;
+      try {
+        text = await replyLlm({
+          provider: attempt.row.provider,
+          model: attempt.row.modelName,
+          apiKey: await readKey(attempt.row),
+          baseUrl: attempt.row.baseUrl || '',
+          messages,
+          facts,
+          system: brief
+        });
+      } catch (error) {
+        lastError = error;
+        break;
+      }
+      const parsed = schema.safeParse(modelJson(text));
+      if (parsed.success) {
+        await recordAudit({ auth: null, ip: null }, {
+          action: 'llm.structured',
+          resource: 'llm_connection',
+          resourceId: attempt.row.id,
+          organizationId,
+          metadata: { purpose: attempt.purpose, provider: attempt.row.provider, model: attempt.row.modelName }
+        });
+        return { data: parsed.data, model: attempt.row.modelName, providerName: llmProviderName(attempt.row.provider) };
+      }
+      const problems = parsed.error.issues
+        .slice(0, 5)
+        .map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`)
+        .join('; ');
+      lastError = new ApiError(502, 'The model reply did not match the expected format.', 'llm_invalid');
+      messages = [
+        ...messages,
+        { role: 'assistant', content: String(text || '').slice(0, 4000) || '(empty)' },
+        { role: 'user', content: `That reply was not valid: ${problems}. Send the corrected JSON object only.` }
+      ];
+    }
+  }
+  throw lastError;
 }
 
 export async function writeGoogleAdPlan({ intake, english }) {

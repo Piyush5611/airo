@@ -2,6 +2,15 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-05 (AI Ads Agent, phases 0–1)
+
+- **Change:** AI Ads Agent foundation and read-only metrics sync. Migration `015_ads_agent.sql`: `ads_agent_settings` (mode `off|recommend|approve|auto`, default `recommend`; daily/monthly spend caps, max budget change %, max actions per day, min spend before judging, kill switch), `ad_metrics_daily` (campaign-level daily spend/impressions/clicks per connection; Meta `leads` from insight actions, Google `conversions`; currency as the ad account reports it), `ai_decisions` (decision log with evidence, proposed change, guardrail result, status), `agent_jobs` (DB lock so one job run at a time).
+- **Change (same day):** `services/adsAgent/`: `guardrails.js` (pure `checkAction`; pausing is never blocked by caps, anything that can raise spend is), `metricsSync.js` (all live verified Meta/Google connections; first sync pulls 30 days, then 7), `jobs.js` (in-process scheduler, checks every 10 minutes, metrics sync every 3 hours, started from `server.js`), `agentService.js` (overview, settings, manual sync with a 5-minute cooldown, `recordDecision`). New integration functions `metaDailyStats` and `googleDailyStats`. `llmService.structuredLlm` returns zod-validated JSON from the ad-writing model (one corrective retry per model, then the next model); `utils/modelJson.js` reads JSON from model replies.
+- **Change (same day):** Routes `GET /api/ads-agent?days=7|14|30` (`campaigns.view`), `PUT /api/ads-agent/settings` and `POST /api/ads-agent/sync` (`campaigns.update`, audited). Only the Owner can choose `auto`. UI: `pages/AdsAgent.jsx` at `/app/growth/ads-agent` ("AI Ads Agent" under Growth): per-platform totals, daily spend, campaign table, guardrails form, decision log. No action changes an ad account yet.
+- **Change (same day):** `npm test` also runs `src/tests/adsAgent.test.js`; `npm run test:unit` runs only the DB-free unit tests.
+- **Affected areas:** `metaAds.js`, `googleAds.js`, `llmService.js`, `routes/index.js`, `schemas.js`, `server.js`, `adsAgentRepo.js`, `App.jsx`, `shell.jsx`.
+- **Migration/API impact:** Run `npm run migrate` (015). Client rebuild needed.
+
 ### 2026-10-05
 
 - **Change:** Nexcall is shown as **Call Yatri** everywhere users see it (provider name, WhatsApp report lines, LLM prompt, errors). The provider key, routes, and function names stay `nexcall`. The Call Yatri connection page (`CallYatriView` in `Connections.jsx`) shows sync status with skipped parts, the 7-day call report tiles, team performance, and Calls / Follow-ups / Leads tabs.

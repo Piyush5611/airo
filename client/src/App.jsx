@@ -8,6 +8,7 @@ import { CampaignDetail, Campaigns, LeadDetail, Leads, Sources } from './pages/G
 import { Activities, CallDetail, Calls, Opportunity, Pipeline } from './pages/Sales.jsx';
 import { Analytics, Reports, ReportView } from './pages/Intel.jsx';
 import { ConnectionDetail, Connections } from './pages/Connections.jsx';
+import { AdsAgent } from './pages/AdsAgent.jsx';
 import { Assistant, Monitoring, Recommendations } from './pages/Ai.jsx';
 import { AssistantPage } from './pages/AssistantChat.jsx';
 import { Settings, Team } from './pages/Workspace.jsx';
@@ -48,6 +49,7 @@ export function App() {
         <Route path="insights" element={<Insights />} />
         <Route path="growth/campaigns" element={<Campaigns />} />
         <Route path="growth/campaigns/:id" element={<CampaignDetail />} />
+        <Route path="growth/ads-agent" element={<AdsAgent />} />
         <Route path="growth/sources" element={<Sources />} />
         <Route path="growth/leads" element={<Leads />} />
         <Route path="growth/leads/:id" element={<LeadDetail />} />

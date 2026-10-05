@@ -44,6 +44,22 @@ export const assignSchema = body({ userId: z.number().int().positive() });
 
 export const idParams = params({ id: z.coerce.number().int().positive() });
 
+const spendCap = z.union([z.coerce.number().positive().max(1000000000), z.null()]).optional();
+
+export const adsAgentSettingsSchema = body({
+  mode: z.enum(['off', 'recommend', 'approve', 'auto']),
+  dailySpendCap: spendCap,
+  monthlySpendCap: spendCap,
+  maxBudgetChangePct: z.coerce.number().int().min(1).max(100),
+  maxActionsPerDay: z.coerce.number().int().min(0).max(50),
+  minSpendForDecision: z.coerce.number().min(0).max(100000000),
+  killSwitch: z.boolean()
+});
+
+export const adsAgentSyncSchema = body({
+  range: z.enum(['LAST_7_DAYS', 'LAST_30_DAYS']).optional()
+});
+
 const adEditBody = z.object({
   name: z.string().trim().min(1).max(180).optional(),
   status: z.enum(['ACTIVE', 'PAUSED', 'ENABLED', 'REMOVED']).optional(),

@@ -384,6 +384,18 @@ export async function googleReport(input, range) {
   return result;
 }
 
+export async function googleDailyStats(input, range = 'LAST_7_DAYS') {
+  if (!GOOGLE_RANGES.includes(range)) throw new ApiError(422, 'Choose a report range.', 'validation_error');
+  const ctx = context(input);
+  const rows = await search(ctx, `SELECT segments.date, campaign.id, campaign.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.status != 'REMOVED' AND segments.date DURING ${range}`, 5);
+  return {
+    currency: input.currency || '',
+    rows: rows
+      .map((row) => ({ date: row.segments?.date || '', id: String(row.campaign?.id || ''), name: String(row.campaign?.name || ''), ...reportRow(row.metrics) }))
+      .filter((row) => row.id && row.date)
+  };
+}
+
 export async function googleCampaignDetail(input, campaignId, range) {
   if (!GOOGLE_RANGES.includes(range)) throw new ApiError(422, 'Choose a report range.', 'validation_error');
   const ctx = context(input);

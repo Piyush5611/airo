@@ -72,7 +72,8 @@ async function metaAccount(organizationId) {
      FROM integration_connections c
      JOIN integration_providers p ON p.id = c.provider_id
      LEFT JOIN integration_credentials cred ON cred.connection_id = c.id
-     WHERE c.organization_id = ? AND p.provider_key = 'meta_ads'
+     WHERE c.organization_id = ? AND p.provider_key = 'meta_ads' AND c.status = 'connected' AND c.mode = 'live'
+     ORDER BY c.id
      LIMIT 1`,
     [organizationId]
   );

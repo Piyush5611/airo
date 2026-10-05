@@ -408,6 +408,110 @@ export async function metaReport({ apiKey, accountId }, range) {
   return result;
 }
 
+function creativeOf(creative = {}) {
+  const spec = creative.object_story_spec || {};
+  const link = spec.link_data || {};
+  const video = spec.video_data || {};
+  const cta = link.call_to_action?.type || video.call_to_action?.type || creative.call_to_action_type || '';
+  return {
+    headline: String(creative.title || link.name || video.title || '').slice(0, 200),
+    text: String(creative.body || link.message || video.message || '').slice(0, 1000),
+    link: String(link.link || video.call_to_action?.value?.link || '').slice(0, 500),
+    image: String(creative.image_url || link.picture || creative.thumbnail_url || video.image_url || '').slice(0, 1000),
+    cta: String(cta)
+  };
+}
+
+function targetingOf(targeting = {}) {
+  const geo = targeting.geo_locations || {};
+  const places = [
+    ...(geo.cities || []).map((item) => item.name),
+    ...(geo.regions || []).map((item) => item.name),
+    ...(geo.countries || [])
+  ].filter(Boolean);
+  const genders = Array.isArray(targeting.genders) && targeting.genders.length === 1 ? (targeting.genders[0] === 1 ? 'Men' : 'Women') : 'All';
+  const interests = (targeting.flexible_spec || []).flatMap((item) => item.interests || []).map((item) => item.name).filter(Boolean);
+  return {
+    age: targeting.age_min || targeting.age_max ? `${targeting.age_min || 18}–${targeting.age_max || 65}` : '',
+    gender: genders,
+    places: places.slice(0, 12),
+    interests: interests.slice(0, 12),
+    advantage: targeting.targeting_automation?.advantage_audience === 1
+  };
+}
+
+export async function metaCampaignDetail({ apiKey, accountId }, campaignId, range) {
+  const preset = REPORT_PRESETS[range];
+  if (!preset) throw new ApiError(422, 'Choose a report range.', 'validation_error');
+  const act = actId(accountId);
+  const id = String(campaignId || '').trim();
+  if (!/^\d{5,25}$/.test(id)) throw new ApiError(422, 'Unknown Meta campaign.', 'validation_error');
+  const campaign = await graph(id, apiKey, {
+    fields: 'id,name,account_id,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,created_time,special_ad_categories'
+  });
+  if (String(campaign.account_id || '') !== act) throw new ApiError(404, 'This campaign is not in the connected ad account.', 'not_found');
+  const account = await graph(`act_${act}`, apiKey, { fields: 'currency' }).catch(() => ({}));
+  const currency = account.currency || '';
+  const stats = 'spend,impressions,clicks,reach,actions';
+  const parts = {
+    adsets: list(`${id}/adsets`, apiKey, { fields: 'id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,destination_type,targeting' }),
+    ads: list(`${id}/ads`, apiKey, { fields: 'id,name,status,effective_status,adset_id,creative{id,title,body,image_url,thumbnail_url,call_to_action_type,object_story_spec}' }),
+    daily: list(`${id}/insights`, apiKey, { date_preset: preset, time_increment: '1', fields: stats }),
+    adsetStats: list(`${id}/insights`, apiKey, { date_preset: preset, level: 'adset', fields: `adset_id,${stats}` }),
+    adStats: list(`${id}/insights`, apiKey, { date_preset: preset, level: 'ad', fields: `ad_id,${stats}` })
+  };
+  const keys = Object.keys(parts);
+  const settled = await Promise.allSettled(Object.values(parts));
+  const pick = (key) => {
+    const outcome = settled[keys.indexOf(key)];
+    return outcome.status === 'fulfilled' ? outcome.value : [];
+  };
+  const notes = settled
+    .map((outcome, index) => (outcome.status === 'rejected' ? `${keys[index]}: ${outcome.reason?.message || 'failed'}` : null))
+    .filter(Boolean);
+  const adsetStats = new Map(pick('adsetStats').map((row) => [String(row.adset_id), row]));
+  const adStats = new Map(pick('adStats').map((row) => [String(row.ad_id), row]));
+  return {
+    range,
+    currency,
+    notes,
+    campaign: {
+      id,
+      name: String(campaign.name || ''),
+      status: campaign.status || '',
+      delivery: campaign.effective_status || '',
+      objective: campaign.objective || '',
+      budget: major(campaign.daily_budget || campaign.lifetime_budget, currency),
+      budgetKind: campaign.daily_budget ? 'daily' : campaign.lifetime_budget ? 'lifetime' : '',
+      startTime: campaign.start_time || campaign.created_time || '',
+      stopTime: campaign.stop_time || '',
+      specialCategories: Array.isArray(campaign.special_ad_categories) ? campaign.special_ad_categories : []
+    },
+    daily: pick('daily').map((row) => ({ date: row.date_start || '', ...insightRow(row) })).sort((a, b) => a.date.localeCompare(b.date)),
+    adsets: pick('adsets').map((row) => ({
+      id: String(row.id),
+      name: String(row.name || ''),
+      status: row.status || '',
+      delivery: row.effective_status || '',
+      budget: major(row.daily_budget || row.lifetime_budget, currency),
+      budgetKind: row.daily_budget ? 'daily' : row.lifetime_budget ? 'lifetime' : '',
+      goal: row.optimization_goal || '',
+      destination: row.destination_type || '',
+      targeting: targetingOf(row.targeting),
+      ...insightRow(adsetStats.get(String(row.id)))
+    })),
+    ads: pick('ads').map((row) => ({
+      id: String(row.id),
+      adsetId: String(row.adset_id || ''),
+      name: String(row.name || ''),
+      status: row.status || '',
+      delivery: row.effective_status || '',
+      creative: creativeOf(row.creative),
+      ...insightRow(adStats.get(String(row.id)))
+    }))
+  };
+}
+
 export async function pullMetaAds({ apiKey, accountId }) {
   const act = actId(accountId);
   const account = await graph(`act_${act}`, apiKey, { fields: 'id,name,currency' });

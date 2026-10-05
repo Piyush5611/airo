@@ -384,6 +384,87 @@ export async function googleReport(input, range) {
   return result;
 }
 
+export async function googleCampaignDetail(input, campaignId, range) {
+  if (!GOOGLE_RANGES.includes(range)) throw new ApiError(422, 'Choose a report range.', 'validation_error');
+  const ctx = context(input);
+  const id = entityId(campaignId, 'campaign');
+  const during = `campaign.id = ${id} AND segments.date DURING ${range}`;
+  const queries = {
+    campaign: `SELECT campaign.id, campaign.name, campaign.status, campaign.primary_status, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign.start_date, campaign.end_date, campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${id}`,
+    daily: `SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE ${during} ORDER BY segments.date`,
+    groups: `SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.cpc_bid_micros FROM ad_group WHERE campaign.id = ${id} AND ad_group.status != 'REMOVED'`,
+    groupStats: `SELECT ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM ad_group WHERE ${during}`,
+    ads: `SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, ad_group_ad.ad.final_urls, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.responsive_search_ad.path1, ad_group_ad.ad.responsive_search_ad.path2, ad_group_ad.status, ad_group_ad.policy_summary.approval_status, ad_group.id FROM ad_group_ad WHERE campaign.id = ${id} AND ad_group_ad.status != 'REMOVED'`,
+    adStats: `SELECT ad_group_ad.ad.id, ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM ad_group_ad WHERE ${during}`,
+    keywords: `SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM keyword_view WHERE ${during} ORDER BY metrics.cost_micros DESC LIMIT 100`
+  };
+  const keys = Object.keys(queries);
+  const settled = await Promise.allSettled(keys.map((key) => search(ctx, queries[key], 2)));
+  const pick = (key) => {
+    const outcome = settled[keys.indexOf(key)];
+    return outcome.status === 'fulfilled' ? outcome.value : [];
+  };
+  if (settled[0].status === 'rejected') throw settled[0].reason;
+  const campaignRow = pick('campaign')[0];
+  if (!campaignRow?.campaign) throw new ApiError(404, 'Google Ads did not return this campaign.', 'not_found');
+  const notes = settled
+    .map((outcome, index) => (outcome.status === 'rejected' ? `${keys[index]}: ${outcome.reason?.message || 'failed'}` : null))
+    .filter(Boolean);
+  const groupStats = new Map(pick('groupStats').map((row) => [String(row.adGroup?.id), row.metrics]));
+  const adStats = new Map(pick('adStats').map((row) => [`${row.adGroup?.id}~${row.adGroupAd?.ad?.id}`, row.metrics]));
+  const campaign = campaignRow.campaign;
+  return {
+    range,
+    currency: input.currency || '',
+    notes,
+    campaign: {
+      id: String(campaign.id),
+      name: String(campaign.name || ''),
+      status: campaign.status || '',
+      delivery: campaign.primaryStatus || '',
+      channel: campaign.advertisingChannelType || '',
+      bidding: campaign.biddingStrategyType || '',
+      startDate: campaign.startDate || '',
+      endDate: campaign.endDate || '',
+      budget: major(campaignRow.campaignBudget?.amountMicros)
+    },
+    daily: pick('daily').map((row) => ({ date: row.segments?.date || '', ...reportRow(row.metrics) })),
+    groups: pick('groups').map((row) => ({
+      id: String(row.adGroup?.id || ''),
+      name: String(row.adGroup?.name || ''),
+      status: row.adGroup?.status || '',
+      cpcBid: major(row.adGroup?.cpcBidMicros),
+      ...reportRow(groupStats.get(String(row.adGroup?.id)))
+    })),
+    ads: pick('ads').map((row) => {
+      const ad = row.adGroupAd?.ad || {};
+      const rsa = ad.responsiveSearchAd || {};
+      return {
+        id: `${row.adGroup?.id}~${ad.id}`,
+        groupId: String(row.adGroup?.id || ''),
+        name: String(ad.name || ''),
+        type: ad.type || '',
+        status: row.adGroupAd?.status || '',
+        approval: row.adGroupAd?.policySummary?.approvalStatus || '',
+        finalUrl: (ad.finalUrls || [])[0] || '',
+        path1: rsa.path1 || '',
+        path2: rsa.path2 || '',
+        headlines: (rsa.headlines || []).map((item) => item.text).filter(Boolean),
+        descriptions: (rsa.descriptions || []).map((item) => item.text).filter(Boolean),
+        ...reportRow(adStats.get(`${row.adGroup?.id}~${ad.id}`))
+      };
+    }),
+    keywords: pick('keywords').map((row) => ({
+      id: `${row.adGroup?.id}~${row.adGroupCriterion?.criterionId}`,
+      groupId: String(row.adGroup?.id || ''),
+      text: String(row.adGroupCriterion?.keyword?.text || ''),
+      matchType: row.adGroupCriterion?.keyword?.matchType || '',
+      status: row.adGroupCriterion?.status || '',
+      ...reportRow(row.metrics)
+    }))
+  };
+}
+
 export async function suggestGoogleLocations({ refreshToken, query }) {
   const q = String(query || '').trim().slice(0, 60);
   if (!/^[\p{L}\p{N} .,'-]{2,60}$/u.test(q)) return [];

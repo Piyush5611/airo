@@ -114,7 +114,9 @@ export function Shell({ kicker, nav, home }) {
           { ...item, end: true },
           ...tools.map((tool) => ({
             to: `/app/connections/${tool.id}`,
-            label: tool.name,
+            label: tools.filter((item) => item.providerKey === tool.providerKey).length > 1 && tool.accountLabel
+              ? `${tool.name} · ${tool.accountLabel}`
+              : tool.name,
             logo: providerLogo(tool.providerKey),
             nested: true,
             end: true

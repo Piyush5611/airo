@@ -35,6 +35,7 @@ export function Connections() {
       next.delete('google');
       next.delete('meta');
       next.delete('reason');
+      next.delete('connection');
       return next;
     }, { replace: true });
   }
@@ -47,8 +48,9 @@ export function Connections() {
         {oauthStep === 'error' ? <p className="delta-down">{oauthReason || 'Sign-in failed.'}</p> : null}
         {oauthStep === 'pick' && can('connections.manage') ? (
           <OAuthAccountPicker
-            key={oauthProvider}
+            key={`${oauthProvider}-${params.get('connection') || ''}`}
             provider={oauthProvider}
+            connectionId={params.get('connection') || ''}
             onCancel={clearOAuth}
             onDone={(notice, connectionId) => {
               clearOAuth();
@@ -72,14 +74,32 @@ export function Connections() {
                     label: 'Provider',
                     render: (row) => {
                       const logo = providerLogo(row.providerKey);
-                      const name = row.connection?.linked ? <Link to={`/app/connections/${row.connection.id}`}>{row.name}</Link> : row.name;
-                      return logo ? <span className="provider-name"><img src={logo} alt="" />{name}</span> : name;
+                      const multi = row.multiAccount && row.accounts?.length;
+                      const name = row.connection?.linked && !multi ? <Link to={`/app/connections/${row.connection.id}`}>{row.name}</Link> : row.name;
+                      const title = logo ? <span className="provider-name"><img src={logo} alt="" />{name}</span> : name;
+                      if (!multi) return title;
+                      return (
+                        <div className="provider-accounts">
+                          {title}
+                          <ul>
+                            {row.accounts.map((account) => (
+                              <li key={account.id}><Link to={`/app/connections/${account.id}`}>{account.accountLabel || row.name}</Link>{account.accountId ? <small>{account.accountId}</small> : null}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
                     }
                   },
                   { key: 'description', label: 'Becomes' },
-                  { key: 'state', label: 'Status', render: (row) => <Badge value={row.connection?.linked ? 'connected' : 'not_connected'} /> },
+                  { key: 'state', label: 'Status', render: (row) => row.multiAccount && row.accounts?.length > 1
+                    ? <Badge value={`${row.accounts.length} accounts connected`} tone="good" />
+                    : <Badge value={row.connection?.linked ? 'connected' : 'not_connected'} /> },
                   { key: 'api', label: 'API', render: (row) => row.providerKey === 'whatsapp' ? 'Platform bot' : row.connection?.linked ? `Live ${row.connection.apiKeyPreview}` : 'Not saved' },
-                  { key: 'action', label: '', render: (row) => can('connections.manage') ? <button className="btn" onClick={() => { setForm(row); setMessage(''); }}>{row.providerKey === 'whatsapp' ? 'API' : row.connection?.linked ? 'Update API' : 'Connect API'}</button> : null }
+                  { key: 'action', label: '', render: (row) => can('connections.manage') ? (
+                    <button className="btn" onClick={() => { setForm(row); setMessage(''); }}>
+                      {row.providerKey === 'whatsapp' ? 'API' : row.multiAccount && row.accounts?.length ? '+ Add account' : row.connection?.linked ? 'Update API' : 'Connect API'}
+                    </button>
+                  ) : null }
                 ]}
                 rows={category.providers}
               />
@@ -113,14 +133,16 @@ function ProviderApiForm({ provider, onDone }) {
     );
   }
 
+  const adding = Boolean(provider.multiAccount && provider.accounts?.length);
+
   if (provider.providerKey === 'google_ads') {
-    return <OAuthConnect provider="google" linked={Boolean(provider.connection?.linked)} />;
+    return <OAuthConnect provider="google" adding={adding} />;
   }
 
   if (meta && !manual) {
     return (
       <div className="stack">
-        <OAuthConnect provider="meta" linked={Boolean(provider.connection?.linked)} />
+        <OAuthConnect provider="meta" adding={adding} />
         <button className="btn-ghost" type="button" onClick={() => setManual(true)}>Paste an access token instead</button>
       </div>
     );
@@ -149,8 +171,8 @@ function ProviderApiForm({ provider, onDone }) {
 
   return (
     <form className="form-grid panel" onSubmit={save}>
-      <h2>{provider.connection?.linked ? 'Update' : 'Connect'} {provider.name} API</h2>
-      <p className="quiet">{meta ? 'Paste the Meta access token and the ad account id, like act_123456789. Meta checks both before the account connects.' : 'The key is checked with the provider before it is saved. A wrong key shows Wrong API and does not connect.'}</p>
+      <h2>{adding ? `Add a ${provider.name} account` : provider.connection?.linked ? `Update ${provider.name} API` : `Connect ${provider.name} API`}</h2>
+      <p className="quiet">{meta ? `Paste the Meta access token and the ad account id, like act_123456789. Meta checks both before the account connects.${adding ? ' An account id that is already connected is updated; a new one is added as another account.' : ''}` : 'The key is checked with the provider before it is saved. A wrong key shows Wrong API and does not connect.'}</p>
       <label className="stack-field">{nexcall ? 'x-api-key' : 'API key or access token'}
         <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" required minLength={8} />
       </label>
@@ -198,16 +220,16 @@ const OAUTH_PROVIDERS = {
   }
 };
 
-function OAuthConnect({ provider, linked }) {
+function useOAuthStart(provider) {
   const setup = OAUTH_PROVIDERS[provider];
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  async function start() {
+  async function start(target) {
     setBusy(true);
     setError('');
     try {
-      const result = await api.post(setup.start, {});
+      const result = await api.post(setup.start, target ? { target } : {});
       window.location.assign(result.url);
     } catch (err) {
       setError(err.message);
@@ -215,17 +237,57 @@ function OAuthConnect({ provider, linked }) {
     }
   }
 
+  return { setup, start, busy, error };
+}
+
+function OAuthConnect({ provider, adding }) {
+  const { setup, start, busy, error } = useOAuthStart(provider);
+
   return (
     <section className="panel form-grid">
-      <h2>{linked ? `Change ${setup.product} account` : `Connect ${setup.product}`}</h2>
+      <h2>{adding ? `Add another ${setup.product} account` : `Connect ${setup.product}`}</h2>
       <p className="quiet">{setup.help}</p>
-      <button className="btn-primary" type="button" disabled={busy} onClick={start}>{busy ? `Opening ${setup.brand}` : `Connect with ${setup.brand}`}</button>
+      {adding ? <p className="quiet">Each ad account is added as its own connection. Accounts that are already connected stay as they are.</p> : null}
+      <button className="btn-primary" type="button" disabled={busy} onClick={() => start(adding ? 'new' : null)}>{busy ? `Opening ${setup.brand}` : `Connect with ${setup.brand}`}</button>
       {error ? <p className="delta-down">{error}</p> : null}
     </section>
   );
 }
 
-function OAuthAccountPicker({ provider, onDone, onCancel }) {
+function AdAccountBar({ provider, current, accounts, canManage }) {
+  const { setup, start, busy, error } = useOAuthStart(provider);
+  const linked = accounts.filter((account) => account.linked);
+  return (
+    <section className="panel account-bar">
+      <div className="account-bar-main">
+        <span className="quiet">{linked.length > 1 ? `${linked.length} ${setup.product} accounts` : `${setup.product} account`}</span>
+        <div className="account-tabs" role="tablist">
+          {linked.map((account) => (
+            <Link
+              key={account.id}
+              role="tab"
+              aria-selected={String(account.id) === String(current)}
+              className={String(account.id) === String(current) ? 'is-on' : ''}
+              to={`/app/connections/${account.id}`}
+            >
+              <strong>{account.accountLabel || setup.product}</strong>
+              {account.accountId ? <small>{provider === 'google' ? customerLabel(account.accountId) : account.accountId}</small> : null}
+            </Link>
+          ))}
+        </div>
+      </div>
+      {canManage ? (
+        <div className="page-actions">
+          <button className="btn" type="button" disabled={busy} onClick={() => start(current)}>Change this account</button>
+          <button className="btn-primary" type="button" disabled={busy} onClick={() => start('new')}>{busy ? `Opening ${setup.brand}` : '+ Add account'}</button>
+        </div>
+      ) : null}
+      {error ? <p className="delta-down">{error}</p> : null}
+    </section>
+  );
+}
+
+function OAuthAccountPicker({ provider, connectionId, onDone, onCancel }) {
   const setup = OAUTH_PROVIDERS[provider];
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState([]);
@@ -236,25 +298,27 @@ function OAuthAccountPicker({ provider, onDone, onCancel }) {
 
   useEffect(() => {
     let active = true;
-    api.get(setup.accounts)
+    api.get(connectionId ? `${setup.accounts}?connection=${encodeURIComponent(connectionId)}` : setup.accounts)
       .then((result) => {
         if (!active) return;
         const rows = result?.accounts || [];
         setAccounts(rows);
         setNote(result?.note || '');
-        setChoice(rows[0]?.id || '');
+        setChoice((rows.find((account) => !account.taken) || {}).id || '');
       })
       .catch((err) => { if (active) setNote(err.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [setup.accounts]);
+  }, [setup.accounts, connectionId]);
+
+  const open = accounts.filter((account) => !account.taken);
 
   async function save(event) {
     event.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const saved = await api.post(setup.save, { [setup.field]: choice });
+      const saved = await api.post(setup.save, { [setup.field]: choice, ...(connectionId ? { connectionId: Number(connectionId) } : {}) });
       onDone(saved.notice, saved.linked ? saved.id : null);
     } catch (err) {
       setError(err.message);
@@ -270,10 +334,15 @@ function OAuthAccountPicker({ provider, onDone, onCancel }) {
       {!loading && accounts.length ? (
         <label className="stack-field">Ad account
           <select value={choice} onChange={(event) => setChoice(event.target.value)}>
-            {accounts.map((account) => <option key={account.id} value={account.id}>{setup.option(account)}</option>)}
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id} disabled={account.taken}>
+                {setup.option(account)}{account.taken ? ' · already connected' : ''}
+              </option>
+            ))}
           </select>
         </label>
       ) : null}
+      {!loading && accounts.length && !open.length ? <p className="quiet">Every ad account this login can open is already connected in AIRO.</p> : null}
       {!loading && !accounts.length ? <p className="delta-down">{note || `${setup.brand} returned no ad accounts for this login.`}</p> : null}
       <div className="page-actions">
         <button className="btn" type="button" onClick={onCancel}>Cancel</button>
@@ -358,7 +427,7 @@ function AdsAlerts({ notice, error }) {
   );
 }
 
-function SpendBars({ rows, currency, resultKey, resultLabel }) {
+function SpendBars({ rows, currency, resultKey, resultLabel, onPick }) {
   const ranked = rows
     .map((row) => ({ id: row.id, name: row.name, spend: Number(row.fields?.spend || 0), clicks: row.fields?.clicks, result: row.fields?.[resultKey] }))
     .filter((row) => row.spend > 0)
@@ -370,7 +439,9 @@ function SpendBars({ rows, currency, resultKey, resultLabel }) {
     <div className="spend-bars">
       {ranked.map((row) => (
         <div className="spend-row" key={row.id}>
-          <span className="spend-name" title={row.name}>{row.name}</span>
+          {onPick ? (
+            <button type="button" className="spend-name is-link" title={`Open ${row.name}`} onClick={() => onPick(row)}>{row.name}</button>
+          ) : <span className="spend-name" title={row.name}>{row.name}</span>}
           <span className="spend-track"><span style={{ width: `${(row.spend / max) * 100}%` }} /></span>
           <strong>{money(row.spend, currency)}</strong>
           <em>{row.result == null || row.result === '' ? `${countCell(row.clicks)} clicks` : `${countCell(row.result)} ${resultLabel}`}</em>
@@ -666,6 +737,271 @@ function AdsPerformance({ brand, report, busy, error, range, onRange, fallbackCu
   );
 }
 
+function CampaignName({ name }) {
+  return (
+    <span className="campaign-name">
+      <strong>{name || '—'}</strong>
+      <em>View details →</em>
+    </span>
+  );
+}
+
+function resultCards(rows, resultKey, resultLabel, currency) {
+  const spend = sumOf(rows, 'spend');
+  const impressions = sumOf(rows, 'impressions');
+  const clicks = sumOf(rows, 'clicks');
+  const results = sumOf(rows, resultKey);
+  const series = (key) => rows.map((row) => Number(row[key] || 0));
+  return [
+    { label: 'Spend', value: money(spend, currency), spark: series('spend'), hint: `${money(ratio(spend, rows.length), currency)} a day` },
+    { label: 'Impressions', value: num(impressions), spark: series('impressions'), hint: `${money(ratio(spend * 1000, impressions), currency)} CPM` },
+    { label: 'Clicks', value: num(clicks), spark: series('clicks'), hint: `${money(ratio(spend, clicks), currency)} per click` },
+    { label: 'CTR', value: pct(ratio(clicks, impressions)), spark: rows.map((row) => (Number(row.impressions) ? Number(row.clicks) / Number(row.impressions) : 0)), hint: 'Clicks ÷ impressions', tone: 'info' },
+    { label: label(resultLabel), value: num(results), spark: series(resultKey), hint: `${pct(ratio(results, clicks))} of clicks`, tone: 'good' },
+    { label: `Cost per ${resultKey === 'leads' ? 'lead' : 'conversion'}`, value: money(ratio(spend, results), currency), hint: results ? `${num(results)} ${resultLabel}` : `No ${resultLabel} yet`, tone: 'warn' }
+  ];
+}
+
+function StatLine({ row, currency, resultKey, resultLabel }) {
+  return (
+    <dl className="stat-line">
+      <div><dt>Spend</dt><dd>{money(row.spend, currency)}</dd></div>
+      <div><dt>Impr.</dt><dd>{countCell(row.impressions)}</dd></div>
+      <div><dt>Clicks</dt><dd>{countCell(row.clicks)}</dd></div>
+      <div><dt>CTR</dt><dd>{pct(ratio(row.clicks, row.impressions))}</dd></div>
+      <div><dt>{label(resultLabel)}</dt><dd>{countCell(row[resultKey])}</dd></div>
+      <div><dt>Cost / {resultKey === 'leads' ? 'lead' : 'conv.'}</dt><dd>{money(ratio(row.spend, row[resultKey]), currency)}</dd></div>
+    </dl>
+  );
+}
+
+function MetaAdCard({ ad, adsetName, currency }) {
+  const creative = ad.creative || {};
+  let host = '';
+  try { host = creative.link ? new URL(creative.link).hostname.replace(/^www\./, '') : ''; } catch { host = ''; }
+  return (
+    <article className="ad-card">
+      <div className="ad-card-head">
+        <div>
+          <strong>{ad.name || 'Ad'}</strong>
+          <em>{adsetName || 'Ad set'}</em>
+        </div>
+        <Badge value={String(ad.delivery || ad.status || '').toLowerCase().replace(/_/g, ' ')} />
+      </div>
+      <div className="fb-post">
+        {creative.text ? <p className="fb-text">{creative.text}</p> : null}
+        {creative.image ? <img src={creative.image} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <div className="ad-preview-empty">No image returned</div>}
+        <div className="fb-foot">
+          <div>
+            {host ? <small>{host}</small> : null}
+            <b>{creative.headline || 'No headline returned'}</b>
+          </div>
+          {creative.cta ? <span className="fb-cta">{label(creative.cta.toLowerCase())}</span> : null}
+        </div>
+      </div>
+      <StatLine row={ad} currency={currency} resultKey="leads" resultLabel="leads" />
+    </article>
+  );
+}
+
+function GoogleAdCard({ ad, groupName, currency }) {
+  let host = 'your-site.com';
+  try { if (ad.finalUrl) host = new URL(ad.finalUrl).hostname.replace(/^www\./, ''); } catch { host = 'your-site.com'; }
+  const path = [host, ad.path1, ad.path1 ? ad.path2 : ''].filter(Boolean).join('/');
+  return (
+    <article className="ad-card">
+      <div className="ad-card-head">
+        <div>
+          <strong>{ad.name || label(String(ad.type || 'ad').toLowerCase())}</strong>
+          <em>{groupName || 'Ad group'}</em>
+        </div>
+        <span className="ad-card-badges">
+          {ad.approval ? <Badge value={String(ad.approval).toLowerCase().replace(/_/g, ' ')} /> : null}
+          <Badge value={googleStatus(ad.status)} />
+        </span>
+      </div>
+      <div className="search-preview">
+        <small>Sponsored · {path}</small>
+        <b>{ad.headlines.slice(0, 3).join(' | ') || 'No headlines returned'}</b>
+        <span>{ad.descriptions.slice(0, 2).join(' ')}</span>
+      </div>
+      {ad.headlines.length > 3 || ad.descriptions.length > 2 ? (
+        <details className="ad-assets">
+          <summary>All {ad.headlines.length} headlines and {ad.descriptions.length} descriptions</summary>
+          <div className="cy-chips">{ad.headlines.map((text) => <span key={`h-${text}`} className="chip">{text}</span>)}</div>
+          <ul>{ad.descriptions.map((text) => <li key={`d-${text}`}>{text}</li>)}</ul>
+        </details>
+      ) : null}
+      <StatLine row={ad} currency={currency} resultKey="conversions" resultLabel="conversions" />
+    </article>
+  );
+}
+
+function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose }) {
+  const [range, setRange] = useState(initialRange || 'LAST_30_DAYS');
+  const [tab, setTab] = useState('Ads');
+  const [field, setField] = useState('spend');
+  const { data, loading, error, reload } = useResource(`/api/connections/${connectionId}/${brand}/campaigns/${campaign.id}?range=${range}`);
+  const meta = brand === 'meta';
+  const resultKey = meta ? 'leads' : 'conversions';
+  const resultLabel = meta ? 'leads' : 'conversions';
+  const currency = data?.currency || campaign.currency || 'INR';
+  const info = data?.campaign;
+  const daily = data?.daily || [];
+  const groups = meta ? data?.adsets || [] : data?.groups || [];
+  const groupName = new Map(groups.map((row) => [row.id, row.name]));
+  const ads = data?.ads || [];
+  const keywords = data?.keywords || [];
+  const tabs = meta ? ['Ads', 'Ad sets'] : ['Ads', 'Ad groups', 'Keywords'];
+  const counts = { Ads: ads.length, 'Ad sets': groups.length, 'Ad groups': groups.length, Keywords: keywords.length };
+
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const onKey = (event) => { if (event.key === 'Escape') closeRef.current(); };
+    document.addEventListener('keydown', onKey);
+    document.body.classList.add('has-drawer');
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.classList.remove('has-drawer');
+    };
+  }, []);
+
+  const facts = info ? [
+    ['Status', <Badge key="s" value={meta ? String(info.delivery || info.status).toLowerCase().replace(/_/g, ' ') : googleStatus(info.status)} />],
+    [meta ? 'Objective' : 'Type', label(String((meta ? info.objective : info.channel) || '').replace('OUTCOME_', '').toLowerCase()) || '—'],
+    ['Budget', info.budget ? `${money(info.budget, currency)}${info.budgetKind ? ` · ${info.budgetKind}` : ''}` : '—'],
+    [meta ? 'Schedule' : 'Bidding', meta
+      ? `${info.startTime ? day(info.startTime) : '—'}${info.stopTime ? ` to ${day(info.stopTime)}` : ' · no end date'}`
+      : label(String(info.bidding || '').toLowerCase()) || '—'],
+    ...(meta ? [] : [['Schedule', `${info.startDate ? day(info.startDate) : '—'}${info.endDate && !info.endDate.startsWith('2037') ? ` to ${day(info.endDate)}` : ' · no end date'}`]])
+  ] : [];
+
+  return (
+    <div className="drawer-layer" role="dialog" aria-modal="true" aria-label={`${campaign.name} details`}>
+      <button type="button" className="drawer-scrim" aria-label="Close" onClick={onClose} />
+      <aside className={`campaign-drawer is-${brand}`}>
+        <header className="drawer-head">
+          <span className={`ads-mark is-${brand}`} aria-hidden="true">{meta ? 'M' : 'G'}</span>
+          <div>
+            <p className="eyebrow">{meta ? 'Meta campaign' : 'Google Ads campaign'}</p>
+            <h2>{info?.name || campaign.name}</h2>
+          </div>
+          <button type="button" className="drawer-close" onClick={onClose} aria-label="Close">×</button>
+        </header>
+        <div className="drawer-body">
+          {facts.length ? (
+            <dl className="drawer-facts">
+              {facts.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}
+            </dl>
+          ) : null}
+          <div className="tabs ads-range">
+            {GOOGLE_RANGES.map(([key, text]) => (
+              <button key={key} type="button" className={range === key ? 'is-on' : ''} onClick={() => setRange(key)}>{text}</button>
+            ))}
+          </div>
+          {error ? (
+            <div className="error-box">
+              <strong>The campaign could not be loaded.</strong>
+              <p className="quiet">{error}</p>
+              <button className="btn" type="button" onClick={() => reload()}>Try again</button>
+            </div>
+          ) : null}
+          {!data && loading ? <div className="skeleton-block" aria-busy="true" /> : null}
+          {data?.notes?.length ? <p className="quiet">Some parts did not load: {data.notes.join(' · ')}</p> : null}
+          {data ? (
+            <div className={loading ? 'is-loading stack' : 'stack'}>
+              <KpiCards items={resultCards(daily, resultKey, resultLabel, currency)} />
+              <section className="drawer-section">
+                <div className="trend-head">
+                  <h3>Daily trend</h3>
+                  <div className="chip-tabs">
+                    {[['spend', 'Spend'], ['impressions', 'Impressions'], ['clicks', 'Clicks'], [resultKey, label(resultLabel)]].map(([key, text]) => (
+                      <button key={key} type="button" className={field === key ? 'is-on' : ''} onClick={() => setField(key)}>{text}</button>
+                    ))}
+                  </div>
+                </div>
+                {daily.length > 1 ? (
+                  <TrendChart
+                    points={daily}
+                    field={field}
+                    format={(value, short) => (field === 'spend' ? (short ? `₹${compact(Math.round(value))}` : money(value, currency)) : (short ? compact(Math.round(value)) : num(value)))}
+                    tooltip={(row) => [['Spend', money(row.spend, currency)], ['Impressions', num(row.impressions)], ['Clicks', num(row.clicks)], [label(resultLabel), num(row[resultKey])]]}
+                  />
+                ) : <p className="quiet">No daily delivery in this range.</p>}
+              </section>
+              <div className="tabs" role="tablist">
+                {tabs.map((item) => (
+                  <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? 'is-on' : ''} onClick={() => setTab(item)}>
+                    {item} · {num(counts[item])}
+                  </button>
+                ))}
+              </div>
+              {tab === 'Ads' ? (
+                ads.length ? (
+                  <div className="ad-cards">
+                    {ads.map((ad) => (meta
+                      ? <MetaAdCard key={ad.id} ad={ad} adsetName={groupName.get(ad.adsetId)} currency={currency} />
+                      : <GoogleAdCard key={ad.id} ad={ad} groupName={groupName.get(ad.groupId)} currency={currency} />))}
+                  </div>
+                ) : <p className="quiet">This campaign has no ads.</p>
+              ) : null}
+              {tab === 'Ad sets' ? (
+                groups.length ? (
+                  <div className="ad-cards">
+                    {groups.map((set) => (
+                      <article key={set.id} className="ad-card">
+                        <div className="ad-card-head">
+                          <div>
+                            <strong>{set.name}</strong>
+                            <em>{set.budget ? `${money(set.budget, currency)} ${set.budgetKind}` : 'Uses campaign budget'}{set.goal ? ` · ${label(set.goal.toLowerCase())}` : ''}</em>
+                          </div>
+                          <Badge value={String(set.delivery || set.status).toLowerCase().replace(/_/g, ' ')} />
+                        </div>
+                        <dl className="drawer-facts is-compact">
+                          <div><dt>Age</dt><dd>{set.targeting.age || '—'}</dd></div>
+                          <div><dt>Gender</dt><dd>{set.targeting.gender}</dd></div>
+                          <div><dt>Advantage+ audience</dt><dd>{set.targeting.advantage ? 'On' : 'Off'}</dd></div>
+                          <div><dt>Destination</dt><dd>{label(String(set.destination || '').toLowerCase()) || '—'}</dd></div>
+                        </dl>
+                        {set.targeting.places.length ? <div className="cy-chips">{set.targeting.places.map((place) => <span key={place} className="chip">{place}</span>)}</div> : null}
+                        {set.targeting.interests.length ? <div className="cy-chips">{set.targeting.interests.map((item) => <span key={item} className="chip is-soft">{item}</span>)}</div> : null}
+                        <StatLine row={set} currency={currency} resultKey="leads" resultLabel="leads" />
+                      </article>
+                    ))}
+                  </div>
+                ) : <p className="quiet">This campaign has no ad sets.</p>
+              ) : null}
+              {tab === 'Ad groups' ? (
+                <Table columns={[
+                  { key: 'name', label: 'Ad group' },
+                  { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.status)} /> },
+                  { key: 'bid', label: 'Max CPC', render: (row) => money(row.cpcBid, currency) },
+                  { key: 'spend', label: 'Spend', render: (row) => money(row.spend, currency) },
+                  { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.clicks) },
+                  { key: 'ctr', label: 'CTR', render: (row) => pct(ratio(row.clicks, row.impressions)) },
+                  { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) }
+                ]} rows={groups} />
+              ) : null}
+              {tab === 'Keywords' ? (
+                <Table columns={[
+                  { key: 'text', label: 'Keyword' },
+                  { key: 'match', label: 'Match', render: (row) => label(String(row.matchType || '').toLowerCase()) || '—' },
+                  { key: 'group', label: 'Ad group', render: (row) => groupName.get(row.groupId) || '—' },
+                  { key: 'spend', label: 'Spend', render: (row) => money(row.spend, currency) },
+                  { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.clicks) },
+                  { key: 'ctr', label: 'CTR', render: (row) => pct(ratio(row.clicks, row.impressions)) },
+                  { key: 'conversions', label: 'Conv.', render: (row) => countCell(row.conversions) }
+                ]} rows={keywords} />
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function AdsTableHead({ tabs, view, onView, counts, query, onQuery, found }) {
   return (
     <div className="cy-tab-head">
@@ -740,6 +1076,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
   const [query, setQuery] = useState('');
   const [range, setRange] = useState('LAST_30_DAYS');
   const [audienceMetric, setAudienceMetric] = useState('spend');
+  const [opened, setOpened] = useState(null);
   const { report, busy: reportBusy, error: reportError } = useAdsReport(id, 'meta', range);
   const publishMode = useRef(false);
   const editRef = useRef(null);
@@ -1042,6 +1379,16 @@ function MetaAdsManager({ id, data, canManage, reload }) {
     .map((row) => ({ label: platformNames[row.name] || label(row.name), value: Number(row.spend || 0), clicks: Number(row.clicks || 0) }))
     .sort((a, b) => b.value - a.value);
   const rangeCampaigns = rangeRows;
+  const campaignTitle = new Map(campaigns.map((row) => [row.externalId, row.name]));
+  const adsetCampaign = new Map(adsets.map((row) => [row.externalId, row.parent]));
+  function openCampaign(row) {
+    const campaignId = view === 'Report' ? row.id
+      : view === 'Ad sets' ? row.parent
+        : view === 'Ads' ? row.fields?.campaignId || adsetCampaign.get(row.parent)
+          : row.externalId;
+    if (!/^\d+$/.test(String(campaignId || ''))) return;
+    setOpened({ id: String(campaignId), name: campaignTitle.get(String(campaignId)) || row.name, currency });
+  }
   const audienceFormat = audienceMetric === 'spend' ? (value) => money(value, reportCurrency) : (value) => num(value);
 
   return (
@@ -1477,7 +1824,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
                 <h2>Top campaigns by spend</h2>
                 <p>{num(campaigns.filter((row) => row.fields?.status === 'ACTIVE').length)} of {num(campaigns.length)} active</p>
               </header>
-              <SpendBars rows={rangeCampaigns} currency={reportCurrency} resultKey="leads" resultLabel="leads" />
+              <SpendBars rows={rangeCampaigns} currency={reportCurrency} resultKey="leads" resultLabel="leads" onPick={(row) => setOpened({ id: String(row.id), name: row.name, currency: reportCurrency })} />
               <div className="status-mini">
                 <StatusMix rows={campaigns} active="ACTIVE" />
               </div>
@@ -1527,8 +1874,8 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         <p className="quiet cy-note">Campaign results for {String(GOOGLE_RANGES.find(([key]) => key === range)?.[1] || '').toLowerCase()}, live from Meta. Change the range in Performance above.</p>
       ) : null}
       {rows.length && view === 'Report' ? (
-        <Table columns={[
-          { key: 'name', label: 'Campaign' },
+        <Table onRow={openCampaign} columns={[
+          { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} /> },
           { key: 'spend', label: 'Spend', render: (row) => money(row.fields.spend, reportCurrency) },
           { key: 'impressions', label: 'Impr.', render: (row) => countCell(row.fields.impressions) },
           { key: 'reach', label: 'Reach', render: (row) => countCell(row.fields.reach) },
@@ -1539,8 +1886,8 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           { key: 'cpl', label: 'Cost / lead', render: (row) => money(ratio(row.fields.spend, row.fields.leads), reportCurrency) }
         ]} rows={rows} />
       ) : rows.length ? (
-        <Table columns={view === 'Campaigns' ? [
-          { key: 'name', label: 'Campaign' },
+        <Table onRow={openCampaign} columns={view === 'Campaigns' ? [
+          { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} /> },
           { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.status || '').toLowerCase()} /> },
           { key: 'objective', label: 'Objective', render: (row) => label(String(row.fields?.objective || '').replace('OUTCOME_', '').toLowerCase()) },
           { key: 'budget', label: 'Budget', render: (row) => money(row.fields?.budget, row.fields?.currency) },
@@ -1548,7 +1895,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           { key: 'clicks', label: 'Clicks', render: (row) => row.fields?.clicks == null || row.fields?.clicks === '' ? '—' : num(row.fields.clicks) },
           { key: 'leads', label: 'Leads', render: (row) => row.fields?.leads == null || row.fields?.leads === '' ? '—' : num(row.fields.leads) },
           { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ACTIVE' || row.fields?.status === 'PAUSED') ? (
-            <span className="page-actions">
+            <span className="page-actions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
               <button className="btn" type="button" disabled={busy} onClick={() => setEditing({ id: row.externalId, name: row.name, budget: row.fields?.budget || '', status: row.fields?.status || 'PAUSED' })}>Edit</button>
               <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE')}>
                 {row.fields.status === 'ACTIVE' ? 'Pause' : 'Turn on'}
@@ -1556,8 +1903,9 @@ function MetaAdsManager({ id, data, canManage, reload }) {
             </span>
           ) : null }
         ] : [
-          { key: 'name', label: 'Name' },
-          { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.status || '').toLowerCase()} /> },
+          { key: 'name', label: view === 'Ads' ? 'Ad' : 'Ad set', render: (row) => <CampaignName name={row.name} /> },
+          { key: 'campaign', label: 'Campaign', render: (row) => campaignTitle.get(view === 'Ad sets' ? row.parent : row.fields?.campaignId || adsetCampaign.get(row.parent)) || '—' },
+          { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.delivery || row.fields?.status || '').toLowerCase().replace(/_/g, ' ')} /> },
           ...(view === 'Ad sets' ? [{ key: 'budget', label: 'Budget', render: (row) => money(row.fields?.budget, row.fields?.currency) }] : [])
         ]} rows={rows} />
       ) : (
@@ -1567,6 +1915,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         </div>
       )}
       </section>
+      {opened ? <CampaignDrawer brand="meta" connectionId={id} campaign={opened} initialRange={range} onClose={() => setOpened(null)} /> : null}
     </div>
   );
 }
@@ -1636,6 +1985,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
   const [notice, setNotice] = useState('');
   const [range, setRange] = useState('LAST_30_DAYS');
   const { report, busy: reportBusy, error: reportError } = useAdsReport(id, 'google', range);
+  const [opened, setOpened] = useState(null);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState('');
   const publishMode = useRef(false);
@@ -1854,6 +2204,11 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
     .filter((row) => row.value > 0)
     .sort((a, b) => b.value - a.value);
   const rangeCampaigns = (report?.campaigns || []).map((row) => ({ id: row.id, name: row.name, fields: row }));
+  const groupParent = new Map(adGroups.map((row) => [row.externalId, row.parent]));
+  function openCampaign(campaignId, name) {
+    if (!/^\d+$/.test(String(campaignId || ''))) return;
+    setOpened({ id: String(campaignId), name: name || campaignName.get(String(campaignId)) || 'Campaign', currency });
+  }
 
   return (
     <div className="stack">
@@ -2116,7 +2471,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
                 <h2>Top campaigns by spend</h2>
                 <p>{GOOGLE_RANGES.find(([key]) => key === range)?.[1]}</p>
               </header>
-              <SpendBars rows={rangeCampaigns} currency={reportCurrency} resultKey="conversions" resultLabel="conv." />
+              <SpendBars rows={rangeCampaigns} currency={reportCurrency} resultKey="conversions" resultLabel="conv." onPick={(row) => openCampaign(row.id)} />
             </section>
             <section className="panel">
               <header>
@@ -2174,8 +2529,8 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
       />
       {view === 'Campaigns' ? (
         listed.Campaigns.length ? (
-          <Table columns={[
-            { key: 'name', label: 'Campaign' },
+          <Table onRow={(row) => openCampaign(row.externalId, row.name)} columns={[
+            { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} /> },
             { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> },
             { key: 'channel', label: 'Type', render: (row) => label(String(row.fields?.channel || '').toLowerCase()) || '—' },
             { key: 'budget', label: 'Daily budget', render: (row) => money(row.fields?.budget, row.fields?.currency) },
@@ -2183,7 +2538,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
             { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.fields?.clicks) },
             { key: 'conversions', label: 'Conversions', render: (row) => countCell(row.fields?.conversions) },
             { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ENABLED' || row.fields?.status === 'PAUSED') ? (
-              <span className="page-actions">
+              <span className="page-actions" onClick={(event) => event.stopPropagation()}>
                 <button className="btn" type="button" disabled={busy} onClick={() => setEditing({ id: row.externalId, name: row.name, budget: row.fields?.budget || '', status: row.fields?.status || 'PAUSED' })}>Edit</button>
                 <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ENABLED' ? 'PAUSED' : 'ENABLED')}>
                   {row.fields.status === 'ENABLED' ? 'Pause' : 'Turn on'}
@@ -2199,15 +2554,15 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
         )
       ) : null}
       {view === 'Ad groups' ? (
-        <Table columns={[
-          { key: 'name', label: 'Ad group' },
+        <Table onRow={(row) => openCampaign(row.parent)} columns={[
+          { key: 'name', label: 'Ad group', render: (row) => <CampaignName name={row.name} /> },
           { key: 'campaign', label: 'Campaign', render: (row) => campaignName.get(row.parent) || '—' },
           { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> }
         ]} rows={listed['Ad groups']} />
       ) : null}
       {view === 'Keywords' ? (
-        <Table columns={[
-          { key: 'name', label: 'Keyword' },
+        <Table onRow={(row) => openCampaign(groupParent.get(row.parent))} columns={[
+          { key: 'name', label: 'Keyword', render: (row) => <CampaignName name={row.name} /> },
           { key: 'match', label: 'Match', render: (row) => label(String(row.fields?.matchType || '').toLowerCase()) || '—' },
           { key: 'group', label: 'Ad group', render: (row) => groupName.get(row.parent) || '—' },
           { key: 'campaign', label: 'Campaign', render: (row) => groupCampaign.get(row.parent) || '—' },
@@ -2215,10 +2570,11 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
         ]} rows={listed.Keywords} />
       ) : null}
       {view === 'Ads' ? (
-        <Table columns={[
-          { key: 'name', label: 'Ad' },
+        <Table onRow={(row) => openCampaign(groupParent.get(row.parent))} columns={[
+          { key: 'name', label: 'Ad', render: (row) => <CampaignName name={row.name} /> },
           { key: 'type', label: 'Type', render: (row) => label(String(row.fields?.adType || '').toLowerCase()) || '—' },
           { key: 'group', label: 'Ad group', render: (row) => groupName.get(row.parent) || '—' },
+          { key: 'campaign', label: 'Campaign', render: (row) => groupCampaign.get(row.parent) || '—' },
           { key: 'approval', label: 'Review', render: (row) => label(String(row.fields?.approval || '').toLowerCase()) || '—' },
           { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> }
         ]} rows={listed.Ads} />
@@ -2231,8 +2587,8 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           {report && !reportBusy ? (
             <>
               <h3>Campaigns</h3>
-              <Table columns={[
-                { key: 'name', label: 'Campaign' },
+              <Table onRow={(row) => openCampaign(row.id, row.name)} columns={[
+                { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} /> },
                 { key: 'spend', label: 'Spend', render: (row) => money(row.spend, report.currency || currency) },
                 { key: 'impressions', label: 'Impr.', render: (row) => countCell(row.impressions) },
                 { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.clicks) },
@@ -2263,6 +2619,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
         </div>
       ) : null}
       </section>
+      {opened ? <CampaignDrawer brand="google" connectionId={id} campaign={opened} initialRange={range} onClose={() => setOpened(null)} /> : null}
     </div>
   );
 }
@@ -3025,7 +3382,7 @@ export function ConnectionDetail() {
   return (
     <Page
       eyebrow={data ? `Connections / ${label(data.category)}` : 'Connections'}
-      title={data?.name || 'Connection'}
+      title={meta && data?.accountLabel && data.accountLabel !== data.name ? `${data.name} · ${data.accountLabel}` : data?.name || 'Connection'}
       lede={google
         ? 'Create Search campaigns, manage them, and read reports for the connected Google Ads account.'
         : metaOnly ? 'Create the campaign, ad set, and ad here, then publish them to the connected Meta account.'
@@ -3048,8 +3405,9 @@ export function ConnectionDetail() {
               </p>
             ) : null}
             {callYatri ? <CallYatriView key={data.lastSyncAt || 'never'} data={data} canManage={can('connections.manage')} /> : null}
-            {metaOnly ? <MetaAdsManager id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
-            {google ? <GoogleAdsManager id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
+            {meta ? <AdAccountBar provider={google ? 'google' : 'meta'} current={id} accounts={data.accounts || []} canManage={can('connections.manage')} /> : null}
+            {metaOnly ? <MetaAdsManager key={id} id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
+            {google ? <GoogleAdsManager key={id} id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
             {!meta && !callYatri && data.webhookPath ? (
               <section className="panel">
                 <h2>Webhook</h2>

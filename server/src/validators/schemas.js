@@ -44,6 +44,8 @@ export const assignSchema = body({ userId: z.number().int().positive() });
 
 export const idParams = params({ id: z.coerce.number().int().positive() });
 
+export const campaignParams = params({ id: z.coerce.number().int().positive(), campaignId: z.string().regex(/^\d{1,25}$/) });
+
 const callEmployee = z.object({
   employeeId: z.union([z.string(), z.number()]).transform(String).pipe(z.string().min(1).max(40)),
   employeeName: z.string().trim().min(1).max(160)
@@ -164,12 +166,26 @@ const googleId = z.string().regex(/^\d{1,20}$/);
 const googleDay = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal('')]).optional();
 const googleStatus = z.enum(['ENABLED', 'PAUSED']);
 
+const oauthConnectionId = z.coerce.number().int().positive().optional();
+
+export const oauthStartSchema = body({
+  target: z.union([z.literal('new'), z.coerce.number().int().positive()]).optional()
+});
+
+export const oauthAccountsQuery = z.object({
+  body: z.any(),
+  params: z.any(),
+  query: z.object({ connection: oauthConnectionId })
+});
+
 export const metaAccountSchema = body({
-  accountId: z.string().regex(/^(act_)?\d{5,20}$/i)
+  accountId: z.string().regex(/^(act_)?\d{5,20}$/i),
+  connectionId: oauthConnectionId
 });
 
 export const googleAccountSchema = body({
-  customerId: z.string().regex(/^\d{3}-?\d{3}-?\d{4}$/)
+  customerId: z.string().regex(/^\d{3}-?\d{3}-?\d{4}$/),
+  connectionId: oauthConnectionId
 });
 
 export const googleStatusSchema = body({

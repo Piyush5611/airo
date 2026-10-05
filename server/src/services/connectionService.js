@@ -1,9 +1,9 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { CATEGORIES } from '../domain/providers.js';
-import { createGoogleSearchCampaign, editGoogleCampaign, exchangeGoogleCode, googleAuthUrl, googleKeywordIdeas, googleReport, listGoogleAccounts, pullGoogleAds, searchGoogleLanguages, setGoogleCampaignStatus, suggestGoogleLocations, verifyGoogleAccount } from '../integrations/googleAds.js';
+import { createGoogleSearchCampaign, editGoogleCampaign, exchangeGoogleCode, googleAuthUrl, googleCampaignDetail, googleKeywordIdeas, googleReport, listGoogleAccounts, pullGoogleAds, searchGoogleLanguages, setGoogleCampaignStatus, suggestGoogleLocations, verifyGoogleAccount } from '../integrations/googleAds.js';
 import { cleanNexcallKey, nexcallBase, nexcallCallReport, nexcallCalls, nexcallFollowups, nexcallLeads, NEXCALL_BASE, NEXCALL_DESCRIPTION, NEXCALL_ENDPOINTS, NEXCALL_MAPPING, pullNexcall, verifyNexcall } from '../integrations/nexcall.js';
-import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, exchangeMetaCode, listAdInstagram, listMetaAdAccounts, listMetaPages, listMetaPixels, listPageInstagram, metaAuthUrl, metaReport, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
+import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, editMetaCampaign, exchangeMetaCode, listAdInstagram, listMetaAdAccounts, listMetaPages, listMetaPixels, listPageInstagram, metaAuthUrl, metaCampaignDetail, metaReport, pullMetaAds, searchMetaAudience, setMetaCampaignStatus, verifyMetaAccount } from '../integrations/metaAds.js';
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
@@ -61,8 +61,28 @@ function publicConnection(row) {
     apiKeyStored: Boolean(preview),
     apiLive: live,
     apiKeyPreview: preview,
+    accountId: MULTI_ACCOUNT.has(connection.providerKey) ? secret?.accountId || null : null,
     linked
   };
+}
+
+const MULTI_ACCOUNT = new Set(['meta_ads', 'google_ads']);
+
+function accountKey(value) {
+  return String(value || '').replace(/^act_/i, '').replace(/-/g, '');
+}
+
+async function providerRows(organizationId, providerKey) {
+  return (await repo.list(organizationId)).filter((item) => item.providerKey === providerKey);
+}
+
+async function takenAccounts(organizationId, providerKey, exceptId) {
+  const rows = await providerRows(organizationId, providerKey);
+  return new Set(rows
+    .filter((row) => row.id !== exceptId)
+    .map((row) => ({ row, secret: readSecret(row.ciphertext) }))
+    .filter(({ row, secret }) => isLinked(row, secret) && secret.accountId)
+    .map(({ secret }) => accountKey(secret.accountId)));
 }
 
 export async function index(auth) {
@@ -73,11 +93,17 @@ export async function index(auth) {
       ...category,
       providers: providers
         .filter((provider) => provider.category === category.key)
-        .map((provider) => ({
-          ...provider,
-          connection: connections.find((item) => item.providerKey === provider.providerKey) || null,
-          connected: connections.some((item) => item.providerKey === provider.providerKey)
-        }))
+        .map((provider) => {
+          const own = connections.filter((item) => item.providerKey === provider.providerKey);
+          const accounts = own.filter((item) => item.linked);
+          return {
+            ...provider,
+            multiAccount: MULTI_ACCOUNT.has(provider.providerKey),
+            accounts,
+            connection: accounts[0] || own[0] || null,
+            connected: own.length > 0
+          };
+        })
     })),
     connections
   };
@@ -95,6 +121,13 @@ export async function detail(auth, id) {
   ]);
   const canManage = auth.permissions?.includes('connections.manage');
   const storedSecret = readSecret((await repo.credential(connection.id))?.ciphertext);
+  const accounts = MULTI_ACCOUNT.has(connection.providerKey)
+    ? (await repo.list(auth.organizationId))
+        .filter((row) => row.providerKey === connection.providerKey)
+        .map(publicConnection)
+        .filter((row) => row.linked || row.id === connection.id)
+        .map((row) => ({ id: row.id, accountLabel: row.accountLabel, accountId: row.accountId, linked: row.linked }))
+    : [];
   return {
     id: connection.id,
     status: connection.status,
@@ -114,6 +147,8 @@ export async function detail(auth, id) {
     errors,
     records: connection.providerKey === 'nexcall' ? [] : objects.map(liveRecord).filter(Boolean),
     linked: isLinked(connection, storedSecret),
+    accountId: MULTI_ACCOUNT.has(connection.providerKey) ? storedSecret?.accountId || null : null,
+    accounts,
     tokenExpiresAt: storedSecret?.tokenExpiresAt || null,
     webhookPath: canManage && token ? `/api/hooks/${token}` : null,
     tool: connection.providerKey === 'nexcall' ? await nexcallTool(id, connection.mode) : null
@@ -335,7 +370,23 @@ async function credentialPreview(connection) {
   return 'No API key is stored. Sync uses the development adapter.';
 }
 
-async function ensureConnection(auth, req, provider) {
+async function ensureConnection(auth, req, provider, accountId = '') {
+  if (MULTI_ACCOUNT.has(provider.providerKey)) {
+    const rows = await providerRows(auth.organizationId, provider.providerKey);
+    const wanted = accountKey(accountId);
+    const target = rows.find((row) => wanted && accountKey(readSecret(row.ciphertext)?.accountId) === wanted)
+      || rows.find((row) => !isLinked(row, readSecret(row.ciphertext)));
+    if (target) {
+      if (target.status !== 'connected') await repo.setStatus(auth.organizationId, target.id, 'connected');
+      return target.id;
+    }
+    return repo.createConnection({
+      organizationId: auth.organizationId,
+      providerId: provider.id,
+      status: 'connected',
+      accountLabel: req.body.accountLabel || provider.name
+    });
+  }
   const existing = (await repo.list(auth.organizationId)).find((item) => item.providerKey === provider.providerKey);
   if (existing && existing.status !== 'disconnected') return existing.id;
   if (existing) {
@@ -390,7 +441,7 @@ export async function saveProviderApi(auth, req) {
   } else {
     await verifyProviderKey({ providerKey: provider.providerKey, apiKey, baseUrl });
   }
-  const id = await ensureConnection(auth, req, provider);
+  const id = await ensureConnection(auth, req, provider, accountId);
   if (provider.providerKey === 'nexcall') {
     const url = nexcallBase(baseUrl || NEXCALL_BASE);
     await repo.saveCredential(id, encryptJson({ mode: 'live', provider: 'nexcall', apiKey, baseUrl: url, verified: true }));
@@ -581,6 +632,11 @@ export async function metaReportFor(auth, id, range) {
   return metaReport({ apiKey: secret.apiKey, accountId: secret.accountId }, range);
 }
 
+export async function metaCampaignFor(auth, id, campaignId, range) {
+  const secret = await metaSecret(auth, id);
+  return metaCampaignDetail({ apiKey: secret.apiKey, accountId: secret.accountId }, campaignId, range);
+}
+
 export async function createMetaCampaign(auth, req, id) {
   const secret = await metaSecret(auth, id);
   await createOnMeta({
@@ -701,9 +757,17 @@ function oauthStateSecret(providerKey) {
   return `${env.jwtSecret}:${providerKey}_oauth`;
 }
 
-function oauthStart(auth, providerKey, buildUrl) {
+async function oauthStart(auth, providerKey, buildUrl, requested) {
+  let target = null;
+  if (requested === 'new') target = 'new';
+  else if (requested != null && requested !== '') {
+    const id = Number(requested);
+    const row = Number.isInteger(id) ? (await providerRows(auth.organizationId, providerKey)).find((item) => item.id === id) : null;
+    if (!row) throw new ApiError(404, 'Connection not found.', 'not_found');
+    target = id;
+  }
   const state = jwt.sign(
-    { purpose: providerKey, organizationId: auth.organizationId, userId: auth.userId },
+    { purpose: providerKey, organizationId: auth.organizationId, userId: auth.userId, target },
     oauthStateSecret(providerKey),
     { expiresIn: '10m' }
   );
@@ -727,7 +791,14 @@ async function oauthCallback(req, providerKey, exchange) {
     const pending = await exchange(code);
     const provider = await repo.findProvider(providerKey);
     if (!provider) return fail('This provider is not in the provider list.');
-    const existing = (await repo.list(state.organizationId)).find((item) => item.providerKey === providerKey);
+    const rows = await providerRows(state.organizationId, providerKey);
+    let existing = rows[0];
+    if (state.target === 'new') {
+      existing = rows.find((row) => !isLinked(row, readSecret(row.ciphertext)));
+    } else if (state.target) {
+      existing = rows.find((row) => row.id === state.target);
+      if (!existing) return fail('This connection was removed. Start again from Connections.');
+    }
     const id = existing?.id || await repo.createConnection({
       organizationId: state.organizationId,
       providerId: provider.id,
@@ -748,19 +819,36 @@ async function oauthCallback(req, providerKey, exchange) {
       resourceId: id,
       organizationId: state.organizationId
     });
-    return `${CONNECTIONS_BACK}&${flag}=pick`;
+    return `${CONNECTIONS_BACK}&${flag}=pick&connection=${id}`;
   } catch (error) {
     return fail(error.message);
   }
 }
 
-async function oauthRow(auth, providerKey) {
-  const row = (await repo.list(auth.organizationId)).find((item) => item.providerKey === providerKey);
+async function oauthRow(auth, providerKey, connectionId) {
+  const rows = await providerRows(auth.organizationId, providerKey);
+  const wanted = Number(connectionId);
+  const row = wanted
+    ? rows.find((item) => item.id === wanted)
+    : rows.find((item) => readSecret(item.ciphertext)?.pendingToken) || rows[0];
   const secret = row ? readSecret(row.ciphertext) || {} : {};
   const token = secret.pendingToken || secret.apiKey;
   if (!row || !token) throw new ApiError(422, `Sign in with ${OAUTH[providerKey].label} first.`, 'validation_error');
   const fresh = Boolean(secret.pendingToken);
-  return { id: row.id, token, expiresAt: fresh ? secret.pendingExpiresAt || null : secret.tokenExpiresAt || null, oauth: fresh || Boolean(secret.oauth) };
+  return {
+    id: row.id,
+    token,
+    previousAccountId: secret.accountId || '',
+    expiresAt: fresh ? secret.pendingExpiresAt || null : secret.tokenExpiresAt || null,
+    oauth: fresh || Boolean(secret.oauth)
+  };
+}
+
+async function claimAccount(auth, providerKey, id, previousAccountId, accountId) {
+  if ((await takenAccounts(auth.organizationId, providerKey, id)).has(accountKey(accountId))) {
+    throw new ApiError(422, 'This ad account is already connected in AIRO. Open it from Connections.', 'validation_error');
+  }
+  if (previousAccountId && accountKey(previousAccountId) !== accountKey(accountId)) await repo.clearObjects(id);
 }
 
 function googleInput(secret) {
@@ -790,39 +878,47 @@ async function syncWithNotice(auth, req, id, done) {
   return synced;
 }
 
-export function googleStart(auth) {
-  return oauthStart(auth, 'google_ads', googleAuthUrl);
+export function googleStart(auth, target) {
+  return oauthStart(auth, 'google_ads', googleAuthUrl, target);
 }
 
 export function googleCallback(req) {
   return oauthCallback(req, 'google_ads', async (code) => ({ token: await exchangeGoogleCode(code) }));
 }
 
-export async function googleAccounts(auth) {
-  const { token } = await oauthRow(auth, 'google_ads');
-  return listGoogleAccounts({ refreshToken: token });
+export async function googleAccounts(auth, connectionId) {
+  const { id, token } = await oauthRow(auth, 'google_ads', connectionId);
+  const listed = await listGoogleAccounts({ refreshToken: token });
+  const taken = await takenAccounts(auth.organizationId, 'google_ads', id);
+  return { ...listed, connectionId: id, accounts: (listed.accounts || []).map((account) => ({ ...account, taken: taken.has(accountKey(account.id)) })) };
 }
 
-export function metaStart(auth) {
-  return oauthStart(auth, 'meta_ads', metaAuthUrl);
+export function metaStart(auth, target) {
+  return oauthStart(auth, 'meta_ads', metaAuthUrl, target);
 }
 
 export function metaCallback(req) {
   return oauthCallback(req, 'meta_ads', exchangeMetaCode);
 }
 
-export async function metaAccounts(auth) {
-  const { token } = await oauthRow(auth, 'meta_ads');
+export async function metaAccounts(auth, connectionId) {
+  const { id, token } = await oauthRow(auth, 'meta_ads', connectionId);
   const accounts = await listMetaAdAccounts({ apiKey: token });
-  return { accounts, note: accounts.length ? '' : 'Facebook returned no ad accounts for this login. Give this login access to the ad account in Meta Business Settings.' };
+  const taken = await takenAccounts(auth.organizationId, 'meta_ads', id);
+  return {
+    connectionId: id,
+    accounts: accounts.map((account) => ({ ...account, taken: taken.has(accountKey(account.id)) })),
+    note: accounts.length ? '' : 'Facebook returned no ad accounts for this login. Give this login access to the ad account in Meta Business Settings.'
+  };
 }
 
 export async function chooseMetaAccount(auth, req) {
-  const { id, token, expiresAt, oauth } = await oauthRow(auth, 'meta_ads');
+  const { id, token, expiresAt, oauth, previousAccountId } = await oauthRow(auth, 'meta_ads', req.body.connectionId);
   const wanted = `act_${req.body.accountId.replace(/^act_/i, '')}`;
   const chosen = (await listMetaAdAccounts({ apiKey: token })).find((account) => account.id === wanted);
   if (!chosen) throw new ApiError(422, 'This Facebook login cannot open that ad account.', 'validation_error');
   await verifyMetaAccount({ apiKey: token, accountId: chosen.id });
+  await claimAccount(auth, 'meta_ads', id, previousAccountId, chosen.id);
   await repo.saveCredential(id, encryptJson({
     mode: 'live',
     provider: 'meta_ads',
@@ -847,12 +943,13 @@ export async function chooseMetaAccount(auth, req) {
 }
 
 export async function chooseGoogleAccount(auth, req) {
-  const { id, token: refreshToken } = await oauthRow(auth, 'google_ads');
+  const { id, token: refreshToken, previousAccountId } = await oauthRow(auth, 'google_ads', req.body.connectionId);
   const wanted = req.body.customerId.replace(/-/g, '');
   const listed = await listGoogleAccounts({ refreshToken });
   const chosen = listed.accounts.find((account) => account.id === wanted);
   if (!chosen) throw new ApiError(422, listed.note || 'This Google login cannot open that ad account.', 'validation_error');
   const account = await verifyGoogleAccount({ refreshToken, accountId: chosen.id, loginCustomerId: chosen.loginCustomerId });
+  await claimAccount(auth, 'google_ads', id, previousAccountId, chosen.id);
   await repo.saveCredential(id, encryptJson({
     mode: 'live',
     provider: 'google_ads',
@@ -905,6 +1002,11 @@ export async function googleIdeas(auth, req, id) {
 export async function googleReportFor(auth, id, range) {
   const input = await googleSecret(auth, id);
   return googleReport(input, range);
+}
+
+export async function googleCampaignFor(auth, id, campaignId, range) {
+  const input = await googleSecret(auth, id);
+  return googleCampaignDetail(input, campaignId, range);
 }
 
 export async function createGoogleCampaign(auth, req, id) {

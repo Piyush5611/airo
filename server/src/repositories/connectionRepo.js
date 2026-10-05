@@ -12,7 +12,7 @@ export function list(organizationId) {
      JOIN integration_providers p ON p.id = c.provider_id
      LEFT JOIN integration_credentials cred ON cred.connection_id = c.id
      WHERE c.organization_id = ?
-     ORDER BY p.category, p.name`,
+     ORDER BY p.category, p.name, c.id`,
     [organizationId]
   );
 }
@@ -96,6 +96,10 @@ export function deleteObjects(connectionId, types) {
     `DELETE FROM integration_objects WHERE connection_id = ? AND object_type IN (${marks})`,
     [connectionId, ...types]
   );
+}
+
+export function clearObjects(connectionId) {
+  return run(`DELETE FROM integration_objects WHERE connection_id = ?`, [connectionId]);
 }
 
 export function upsertObject(row) {

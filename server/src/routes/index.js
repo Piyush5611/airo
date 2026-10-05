@@ -180,6 +180,9 @@ client.post('/connections/:id/meta/pages', requirePermission('connections.manage
 client.get('/connections/:id/meta/report', requirePermission('connections.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.metaReportFor(req.auth, req.params.id, String(req.query.range || 'LAST_30_DAYS')));
 }));
+client.get('/connections/:id/meta/campaigns/:campaignId', requirePermission('connections.view'), validate(schemas.campaignParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.metaCampaignFor(req.auth, req.params.id, String(req.params.campaignId || ''), String(req.query.range || 'LAST_30_DAYS')));
+}));
 client.get('/connections/:id/meta/audience', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.metaAudienceSearch(req.auth, req.params.id, req.query.kind, req.query.q));
 }));
@@ -201,20 +204,20 @@ client.post('/connections/:id/meta/edit', requirePermission('connections.manage'
 client.post('/connections/:id/meta/status', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.metaStatusSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.updateMetaCampaignStatus(req.auth, req, req.params.id));
 }));
-client.post('/connections/meta/start', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
-  ok(res, connections.metaStart(req.auth));
+client.post('/connections/meta/start', requirePermission('connections.manage'), validate(schemas.oauthStartSchema), asyncHandler(async (req, res) => {
+  ok(res, await connections.metaStart(req.auth, req.body.target));
 }));
-client.get('/connections/meta/accounts', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
-  ok(res, await connections.metaAccounts(req.auth));
+client.get('/connections/meta/accounts', requirePermission('connections.manage'), validate(schemas.oauthAccountsQuery), asyncHandler(async (req, res) => {
+  ok(res, await connections.metaAccounts(req.auth, req.query.connection));
 }));
 client.post('/connections/meta/account', requirePermission('connections.manage'), validate(schemas.metaAccountSchema), asyncHandler(async (req, res) => {
   ok(res, await connections.chooseMetaAccount(req.auth, req));
 }));
-client.post('/connections/google/start', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
-  ok(res, connections.googleStart(req.auth));
+client.post('/connections/google/start', requirePermission('connections.manage'), validate(schemas.oauthStartSchema), asyncHandler(async (req, res) => {
+  ok(res, await connections.googleStart(req.auth, req.body.target));
 }));
-client.get('/connections/google/accounts', requirePermission('connections.manage'), asyncHandler(async (req, res) => {
-  ok(res, await connections.googleAccounts(req.auth));
+client.get('/connections/google/accounts', requirePermission('connections.manage'), validate(schemas.oauthAccountsQuery), asyncHandler(async (req, res) => {
+  ok(res, await connections.googleAccounts(req.auth, req.query.connection));
 }));
 client.post('/connections/google/account', requirePermission('connections.manage'), validate(schemas.googleAccountSchema), asyncHandler(async (req, res) => {
   ok(res, await connections.chooseGoogleAccount(req.auth, req));
@@ -230,6 +233,9 @@ client.post('/connections/:id/google/ideas', requirePermission('connections.mana
 }));
 client.get('/connections/:id/google/report', requirePermission('connections.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.googleReportFor(req.auth, req.params.id, String(req.query.range || 'LAST_30_DAYS')));
+}));
+client.get('/connections/:id/google/campaigns/:campaignId', requirePermission('connections.view'), validate(schemas.campaignParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.googleCampaignFor(req.auth, req.params.id, String(req.params.campaignId || ''), String(req.query.range || 'LAST_30_DAYS')));
 }));
 client.post('/connections/:id/google/campaigns', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.googleCampaignSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.createGoogleCampaign(req.auth, req, req.params.id), 201);

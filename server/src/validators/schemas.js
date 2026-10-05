@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { businessProfileSchema, launchEditSchema } from '../domain/adsAgent.js';
 
 const body = (shape) => z.object({ body: z.object(shape), query: z.any(), params: z.any() });
 const params = (shape) => z.object({ body: z.any(), query: z.any(), params: z.object(shape) });
@@ -55,6 +56,20 @@ export const adsAgentSettingsSchema = body({
   minSpendForDecision: z.coerce.number().min(0).max(100000000),
   killSwitch: z.boolean()
 });
+
+export const businessProfileBody = body(businessProfileSchema.shape);
+
+export const launchCreateSchema = body({
+  strategyId: z.number().int().positive(),
+  platform: z.enum(['meta', 'google']),
+  connectionId: z.number().int().positive().optional()
+});
+
+export const launchEditBody = idParams.merge(body(launchEditSchema.shape));
+
+export const launchPausedBody = idParams.merge(body({
+  imageBase64: z.string().min(100).max(4000000).optional()
+}));
 
 export const adsAgentSyncSchema = body({
   range: z.enum(['LAST_7_DAYS', 'LAST_30_DAYS']).optional()

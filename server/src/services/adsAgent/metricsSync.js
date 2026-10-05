@@ -15,7 +15,7 @@ function number(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function adConnections(organizationId) {
+export async function adConnections(organizationId) {
   const found = [];
   for (const { providerKey, platform } of PLATFORMS) {
     const rows = await liveConnections(providerKey);

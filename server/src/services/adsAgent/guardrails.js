@@ -29,6 +29,21 @@ export function normalizeSettings(row) {
   };
 }
 
+// Owner-approved launches skip the agent mode and action count, but still respect the kill switch and spend caps.
+export function checkLaunch({ dailyBudget, settings, spendToday = 0, spendMonth = 0 }) {
+  const rules = normalizeSettings(settings);
+  const reasons = [];
+  const budget = amount(dailyBudget);
+  if (!(budget > 0)) reasons.push('Set a daily budget.');
+  if (rules.killSwitch) reasons.push('Kill switch is on. Turn it off in guardrails first.');
+  if (budget > 0 && rules.dailySpendCap != null && budget > rules.dailySpendCap) {
+    reasons.push(`Daily budget ${budget} is above the daily spend cap (${rules.dailySpendCap}).`);
+  }
+  if (rules.dailySpendCap != null && spendToday >= rules.dailySpendCap) reasons.push('Daily spend cap already reached today.');
+  if (rules.monthlySpendCap != null && spendMonth >= rules.monthlySpendCap) reasons.push('Monthly spend cap already reached.');
+  return { allowed: reasons.length === 0, reasons };
+}
+
 // Pausing lowers spend, so caps never block it. Anything that can raise spend is checked against every cap.
 export function checkAction(action, { settings, actionsToday = 0, spendToday = 0, spendMonth = 0 }) {
   const rules = normalizeSettings(settings);

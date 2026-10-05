@@ -275,7 +275,7 @@ async function adModels() {
   return attempts;
 }
 
-export async function structuredLlm({ organizationId = null, schema, system, facts, task }) {
+export async function structuredLlm({ organizationId = null, schema, system, facts, task, maxTokens = 4096 }) {
   const attempts = await adModels();
   if (!attempts.length) throw new ApiError(422, 'Connect an AI model for Ad writing on Platform AI first.', 'llm_missing');
   const brief = `${system}\nReply with one JSON object only. No markdown and no text outside the JSON.`;
@@ -292,7 +292,9 @@ export async function structuredLlm({ organizationId = null, schema, system, fac
           baseUrl: attempt.row.baseUrl || '',
           messages,
           facts,
-          system: brief
+          system: brief,
+          maxTokens,
+          maxChars: 24000
         });
       } catch (error) {
         lastError = error;

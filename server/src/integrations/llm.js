@@ -118,10 +118,10 @@ async function postJson(url, headers, body) {
   return data;
 }
 
-function replyText(value) {
+function replyText(value, limit = 8000) {
   const text = String(value || '').trim();
   if (!text) throw new ApiError(502, 'The model returned an empty reply.', 'llm_empty');
-  return text.slice(0, 8000);
+  return text.slice(0, limit);
 }
 
 const ASSISTANT_BRIEF = `You are the AIRO assistant.
@@ -163,7 +163,7 @@ function hasDevanagari(text) {
   return /[\u0900-\u097F]/.test(String(text || ''));
 }
 
-async function completeLlm({ provider, model, apiKey, baseUrl, system, turns }) {
+async function completeLlm({ provider, model, apiKey, baseUrl, system, turns, maxTokens = 1024 }) {
   if (provider === 'openai') {
     const origin = httpsOrigin(baseUrl, 'https://api.openai.com');
     const data = await postJson(`${origin}/v1/chat/completions`, { Authorization: `Bearer ${apiKey}` }, {
@@ -179,7 +179,7 @@ async function completeLlm({ provider, model, apiKey, baseUrl, system, turns }) 
       'anthropic-version': '2023-06-01'
     }, {
       model,
-      max_tokens: 1024,
+      max_tokens: maxTokens,
       system,
       messages: turns
     });
@@ -203,7 +203,7 @@ async function completeLlm({ provider, model, apiKey, baseUrl, system, turns }) 
   return parts.map((part) => part.text || '').join('');
 }
 
-export async function replyLlm({ provider, model, apiKey, baseUrl, messages, facts, system }) {
+export async function replyLlm({ provider, model, apiKey, baseUrl, messages, facts, system, maxTokens, maxChars }) {
   if (!PROVIDERS[provider]) throw new ApiError(422, 'Choose a model provider.', 'validation_error');
   const brief = `${system || ASSISTANT_BRIEF}\n\nStatus from AIRO just now:\n${facts || 'No status was loaded.'}`;
   const turns = messages
@@ -213,7 +213,7 @@ export async function replyLlm({ provider, model, apiKey, baseUrl, messages, fac
   if (!turns.length || turns.at(-1).role !== 'user') {
     throw new ApiError(422, 'Type a message first.', 'validation_error');
   }
-  const call = { provider, model, apiKey, baseUrl };
+  const call = { provider, model, apiKey, baseUrl, maxTokens };
   let text = await completeLlm({ ...call, system: brief, turns });
   if (hasDevanagari(text)) {
     const fixed = await completeLlm({
@@ -223,7 +223,7 @@ export async function replyLlm({ provider, model, apiKey, baseUrl, messages, fac
     });
     if (!hasDevanagari(fixed)) text = fixed;
   }
-  return replyText(text);
+  return replyText(text, maxChars);
 }
 
 export async function verifyLlm({ provider, model, apiKey, baseUrl, manual }) {

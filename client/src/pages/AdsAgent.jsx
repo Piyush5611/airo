@@ -3,7 +3,11 @@ import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { ago, day, num } from '../format.js';
-import { Badge, LineChart, Page, State, Table } from '../ui.jsx';
+import { Badge, LineChart, Page, State, Subnav, Table, useSection } from '../ui.jsx';
+import { ProfileForm, StrategyPanel } from './AdsStrategy.jsx';
+import { LaunchPanel } from './AdsLaunch.jsx';
+
+const SECTIONS = ['Performance', 'Business profile', 'Strategy', 'Launch'];
 
 const MODES = [
   { key: 'off', label: 'Off', note: 'The agent does nothing.' },
@@ -129,6 +133,7 @@ export function AdsAgent() {
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState('');
   const canManage = can('campaigns.update');
+  const [section, setSection] = useSection(SECTIONS);
 
   async function sync() {
     setSyncing(true);
@@ -154,7 +159,7 @@ export function AdsAgent() {
       eyebrow="Growth"
       title="AI Ads Agent"
       lede={data?.lastSyncedAt ? `Real numbers from your ad accounts. Last synced ${ago(data.lastSyncedAt)}.` : 'Real numbers from your ad accounts, synced every 3 hours.'}
-      actions={(
+      actions={section !== 'Performance' ? null : (
         <>
           <select value={days} onChange={(event) => setDays(Number(event.target.value))} aria-label="Range">
             <option value={7}>Last 7 days</option>
@@ -165,8 +170,12 @@ export function AdsAgent() {
         </>
       )}
     >
-      {syncNote ? <p className="quiet">{syncNote}</p> : null}
-      <State loading={loading} error={error} onRetry={reload}>
+      <Subnav items={SECTIONS} value={section} onChange={setSection} />
+      {section === 'Business profile' ? <ProfileForm canManage={canManage} /> : null}
+      {section === 'Strategy' ? <StrategyPanel canManage={canManage} /> : null}
+      {section === 'Launch' ? <LaunchPanel canManage={canManage} /> : null}
+      {section === 'Performance' && syncNote ? <p className="quiet">{syncNote}</p> : null}
+      {section === 'Performance' ? <State loading={loading} error={error} onRetry={reload}>
         {data && !data.ready ? <div className="empty"><strong>Ads agent is not set up</strong><p className="quiet">{data.note}</p></div> : null}
         {data?.ready ? (
           <div className="stack">
@@ -211,7 +220,7 @@ export function AdsAgent() {
             </div>
           </div>
         ) : null}
-      </State>
+      </State> : null}
     </Page>
   );
 }

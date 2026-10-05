@@ -136,6 +136,137 @@ export function actionsToday(organizationId) {
   );
 }
 
+export function profile(organizationId) {
+  return one(`SELECT profile, updated_at AS updatedAt FROM business_profiles WHERE organization_id = ?`, [organizationId]);
+}
+
+export function saveProfile(organizationId, userId, value) {
+  return run(
+    `INSERT INTO business_profiles (organization_id, profile, updated_by) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE profile = VALUES(profile), updated_by = VALUES(updated_by)`,
+    [organizationId, JSON.stringify(value), userId]
+  );
+}
+
+export function strategies(organizationId, limit) {
+  return many(
+    `SELECT id, version, status, profile_snapshot AS profileSnapshot, metrics_snapshot AS metricsSnapshot, strategy, model,
+            created_at AS createdAt, approved_at AS approvedAt
+     FROM ad_strategies WHERE organization_id = ? ORDER BY version DESC LIMIT ?`,
+    [organizationId, limit]
+  );
+}
+
+export function strategy(organizationId, id) {
+  return one(`SELECT id, version, status FROM ad_strategies WHERE organization_id = ? AND id = ?`, [organizationId, id]);
+}
+
+export async function addStrategy(row) {
+  const next = await one(`SELECT COALESCE(MAX(version), 0) + 1 AS version FROM ad_strategies WHERE organization_id = ?`, [row.organizationId]);
+  const id = await insert(
+    `INSERT INTO ad_strategies (organization_id, version, status, profile_snapshot, metrics_snapshot, strategy, model, created_by)
+     VALUES (?, ?, 'draft', ?, ?, ?, ?, ?)`,
+    [
+      row.organizationId,
+      next.version,
+      JSON.stringify(row.profile),
+      row.metrics ? JSON.stringify(row.metrics) : null,
+      JSON.stringify(row.strategy),
+      row.model || null,
+      row.userId || null
+    ]
+  );
+  return { id, version: next.version };
+}
+
+export async function approveStrategy(organizationId, id, userId) {
+  await run(`UPDATE ad_strategies SET status = 'archived' WHERE organization_id = ? AND status = 'approved' AND id <> ?`, [organizationId, id]);
+  return run(
+    `UPDATE ad_strategies SET status = 'approved', approved_by = ?, approved_at = UTC_TIMESTAMP() WHERE organization_id = ? AND id = ?`,
+    [userId, organizationId, id]
+  );
+}
+
+export function archiveStrategy(organizationId, id) {
+  return run(`UPDATE ad_strategies SET status = 'archived' WHERE organization_id = ? AND id = ?`, [organizationId, id]);
+}
+
+export function approvedStrategy(organizationId, id) {
+  return one(
+    `SELECT id, version, status, profile_snapshot AS profileSnapshot, strategy
+     FROM ad_strategies WHERE organization_id = ? AND id = ? AND status = 'approved'`,
+    [organizationId, id]
+  );
+}
+
+export function spendNow(organizationId) {
+  return one(
+    `SELECT COALESCE(SUM(CASE WHEN metric_date = CURDATE() THEN spend END), 0) AS spendToday,
+            COALESCE(SUM(spend), 0) AS spendMonth
+     FROM ad_metrics_daily
+     WHERE organization_id = ? AND level = 'campaign' AND metric_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')`,
+    [organizationId]
+  );
+}
+
+const LAUNCH_FIELDS = `id, strategy_id AS strategyId, platform, connection_id AS connectionId, status, creative, settings,
+  external_campaign_id AS externalCampaignId, error, model, created_at AS createdAt, updated_at AS updatedAt,
+  launched_at AS launchedAt, published_at AS publishedAt`;
+
+export function launches(organizationId, limit) {
+  return many(`SELECT ${LAUNCH_FIELDS} FROM ad_launches WHERE organization_id = ? ORDER BY id DESC LIMIT ?`, [organizationId, limit]);
+}
+
+export function launch(organizationId, id) {
+  return one(`SELECT ${LAUNCH_FIELDS} FROM ad_launches WHERE organization_id = ? AND id = ?`, [organizationId, id]);
+}
+
+export function addLaunch(row) {
+  return insert(
+    `INSERT INTO ad_launches (organization_id, strategy_id, platform, connection_id, creative, settings, model, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [row.organizationId, row.strategyId, row.platform, row.connectionId, JSON.stringify(row.creative), JSON.stringify(row.settings), row.model || null, row.userId || null]
+  );
+}
+
+export function updateLaunchDraft(organizationId, id, { creative, settings }) {
+  return run(
+    `UPDATE ad_launches SET creative = ?, settings = ?, error = NULL WHERE organization_id = ? AND id = ? AND status = 'draft'`,
+    [JSON.stringify(creative), JSON.stringify(settings), organizationId, id]
+  );
+}
+
+export function setLaunchError(organizationId, id, error) {
+  return run(`UPDATE ad_launches SET error = ? WHERE organization_id = ? AND id = ?`, [String(error || '').slice(0, 400), organizationId, id]);
+}
+
+export function markLaunchCreated(organizationId, id, campaignId, userId) {
+  return run(
+    `UPDATE ad_launches SET status = 'created', external_campaign_id = ?, error = NULL, launched_by = ?, launched_at = UTC_TIMESTAMP()
+     WHERE organization_id = ? AND id = ? AND status = 'draft'`,
+    [campaignId, userId, organizationId, id]
+  );
+}
+
+export function markLaunchPublished(organizationId, id, userId) {
+  return run(
+    `UPDATE ad_launches SET status = 'published', error = NULL, published_by = ?, published_at = UTC_TIMESTAMP()
+     WHERE organization_id = ? AND id = ? AND status = 'created'`,
+    [userId, organizationId, id]
+  );
+}
+
+export function cancelLaunch(organizationId, id) {
+  return run(`UPDATE ad_launches SET status = 'cancelled' WHERE organization_id = ? AND id = ? AND status = 'draft'`, [organizationId, id]);
+}
+
+export function setDecisionStatus(organizationId, id, status, extra = {}) {
+  return run(
+    `UPDATE ai_decisions SET status = ?, error = ?, outcome = ? WHERE organization_id = ? AND id = ?`,
+    [status, extra.error ? String(extra.error).slice(0, 300) : null, extra.outcome ? JSON.stringify(extra.outcome) : null, organizationId, id]
+  );
+}
+
 export async function claimJob(jobKey, minutes) {
   await run(`INSERT IGNORE INTO agent_jobs (job_key) VALUES (?)`, [jobKey]);
   const result = await run(

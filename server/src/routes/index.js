@@ -16,6 +16,8 @@ import * as whatsapp from '../services/whatsappService.js';
 import * as llm from '../services/llmService.js';
 import * as metaWebhook from '../services/metaWebhookService.js';
 import * as adsAgent from '../services/adsAgent/agentService.js';
+import * as adsStrategy from '../services/adsAgent/strategyService.js';
+import * as adsLaunch from '../services/adsAgent/launchService.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -126,6 +128,36 @@ client.put('/ads-agent/settings', requirePermission('campaigns.update'), validat
 }));
 client.post('/ads-agent/sync', requirePermission('campaigns.update'), validate(schemas.adsAgentSyncSchema), asyncHandler(async (req, res) => {
   ok(res, await adsAgent.syncNow(req.auth, req));
+}));
+client.get('/ads-agent/profile', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsStrategy.getProfile(req.auth))));
+client.put('/ads-agent/profile', requirePermission('campaigns.update'), validate(schemas.businessProfileBody), asyncHandler(async (req, res) => {
+  ok(res, await adsStrategy.saveProfile(req.auth, req));
+}));
+client.get('/ads-agent/strategies', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsStrategy.listStrategies(req.auth))));
+client.post('/ads-agent/strategies', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
+  ok(res, await adsStrategy.generateStrategy(req.auth, req), 201);
+}));
+client.post('/ads-agent/strategies/:id/approve', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await adsStrategy.setStrategyStatus(req.auth, req, req.params.id, 'approved'));
+}));
+client.post('/ads-agent/strategies/:id/archive', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await adsStrategy.setStrategyStatus(req.auth, req, req.params.id, 'archived'));
+}));
+client.get('/ads-agent/launches', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsLaunch.listLaunches(req.auth))));
+client.post('/ads-agent/launches', requirePermission('campaigns.update'), validate(schemas.launchCreateSchema), asyncHandler(async (req, res) => {
+  ok(res, await adsLaunch.createLaunch(req.auth, req), 201);
+}));
+client.patch('/ads-agent/launches/:id', requirePermission('campaigns.update'), validate(schemas.launchEditBody), asyncHandler(async (req, res) => {
+  ok(res, await adsLaunch.updateLaunch(req.auth, req, req.params.id));
+}));
+client.post('/ads-agent/launches/:id/create', requirePermission('campaigns.update', 'connections.manage'), validate(schemas.launchPausedBody), asyncHandler(async (req, res) => {
+  ok(res, await adsLaunch.createPaused(req.auth, req, req.params.id));
+}));
+client.post('/ads-agent/launches/:id/publish', requirePermission('campaigns.update', 'connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await adsLaunch.publish(req.auth, req, req.params.id));
+}));
+client.post('/ads-agent/launches/:id/cancel', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await adsLaunch.cancel(req.auth, req, req.params.id));
 }));
 client.get('/pipeline', requirePermission('pipeline.view'), asyncHandler(async (req, res) => ok(res, await sales.pipeline(req.auth))));
 client.get('/pipeline/:id', requirePermission('pipeline.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {

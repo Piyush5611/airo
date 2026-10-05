@@ -6,6 +6,8 @@ import {
   budgetTotal, campaignFindings, experimentFindings, experimentGroups, mergeQuality, pacingFindings, qualityFindings,
   scaleBudgets, scaleFindings, splitWindows, zScore
 } from '../services/adsAgent/monitorRules.js';
+import { chosenNames, hasProfileDetails, intakeFacts } from '../services/adsAgent/chatPlanner.js';
+import { competitorTopic, libraryStats, wantsCompetitorInfo } from '../services/adsAgent/competitorResearch.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 
 const profile = businessProfileSchema.parse({
@@ -263,4 +265,45 @@ test('scaling picks campaigns far cheaper than the account average, never with a
   assert.deepEqual(scaleFindings(list, { settings: rules, profile: { targetCpl: 300, currency: 'INR' }, today: TODAY }), []);
   const poor = new Map([['cheap', { crmLeads: 20, qualifiedRate: 5 }]]);
   assert.deepEqual(scaleFindings(list, { settings: rules, profile: null, today: TODAY, quality: poor }), []);
+});
+
+test('whatsapp city replies pick suggestions by ok, numbers, or names', () => {
+  const suggested = ['Noida', 'Greater Noida', 'Ghaziabad'];
+  assert.deepEqual(chosenNames('ok', suggested), suggested);
+  assert.deepEqual(chosenNames('1, 3', suggested), ['Noida', 'Ghaziabad']);
+  assert.deepEqual(chosenNames('1 2 9', suggested), ['Noida', 'Greater Noida']);
+  assert.deepEqual(chosenNames('Delhi, Gurgaon aur Faridabad', suggested), ['Delhi', 'Gurgaon', 'Faridabad']);
+  assert.deepEqual(chosenNames('Pune', []), ['Pune']);
+});
+
+test('chat facts use the business profile and never add empty lines', () => {
+  assert.equal(hasProfileDetails(null), false);
+  assert.equal(hasProfileDetails({ usps: ['Near metro'] }), true);
+  const facts = intakeFacts({ product: '2bhk flats', details: 'Possession 2027', website: '' }, { businessName: 'Test Homes', usps: ['Near metro'] });
+  assert.ok(facts.includes('Business name: Test Homes'));
+  assert.ok(facts.includes('Selling points: Near metro'));
+  assert.ok(facts.includes('Website: none'));
+  assert.ok(facts.every((line) => line.length > 0));
+});
+
+test('competitor questions are detected and reduced to a search topic', () => {
+  assert.equal(wantsCompetitorInfo('What competitors do'), true);
+  assert.equal(wantsCompetitorInfo('competitors kya run kr rahe hai'), true);
+  assert.equal(wantsCompetitorInfo('haan'), false);
+  assert.equal(competitorTopic('What competitors do'), '');
+  assert.equal(competitorTopic('competitors kya chala rahe hai saya raj nagar project pe'), 'saya raj nagar');
+  assert.equal(competitorTopic('competitors 2bhk flats noida'), '2bhk flats noida');
+});
+
+test('ad library stats count advertisers and platform share', () => {
+  const stats = libraryStats([
+    { pageId: '1', page: 'A Homes', platforms: ['facebook', 'instagram'], startDate: '2026-09-01' },
+    { pageId: '1', page: 'A Homes', platforms: ['instagram'], startDate: '2026-08-01' },
+    { pageId: '2', page: 'B Realty', platforms: ['facebook'], startDate: '' }
+  ]);
+  assert.equal(stats.ads, 3);
+  assert.equal(stats.advertisers.length, 2);
+  assert.deepEqual(stats.advertisers[0], { page: 'A Homes', count: 2, firstStart: '2026-08-01' });
+  assert.equal(stats.platforms.instagram, 2);
+  assert.equal(stats.platforms.facebook, 2);
 });

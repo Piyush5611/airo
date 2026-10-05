@@ -938,6 +938,33 @@ export async function searchPublicAds({ apiKey, query }) {
   }
 }
 
+export async function adLibrarySearch({ apiKey, query, limit = 50 }) {
+  const term = String(query || '').trim().slice(0, 80);
+  if (term.length < 2) return { ads: [], error: 'no_term' };
+  try {
+    const data = await graph('ads_archive', apiKey, {
+      search_terms: term,
+      ad_type: 'ALL',
+      ad_reached_countries: JSON.stringify(['IN']),
+      ad_active_status: 'ACTIVE',
+      fields: 'page_id,page_name,ad_creative_bodies,ad_creative_link_titles,ad_creative_link_descriptions,publisher_platforms,ad_delivery_start_time',
+      limit: String(Math.min(100, Math.max(1, limit)))
+    });
+    const ads = (data.data || []).map((row) => ({
+      pageId: String(row.page_id || ''),
+      page: String(row.page_name || '').slice(0, 80),
+      title: String((row.ad_creative_link_titles || [])[0] || '').slice(0, 100),
+      text: String((row.ad_creative_bodies || [])[0] || '').slice(0, 300),
+      description: String((row.ad_creative_link_descriptions || [])[0] || '').slice(0, 150),
+      platforms: (row.publisher_platforms || []).map((item) => String(item).toLowerCase()),
+      startDate: String(row.ad_delivery_start_time || '').slice(0, 10)
+    })).filter((row) => row.page || row.title || row.text);
+    return { ads, error: '' };
+  } catch {
+    return { ads: [], error: 'library_failed' };
+  }
+}
+
 export async function listAdInstagram({ apiKey, accountId }) {
   const rows = await safeList(`act_${actId(accountId)}/instagram_accounts`, apiKey, { fields: 'id,username', limit: '50' });
   return rows

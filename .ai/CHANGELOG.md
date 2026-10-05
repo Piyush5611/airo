@@ -2,6 +2,26 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (WhatsApp message design)
+
+- **Change:** New `services/adsAgent/waFormat.js` with WhatsApp formatting helpers: `header`, `section`, `bullets`, `numbered`, `field`, `options` (quote block), `hint` (italic), `step` ("Step 2/5"), `money` (₹ for INR) and `LINE`. Google and Meta chat prompts, region suggestions, plans, saved/paused/live messages and competitor research now use one card layout. The text and flow logic are unchanged. Meta fallback copy uses the same plan layout.
+
+### 2026-10-06 (WhatsApp competitor research)
+
+- **Change:** New `services/adsAgent/competitorResearch.js`. In `whatsappService.answerWithModel`, an owner message about competitors (competitor, competition, rival, ad library) is answered before the Google and Meta draft handlers, so it also works while a draft waits for approval. The draft is not changed.
+- **Change (same day):** Meta: new `adLibrarySearch` (integrations/metaAds.js) reads up to 50 active ads for the topic, with page, headline, text, description, platforms and start date. The reply shows advertiser count, ads per advertiser, oldest running ad, platform share and 3 sample ads. For India the Meta API only returns social issue, election and politics ads, so normal business ads usually come back empty. The reply then says so and gives the Ad Library link.
+- **Change (same day):** Google: Keyword Planner competition (HIGH/MEDIUM count, monthly searches, top-of-page bid range). Google exposes no API for competitor advertisers or ad copy, so the reply links the Ads Transparency Center, using a domain link for competitors in the business profile. No Google-to-Meta advertiser ratio is shown because neither number is available honestly.
+- **Migration/API impact:** None.
+
+### 2026-10-06 (WhatsApp ad chat planner)
+
+- **Change:** New `services/adsAgent/chatPlanner.js`, used by `googleAdChat.js` and `metaAdChat.js`. The facts now include the saved business profile plus a new optional `details` step (price, offer, USPs). That step is skipped when the profile already has selling points, an offering or prices.
+- **Change (same day):** `suggestTargeting` (zod-validated LLM output) suggests 1-6 cities, age and gender, Meta interest seeds, Google keyword seeds, negatives and selling points taken from the facts only. The region step shows numbered cities. The owner can reply ok, numbers like 1,2, or their own cities. The cities are resolved on Meta (`searchMetaAudience`) or Google (`suggestGoogleLocations`), and anything not found is reported.
+- **Change (same day):** Google plans use Keyword Planner ideas from the seeds, product, cities and website, ranked by monthly searches. `writeGoogleCopy` returns 10-15 unique headlines, 3-4 descriptions, path1/path2, keywords (only from those ideas, with EXACT and PHRASE match) and negatives. Negatives and paths are now sent to `createGoogleSearchCampaign`, and `negatives:` edits are supported.
+- **Change (same day):** Meta interests come from AI seeds checked with Meta search (up to 6). Age and gender come from the suggestion only when there is no special category. `writeMetaCopy` writes 2-3 angle variants. Variants 1 and 2 are created as an A/B test in the same ad set (`creativeTest`), and `use 3` swaps a variant in.
+- **Fallback:** If the model fails, the old copy writers (`writeGoogleAdPlan`, `writeAdPlan`) and the first-15 keyword ideas are used. Older drafts keep working (`region_pick`).
+- **Migration/API impact:** None.
+
 ### 2026-10-06 (AI Ads Agent, phase 7)
 
 - **Change:** Experiments and scaling. Migration `019_ad_level_metrics.sql` adds `campaign_external_id` and `adset_external_id` to `ad_metrics_daily`. The Meta sync also saves ad-level daily rows (`metaAdDailyStats`, own paging up to about 5,500 rows, saved in chunks of 500). Every campaign query still filters `level = 'campaign'`.

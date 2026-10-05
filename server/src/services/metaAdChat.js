@@ -6,6 +6,10 @@ import { upsertObject } from '../repositories/connectionRepo.js';
 import { recordAudit } from './auditService.js';
 import { writeAdPlan } from './llmService.js';
 import { clearGoogleDraft } from './googleAdChat.js';
+import { LINE, bullets, card, field, header, hint, money, numbered, options, section, step as fmtStep } from './adsAgent/waFormat.js';
+import {
+  businessProfile, chosenNames, hasProfileDetails, resolveMetaCities, resolveMetaInterests, suggestTargeting, writeMetaCopy
+} from './adsAgent/chatPlanner.js';
 
 const START = /\b(run|start|launch|chalao|chala|banao)\b.{0,40}\bmeta\b|\bmeta\s+ads?\b.{0,24}\b(run|start|launch|chalao|chala|banao)\b/i;
 const OTHER_ADS = /\b(linkedin|youtube)\b.{0,24}\bads?\b|\b(run|start|launch|chalao|chala|banao)\b.{0,40}\b(linkedin|youtube)\b/i;
@@ -196,14 +200,14 @@ function planFromModel(text, intake) {
 
 function researchLines(note, ads, english) {
   if (!ads.length) {
-    return say(
+    return hint(say(
       english,
       note || 'Public competitor ads could not be read. I will not guess them.',
       note || 'Public competitor ads padhe nahi ja sake. Main unhe guess nahi karunga.'
-    );
+    ));
   }
-  const rows = ads.slice(0, 5).map((ad) => `- ${[ad.page, ad.title].filter(Boolean).join(': ') || ad.text}`);
-  return say(english, `Public ads found:\n${rows.join('\n')}`, `Public ads mile:\n${rows.join('\n')}`);
+  const rows = ads.slice(0, 5).map((ad) => [ad.page, ad.title].filter(Boolean).join(': ') || ad.text);
+  return section(say(english, 'Public ads found', 'Public ads mile'), bullets(rows));
 }
 
 function checkedImage(raw) {
@@ -222,11 +226,16 @@ function sharedPhoto(text, imageBase64, imageError) {
 }
 
 function imageAsk(english) {
-  return say(
-    english,
-    'Send the ad photo in this chat. JPG or PNG, under 2 MB. An https link also works. Reply skip to leave the ad for later, or cancel to stop.',
-    'Ad ki photo isi chat mein bhejo. JPG ya PNG, 2 MB se kam. https link bhi chalega. Baad mein rakhne ke liye skip likho, band karne ke liye cancel.'
-  );
+  return card([
+    section(say(english, 'Next: send the ad photo', 'Ab ad ki photo bhejo'), [
+      hint(say(english, 'JPG or PNG under 2 MB, in this chat. An https image link also works.', 'JPG ya PNG, 2 MB se kam, isi chat mein. https image link bhi chalega.'))
+    ]),
+    options([
+      [say(english, 'photo', 'photo'), say(english, 'create the paused ad', 'paused ad bana do')],
+      ['skip', say(english, 'save without photo for now', 'abhi bina photo save karo')],
+      ['cancel', say(english, 'stop this setup', 'setup band karo')]
+    ])
+  ]);
 }
 
 async function downloadImage(url) {
@@ -364,13 +373,14 @@ async function begin(organizationId, conversationId, text) {
   const payload = { lang: english ? 'en' : 'hi', sample: text.slice(0, 80) };
   await clearGoogleDraft(conversationId);
   await saveDraft(organizationId, conversationId, 'category', payload);
-  return {
-    text: say(
-      english,
-      'I am the AIRO assistant. What should the ad sell? Example: real estate, 2BHK flats.',
-      'I am the AIRO assistant. Ad kis cheez ka hai? Example: real estate, 2BHK flats.'
-    )
-  };
+  return { text: intakePrompt('category', english, payload) };
+}
+
+function publishOptions(english) {
+  return section(say(english, 'Publish now?', 'Ab publish karein?'), options([
+    ['haan', say(english, 'turn it on', 'on kar do')],
+    ['nahi', say(english, 'keep it paused', 'paused rehne do')]
+  ]));
 }
 
 function applyObjective(payload, objective) {
@@ -393,6 +403,7 @@ function nextIntake(payload) {
   if (!payload.category) return 'category';
   if (!payload.product) return 'product';
   if (!payload.website && !payload.noWebsite) return 'website';
+  if (!payload.detailsDone) return 'details';
   if (!payload.region && !(Array.isArray(payload.locations) && payload.locations.length)) return 'region';
   if (!payload.dailyBudget) return 'budget';
   if (!payload.objectiveKey) return 'objective';
@@ -401,32 +412,77 @@ function nextIntake(payload) {
 }
 
 function intakePrompt(step, english, payload) {
-  if (step === 'category') return say(english, 'What should the ad sell? Example: real estate, 2BHK flats.', 'Ad kis cheez ka hai? Example: real estate, 2BHK flats.');
-  if (step === 'product') return say(english, 'What product or service should the ad sell?', 'Product ya service kya hai?');
+  if (step === 'category') {
+    return card([
+      header('Meta Ad Setup', say(english, 'Facebook + Instagram · 5 quick steps', 'Facebook + Instagram · 5 chhote steps')),
+      fmtStep(1, 5, 'Product', say(english, 'What should the ad sell?', 'Ad kis cheez ka hai?'), 'Example: 2BHK flats in Noida, salon, coaching classes')
+    ]);
+  }
+  if (step === 'product') return fmtStep(1, 5, 'Product', say(english, 'What product or service should the ad sell?', 'Product ya service kya hai?'));
   if (step === 'website') {
-    return say(
-      english,
-      'Send the website link, starting with https. If there is no website, say no website.',
-      'Website link bhejo, https se. Website nahi hai to no website likho.'
+    return fmtStep(
+      2, 5, 'Website',
+      say(english, 'Send the website link.', 'Website link bhejo.'),
+      say(english, 'Starts with https://  ·  no website? reply no website', 'https:// se shuru  ·  website nahi hai? no website likho')
     );
   }
-  if (step === 'region') {
-    return payload?.noWebsite
-      ? say(english, 'No website is fine. The ad will use this business Facebook Page. Which city should it target? Or say all India.', 'Website nahi hai to theek hai. Ad is business ki Facebook Page use karegi. Kaunsi city target karni hai? Ya all India likho.')
-      : say(english, 'Which city should this ad target? Or say all India.', 'Kaunsi city target karni hai? Ya all India likho.');
+  if (step === 'details') {
+    return fmtStep(
+      3, 5, say(english, 'What makes it special', 'Khaas kya hai'),
+      card([
+        say(english, 'Strong ads need real selling points. Tell me any of these:', 'Achhe ads ke liye asli selling points chahiye. Inme se jo ho batao:'),
+        bullets(say(english, ['Price or range', 'Offer', 'Location advantages', 'Experience or trust', 'Amenities or features'], ['Price ya range', 'Offer', 'Location ke fayde', 'Experience ya trust', 'Amenities ya features']))
+      ]),
+      say(english, 'Or reply skip', 'Ya skip likho')
+    );
   }
-  if (step === 'budget') return say(english, 'Daily budget and objective. Example: 500 leads.', 'Daily budget aur objective. Example: 500 leads.');
+  const noSite = payload?.noWebsite ? hint(say(english, 'No website is fine, the ad will use the Facebook Page.', 'Website nahi hai to theek hai, ad Facebook Page use karegi.')) : '';
+  if (step === 'region' && payload?.suggestion?.cities?.length) {
+    const s = payload.suggestion;
+    const gender = s.gender === 'all' ? say(english, 'everyone', 'sab') : s.gender;
+    return card([
+      `*Step 4/5 · ${say(english, 'Audience', 'Audience')}*`,
+      noSite,
+      section(say(english, 'AI suggested cities', 'AI suggested cities'), numbered(s.cities)),
+      section(say(english, 'AI suggested audience', 'AI suggested audience'), [field('Age', `${s.ageMin}-${s.ageMax}`), field('Gender', gender)]),
+      s.why ? hint(`${say(english, 'Why', 'Kyun')}: ${s.why}`) : '',
+      section(say(english, 'Reply with', 'Reply karo'), options([
+        ['ok', say(english, 'use all cities', 'sab cities use karo')],
+        ['1,2', say(english, 'pick by number', 'number se chuno')],
+        ['Delhi, Pune', say(english, 'your own cities', 'apni cities')],
+        ['all India', say(english, 'whole country', 'poora desh')]
+      ]))
+    ]);
+  }
+  if (step === 'region') {
+    return card([noSite, fmtStep(4, 5, say(english, 'Cities', 'Cities'), say(english, 'Which cities should this ad target?', 'Kaunsi cities target karni hain?'), say(english, 'Separate with commas, or reply all India', 'Comma se alag likho, ya all India'))]);
+  }
+  if (step === 'budget') {
+    return fmtStep(
+      5, 5, say(english, 'Budget and goal', 'Budget aur goal'),
+      card([
+        say(english, 'Send the daily budget and what you want:', 'Roz ka budget aur goal bhejo:'),
+        bullets(say(english, ['*leads* - enquiries with name and phone', '*appointments* - bookings or visits', '*sales* - ecommerce orders'], ['*leads* - naam aur phone wali enquiries', '*appointments* - booking ya visit', '*sales* - ecommerce orders']))
+      ]),
+      say(english, 'Example: 500 leads', 'Example: 500 leads')
+    );
+  }
   if (step === 'objective') {
-    return say(english, 'What is the objective: leads, appointments, or ecommerce sales?', 'Objective kya hai: leads, appointments, ya ecommerce sales?');
+    return card([
+      `*${say(english, 'What is the goal?', 'Goal kya hai?')}*`,
+      options([['leads', say(english, 'enquiries', 'enquiries')], ['appointments', say(english, 'bookings or visits', 'booking ya visit')], ['sales', say(english, 'ecommerce orders', 'ecommerce orders')]])
+    ]);
   }
   if (step === 'shop') {
-    return say(english, 'Ecommerce sales need an https shop link. Send that link, or reply leads or appointments.', 'Ecommerce sales ke liye https shop link chahiye. Link bhejo, ya leads ya appointments likho.');
+    return card([
+      say(english, 'Ecommerce sales need an https shop link.', 'Ecommerce sales ke liye https shop link chahiye.'),
+      options([['https://...', say(english, 'your shop link', 'aapka shop link')], ['leads', say(english, 'switch to enquiries', 'enquiries pe switch')], ['appointments', say(english, 'switch to bookings', 'booking pe switch')]])
+    ]);
   }
-  return say(
-    english,
-    'Special ad category: reply housing, employment, credit, or issues. If this is not one of those, reply none.',
-    'Special ad category: housing, employment, credit, ya issues. Inme se nahi hai to none likho.'
-  );
+  return card([
+    `*Special ad category*`,
+    options([['housing', 'real estate'], ['employment', 'jobs'], ['credit', 'loans, cards'], ['issues', 'politics, social'], ['none', say(english, 'none of these', 'inme se koi nahi')]])
+  ]);
 }
 
 function rememberedSite(payload, messages) {
@@ -454,8 +510,19 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
   const english = langOf(draft, text);
   const payload = { ...draft.payload, lang: english ? 'en' : 'hi' };
   const ask = (step, message) => saveDraft(organizationId, conversationId, step, payload, draft.campaignId).then(() => ({ text: message }));
-  const goNext = () => {
-    const step = nextIntake(payload);
+  const goNext = async () => {
+    let step = nextIntake(payload);
+    if (step === 'details' && hasProfileDetails(await businessProfile(organizationId))) {
+      payload.detailsDone = true;
+      step = nextIntake(payload);
+    }
+    if (step === 'region' && !payload.suggestion) {
+      const suggestion = await suggestTargeting({ organizationId, payload, profile: await businessProfile(organizationId), platform: 'meta' });
+      if (suggestion) {
+        payload.suggestion = suggestion;
+        payload.sellingPoints = suggestion.sellingPoints;
+      }
+    }
     if (step === 'ready') {
       if (!payload.specialCategory) payload.specialCategory = impliedSpecial(`${payload.category} ${payload.product}`);
       return choosePage(organizationId, conversationId, payload, english);
@@ -463,12 +530,24 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
     return ask(step, intakePrompt(step, english, payload));
   };
 
+  if (draft.step === 'details') {
+    payload.details = /^(skip|no|nahi|nahin|none)\b/i.test(text) ? '' : text.slice(0, 500);
+    payload.detailsDone = true;
+    return goNext();
+  }
+
   if (draft.step === 'category') {
     if (text.length < 2) {
       return { text: say(english, 'Tell me what the ad should sell.', 'Ad kis cheez ka hai, woh likho.') };
     }
     payload.category = text.slice(0, 80);
     payload.product = text.slice(0, 120);
+    const site = httpsWebsite(text);
+    if (site) {
+      payload.website = site;
+      payload.noWebsite = false;
+      return goNext();
+    }
     return ask('website', intakePrompt('website', english, payload));
   }
   if (draft.step === 'product') {
@@ -581,7 +660,7 @@ async function pickRegion(organizationId, conversationId, payload, text, english
     payload.region = 'India';
     payload.locations = [];
     await saveDraft(organizationId, conversationId, 'budget', payload);
-    return { text: say(english, 'Daily budget and objective. Example: 500 leads.', 'Daily budget aur objective. Example: 500 leads.') };
+    return { text: intakePrompt('budget', english, payload) };
   }
   let choices = step === 'region_pick' && Array.isArray(payload.locationChoices) ? payload.locationChoices : [];
   if (step === 'region_pick') {
@@ -592,7 +671,25 @@ async function pickRegion(organizationId, conversationId, payload, text, english
     payload.locations = [{ key: picked.key, name: picked.name, radiusMode: 'city' }];
     delete payload.locationChoices;
     await saveDraft(organizationId, conversationId, 'budget', payload);
-    return { text: say(english, 'Daily budget and objective. Example: 500 leads.', 'Daily budget aur objective. Example: 500 leads.') };
+    return { text: intakePrompt('budget', english, payload) };
+  }
+  const names = chosenNames(text, payload.suggestion?.cities || []);
+  if (names.length > 1 || payload.suggestion?.cities?.length) {
+    const { found, missing } = await resolveMetaCities(account.apiKey, names);
+    if (!found.length) {
+      return { text: say(english, 'Meta did not find those cities. Send other cities, or say all India.', 'Meta ko ye cities nahi mili. Doosri cities bhejo, ya all India likho.') };
+    }
+    payload.locations = found.map(({ key, name, radiusMode }) => ({ key, name, radiusMode }));
+    payload.region = found.map((city) => (city.region ? `${city.name}, ${city.region}` : city.name)).join('; ');
+    await saveDraft(organizationId, conversationId, 'budget', payload);
+    return {
+      text: card([
+        section(say(english, 'Cities set', 'Cities set'), bullets(found.map((city) => (city.region ? `${city.name}, ${city.region}` : city.name)))),
+        missing.length ? hint(say(english, `Not found on Meta: ${missing.join(', ')}`, `Meta pe nahi mili: ${missing.join(', ')}`)) : '',
+        LINE,
+        intakePrompt('budget', english, payload)
+      ])
+    };
   }
   try {
     choices = await searchMetaAudience({ apiKey: account.apiKey, kind: 'city', query: text });
@@ -605,7 +702,7 @@ async function pickRegion(organizationId, conversationId, payload, text, english
     payload.region = picked.region ? `${picked.name}, ${picked.region}` : picked.name;
     payload.locations = [{ key: picked.key, name: picked.name, radiusMode: 'city' }];
     await saveDraft(organizationId, conversationId, 'budget', payload);
-    return { text: say(english, 'Daily budget and objective. Example: 500 leads.', 'Daily budget aur objective. Example: 500 leads.') };
+    return { text: intakePrompt('budget', english, payload) };
   }
   if (choices.length > 1) {
     payload.locationChoices = choices.slice(0, 5);
@@ -646,14 +743,43 @@ async function buildPlan(organizationId, conversationId, payload, english) {
   const library = await searchPublicAds({ apiKey: account.apiKey, query: payload.product || payload.category });
   payload.publicNote = library.note || '';
   payload.publicAds = library.ads.slice(0, 5);
-  let interests = [];
-  try {
-    const found = await searchMetaAudience({ apiKey: account.apiKey, kind: 'interest', query: payload.category });
-    interests = found.slice(0, 3);
-  } catch {
-    interests = [];
+  const suggestion = payload.suggestion;
+  let interests = suggestion?.interestSeeds?.length ? await resolveMetaInterests(account.apiKey, suggestion.interestSeeds) : [];
+  if (!interests.length) {
+    try {
+      const found = await searchMetaAudience({ apiKey: account.apiKey, kind: 'interest', query: payload.category });
+      interests = found.slice(0, 3);
+    } catch {
+      interests = [];
+    }
   }
   payload.interests = interests;
+  if (suggestion && !payload.specialCategory) {
+    if (!payload.ageMin) payload.ageMin = suggestion.ageMin;
+    if (!payload.ageMax) payload.ageMax = suggestion.ageMax;
+    if (!payload.gender && suggestion.gender !== 'all') payload.gender = suggestion.gender;
+  }
+  try {
+    const copy = await writeMetaCopy({
+      organizationId,
+      payload,
+      profile: await businessProfile(organizationId),
+      publicAds: payload.publicAds,
+      english
+    });
+    payload.variants = copy.variants;
+    payload.headline = copy.variants[0].headline;
+    payload.message = copy.variants[0].primaryText;
+    payload.headlineB = copy.variants[1]?.headline || '';
+    payload.messageB = copy.variants[1]?.primaryText || '';
+    payload.strategy = copy.strategy;
+    await saveDraft(organizationId, conversationId, 'image', payload);
+    return { text: metaPlanText(payload, english) };
+  } catch {
+    payload.variants = [];
+    payload.headlineB = '';
+    payload.messageB = '';
+  }
   let plan;
   try {
     const written = await writeAdPlan({
@@ -681,38 +807,87 @@ async function buildPlan(organizationId, conversationId, payload, english) {
   payload.message = plan.message;
   payload.strategy = plan.strategy;
   payload.cta = plan.cta || payload.cta;
+  payload.variants = [{ angle: '', headline: payload.headline, primaryText: payload.message }];
   await saveDraft(organizationId, conversationId, 'image', payload);
-  const interestLine = interests.length
-    ? say(english, `Interests Meta returned: ${interests.map((item) => item.name).join(', ')}.`, `Meta interests: ${interests.map((item) => item.name).join(', ')}.`)
-    : say(english, 'Meta did not return an interest for this category, so none is attached.', 'Is category ke liye Meta ne interest nahi diya, isliye interest attach nahi hai.');
-  return {
-    text: [
-      say(english, 'I am the AIRO assistant. Here is the Meta plan. It is not published yet.', 'I am the AIRO assistant. Yeh Meta plan hai. Abhi publish nahi hua.'),
-      researchLines(payload.publicNote, payload.publicAds, english),
-      say(english, `Strategy: ${payload.strategy}`, `Strategy: ${payload.strategy}`),
-      say(
-        english,
-        `Page ${payload.pageName}. Objective ${payload.objectiveLabel}. Daily budget ${payload.dailyBudget}. Region ${payload.region}. ${payload.website ? `Website ${payload.website}` : 'No website, so the ad uses the Facebook Page.'} Special category ${payload.specialCategory || 'none'}.`,
-        `Page ${payload.pageName}. Objective ${payload.objectiveLabel}. Daily budget ${payload.dailyBudget}. Region ${payload.region}. ${payload.website ? `Website ${payload.website}` : 'Website nahi hai, isliye ad Facebook Page use karegi.'} Special category ${payload.specialCategory || 'none'}.`
-      ),
-      interestLine,
-      `Headline: ${payload.headline}`,
-      `Text: ${payload.message}`,
-      say(
-        english,
-        `${imageAsk(true)} To change the copy first, send it as: headline | ad text`,
-        `${imageAsk(false)} Copy badalni ho to pehle aise bhejo: headline | ad text`
-      )
-    ].join('\n')
-  };
+  return { text: metaPlanText(payload, english) };
+}
+
+function audienceFields(payload, english) {
+  if (payload.specialCategory) {
+    return [
+      field(say(english, 'Locations', 'Locations'), payload.region),
+      hint(say(english, `Special category ${payload.specialCategory}: Meta decides age and gender.`, `Special category ${payload.specialCategory}: age aur gender Meta decide karega.`))
+    ];
+  }
+  const gender = payload.gender === 'men' ? 'men' : payload.gender === 'women' ? 'women' : say(english, 'everyone', 'sab');
+  return [
+    field(say(english, 'Locations', 'Locations'), payload.region),
+    field('Age', `${payload.ageMin || 18}-${payload.ageMax || 65}`),
+    field('Gender', gender),
+    field('Advantage+ audience', 'on')
+  ];
+}
+
+function variantBlock(item, index, total, english) {
+  const role = total > 1 && index === 0 ? say(english, 'main ad', 'main ad') : total > 1 && index === 1 ? say(english, 'A/B test', 'A/B test') : total > 2 ? say(english, 'backup', 'backup') : '';
+  return [
+    `*${say(english, 'Variant', 'Variant')} ${index + 1}*${item.angle ? ` · ${item.angle}` : ''}${role ? `  _(${role})_` : ''}`,
+    `> *${item.headline}*`,
+    ...String(item.primaryText).split(/\n+/).map((line) => `> ${line}`)
+  ].join('\n');
+}
+
+function metaPlanText(payload, english) {
+  const interests = payload.interests || [];
+  const variants = payload.variants?.length ? payload.variants : [{ angle: '', headline: payload.headline, primaryText: payload.message }];
+  return card([
+    header('Meta Ad Plan', say(english, 'Facebook + Instagram · draft, not published', 'Facebook + Instagram · draft, abhi publish nahi')),
+    section('Strategy', payload.strategy),
+    section('Setup', [
+      field('Page', payload.pageName),
+      field(say(english, 'Goal', 'Goal'), payload.objectiveLabel),
+      field(say(english, 'Daily budget', 'Daily budget'), money(payload.dailyBudget, payload.currency)),
+      field('Website', payload.website || say(english, 'none, uses the Facebook Page', 'nahi, Facebook Page use hogi'))
+    ]),
+    section('Audience', audienceFields(payload, english)),
+    section(
+      say(english, 'Interests', 'Interests'),
+      interests.length
+        ? [hint(say(english, 'Checked on Meta', 'Meta pe check kiye')), interests.map((item) => item.name).join(' · ')]
+        : hint(say(english, 'Meta returned no matching interest, so targeting stays broad.', 'Meta ne matching interest nahi diya, isliye targeting broad rahegi.'))
+    ),
+    researchLines(payload.publicNote, payload.publicAds, english),
+    section(say(english, 'Ad copy', 'Ad copy'), variants.map((item, index) => variantBlock(item, index, variants.length, english)).join('\n\n')),
+    variants.length > 1 ? hint(say(english, 'Variants 1 and 2 run as an A/B test in the same ad set. Once there is enough data, AIRO suggests pausing the weaker one.', 'Variant 1 aur 2 same ad set mein A/B test ki tarah chalenge. Data aane pe AIRO kamzor wala pause suggest karega.')) : '',
+    LINE,
+    section(say(english, 'Want changes?', 'Kuch badalna hai?'), [
+      variants.length > 2 ? `\`use 3\`  →  ${say(english, 'make variant 3 the main ad', 'variant 3 ko main ad banao')}` : '',
+      `\`headline | ad text\`  →  ${say(english, 'write your own copy', 'apni copy likho')}`
+    ]),
+    imageAsk(english)
+  ]);
 }
 
 function applyCopyLine(payload, text) {
+  const swap = String(text).trim().match(/^use\s+(\d)$/i);
+  if (swap && payload.variants?.[Number(swap[1]) - 1]) {
+    const picked = payload.variants[Number(swap[1]) - 1];
+    const others = payload.variants.filter((item) => item !== picked);
+    payload.variants = [picked, ...others];
+    payload.headline = picked.headline;
+    payload.message = picked.primaryText;
+    payload.headlineB = others[0]?.headline || '';
+    payload.messageB = others[0]?.primaryText || '';
+    return true;
+  }
   if (!text.includes('|') || publicImageUrl(text) || /^Photo \d{6,40}$/.test(text)) return false;
   const [headline, message] = text.split('|').map((part) => part.trim());
   if (!headline || !message) return false;
   payload.headline = headline.slice(0, 40);
-  payload.message = message.slice(0, 200);
+  payload.message = message.slice(0, 300);
+  payload.headlineB = '';
+  payload.messageB = '';
+  payload.variants = [];
   return true;
 }
 
@@ -739,13 +914,14 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
   const photo = await readyImage(imageBase64, imageError, copied ? '' : text);
   if (copied && !photo.imageBase64) {
     await saveDraft(organizationId, conversationId, 'image', payload);
-    const reason = photo.error ? `${photo.error}\n` : '';
     return {
-      text: say(
-        english,
-        `Updated.\nHeadline: ${payload.headline}\nText: ${payload.message}\n${reason}${imageAsk(true)}`,
-        `Update ho gaya.\nHeadline: ${payload.headline}\nText: ${payload.message}\n${reason}${imageAsk(false)}`
-      )
+      text: card([
+        header(say(english, 'Copy updated', 'Copy update ho gayi')),
+        `> *${payload.headline}*\n${String(payload.message).split(/\n+/).map((line) => `> ${line}`).join('\n')}`,
+        payload.headlineB ? hint(say(english, `A/B test ad: ${payload.headlineB}`, `A/B test ad: ${payload.headlineB}`)) : '',
+        photo.error ? hint(photo.error) : '',
+        imageAsk(english)
+      ])
     };
   }
   if (!photo.imageBase64 && SKIP_IMAGE.test(text)) return saveWithoutImage(organizationId, conversationId, payload, english);
@@ -780,7 +956,10 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
       interests: payload.interests || [],
       locations: payload.locations || [],
       conversion: payload.conversion,
-      cta: payload.cta
+      cta: payload.cta,
+      creativeTest: Boolean(payload.headlineB),
+      headlineB: payload.headlineB || undefined,
+      messageB: payload.messageB || undefined
     });
     payload.campaignId = created.campaignId;
     await saveDraft(organizationId, conversationId, 'approval', payload, created.campaignId);
@@ -793,11 +972,16 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
       metadata: { channel: 'whatsapp', publish: false }
     });
     return {
-      text: say(
-        english,
-        `Paused campaign saved on Meta. Campaign id ${created.campaignId}. It is not live. Reply haan to publish, or nahi to leave it paused.`,
-        `Paused campaign Meta pe save ho gaya. Campaign id ${created.campaignId}. Abhi live nahi hai. Publish karne ke liye haan likho, paused chhodne ke liye nahi.`
-      )
+      text: card([
+        header(say(english, 'Campaign saved (paused)', 'Campaign save ho gaya (paused)'), say(english, 'Not live yet · no money spent', 'Abhi live nahi · koi paisa kharch nahi')),
+        section('Meta', [
+          field('Campaign id', created.campaignId),
+          field(say(english, 'Daily budget', 'Daily budget'), money(payload.dailyBudget, payload.currency)),
+          field(say(english, 'Locations', 'Locations'), payload.region),
+          field('Ads', payload.headlineB ? say(english, '2 (A/B test)', '2 (A/B test)') : '1')
+        ]),
+        publishOptions(english)
+      ])
     };
   } catch (error) {
     const reason = String(error.message || 'Meta did not save the ad.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
@@ -857,11 +1041,10 @@ async function attachAdSet(organizationId, conversationId, draft, english, image
       };
     }
     return {
-      text: say(
-        english,
-        `Ad set ${adset.adsetId} is now under paused campaign ${draft.campaignId}. ${imageAsk(true)}`,
-        `Ad set ${adset.adsetId} paused campaign ${draft.campaignId} ke neeche save ho gaya. ${imageAsk(false)}`
-      )
+      text: card([
+        header(say(english, 'Ad set saved (paused)', 'Ad set save ho gaya (paused)'), `Campaign ${draft.campaignId} · ad set ${adset.adsetId}`),
+        imageAsk(english)
+      ])
     };
   } catch (error) {
     const reason = String(error.message || 'Meta did not save the ad set.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
@@ -898,11 +1081,11 @@ async function saveWithoutImage(organizationId, conversationId, payload, english
       metadata: { channel: 'whatsapp', publish: false }
     });
     return {
-      text: say(
-        english,
-        `Paused campaign ${created.id} and ad set ${adset.adsetId} are saved on Meta without an ad. Nothing is live. Send the photo in this chat later, or add it from Connections, Meta Ads.`,
-        `Paused campaign ${created.id} aur ad set ${adset.adsetId} Meta pe bina ad ke save ho gaye. Kuch live nahi hai. Photo baad mein isi chat mein bhejo, ya Connections, Meta Ads se lagao.`
-      )
+      text: card([
+        header(say(english, 'Saved without photo (paused)', 'Bina photo save hua (paused)'), say(english, 'Nothing is live', 'Kuch live nahi hai')),
+        section('Meta', [field('Campaign id', created.id), field('Ad set id', adset.adsetId)]),
+        hint(say(english, 'Send the photo in this chat later, or add it from AIRO → Connections → Meta Ads.', 'Photo baad mein isi chat mein bhejo, ya AIRO → Connections → Meta Ads se lagao.'))
+      ])
     };
   } catch (error) {
     const reason = String(error.message || 'Meta did not save the campaign.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
@@ -915,11 +1098,10 @@ async function finishAd(organizationId, conversationId, payload, text, english, 
   if (!photo.imageBase64 && SKIP_IMAGE.test(text)) {
     await saveDraft(organizationId, conversationId, 'done', payload, payload.campaignId);
     return {
-      text: say(
-        english,
-        `Campaign ${payload.campaignId} and its ad set stay paused. Send the photo in this chat later, or add it from Connections, Meta Ads.`,
-        `Campaign ${payload.campaignId} aur uska ad set paused rahenge. Photo baad mein isi chat mein bhej sakte ho, ya Connections, Meta Ads se laga sakte ho.`
-      )
+      text: card([
+        header(say(english, 'Kept paused', 'Paused rakha'), `Campaign ${payload.campaignId}`),
+        hint(say(english, 'Send the photo in this chat later, or add it from AIRO → Connections → Meta Ads.', 'Photo baad mein isi chat mein bhejo, ya AIRO → Connections → Meta Ads se lagao.'))
+      ])
     };
   }
   if (!photo.imageBase64) {
@@ -956,11 +1138,10 @@ async function finishAd(organizationId, conversationId, payload, text, english, 
       payload: { origin: 'api', status: 'PAUSED', campaignId: String(payload.campaignId) }
     });
     return {
-      text: say(
-        english,
-        `Ad ${created.adId} is saved on the paused ad set. Reply haan to publish the campaign, or nahi to leave it paused.`,
-        `Ad ${created.adId} paused ad set par save ho gayi. Publish ke liye haan likho, paused chhodne ke liye nahi.`
-      )
+      text: card([
+        header(say(english, 'Ad saved (paused)', 'Ad save ho gayi (paused)'), `Ad ${created.adId}`),
+        publishOptions(english)
+      ])
     };
   } catch (error) {
     const reason = String(error.message || 'Meta did not save the ad.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
@@ -1010,10 +1191,12 @@ async function approve(organizationId, conversationId, draft, payload, text, eng
     metadata: { channel: 'whatsapp', publish: true }
   });
   return {
-    text: say(
-      english,
-      `Published. Campaign ${draft.campaignId}, its ad set, and its ad are active on Meta.`,
-      `Publish ho gaya. Campaign ${draft.campaignId}, uska ad set, aur ad Meta pe active hain.`
-    )
+    text: card([
+      header(say(english, 'Campaign is live', 'Campaign live ho gaya'), `Campaign ${draft.campaignId}`),
+      bullets([
+        say(english, 'Meta reviews new ads first, usually within a few hours.', 'Meta pehle naye ads review karta hai, aam taur pe kuch ghanton mein.'),
+        say(english, 'AIRO will watch results and suggest changes.', 'AIRO results dekhega aur changes suggest karega.')
+      ])
+    ])
   };
 }

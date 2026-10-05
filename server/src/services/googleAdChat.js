@@ -4,6 +4,10 @@ import { createGoogleSearchCampaign, googleKeywordIdeas, setGoogleCampaignStatus
 import { upsertObject } from '../repositories/connectionRepo.js';
 import { recordAudit } from './auditService.js';
 import { writeGoogleAdPlan } from './llmService.js';
+import { LINE, bullets, card, field, header, hint, money, numbered, options, section, step as fmtStep } from './adsAgent/waFormat.js';
+import {
+  businessProfile, chosenNames, hasProfileDetails, keywordCandidates, resolveGoogleLocations, suggestTargeting, writeGoogleCopy
+} from './adsAgent/chatPlanner.js';
 
 const START = /\b(run|start|launch|create|chalao|chala|chalana|chalani|banao|bana|banana|banani|lagao|lagana)\b.{0,40}\bgoogle\b|\bgoogle\s+ads?\b.{0,24}\b(run|start|launch|create|chalao|chala|chalana|chalani|banao|bana|banana|banani|lagao|lagana)\b/i;
 const CANCEL = /^(cancel|stop|ruk|band|nahi chahiye|nahin chahiye)\b/i;
@@ -233,32 +237,102 @@ async function pickKeywords(account, payload) {
   return { keywords: own.map((text) => ({ text, matchType: 'PHRASE' })), fromGoogle: false };
 }
 
+function keywordLabel(item) {
+  const match = item.matchType === 'EXACT' ? `[${item.text}]` : item.matchType === 'BROAD' ? item.text : `"${item.text}"`;
+  return item.searches ? `${match} (${Number(item.searches).toLocaleString('en-IN')}/mo)` : match;
+}
+
 function planText(payload, english) {
-  const keywordLine = payload.keywords.map((item) => item.text).join(', ');
-  return [
-    say(english, 'Here is the Google Search plan. Nothing is created yet.', 'Yeh Google Search plan hai. Abhi kuch bana nahi hai.'),
-    payload.strategy ? `Strategy: ${payload.strategy}` : '',
-    say(
-      english,
-      `Website ${payload.website}. Location ${payload.region}. Daily budget ${payload.dailyBudget}${payload.currency ? ` ${payload.currency}` : ''}. Bidding: maximize clicks.`,
-      `Website ${payload.website}. Location ${payload.region}. Daily budget ${payload.dailyBudget}${payload.currency ? ` ${payload.currency}` : ''}. Bidding: maximize clicks.`
-    ),
-    `${say(english, payload.keywordsFromGoogle ? 'Keywords from Google ideas' : 'Keywords (Google gave no ideas, so these use your words)', payload.keywordsFromGoogle ? 'Google ke keyword ideas' : 'Keywords (Google ne ideas nahi diye, isliye aapke shabd)')}: ${keywordLine}`,
-    `Headlines: ${payload.headlines.join(' | ')}`,
-    `Descriptions: ${payload.descriptions.join(' | ')}`,
-    say(
-      english,
-      'Reply ok to save it on Google Ads as paused. To change something, send your idea in words, or send: headlines: a | b | c, descriptions: a | b, keywords: x, y, budget: 500. Reply cancel to stop.',
-      'Paused save karne ke liye ok likho. Kuch badalna ho to apna idea likho, ya aise bhejo: headlines: a | b | c, descriptions: a | b, keywords: x, y, budget: 500. Band karne ke liye cancel.'
-    )
-  ].filter(Boolean).join('\n');
+  const source = payload.copyFromModel
+    ? say(english, 'picked from Google Keyword Planner', 'Google Keyword Planner se chune')
+    : payload.keywordsFromGoogle ? say(english, 'from Google ideas', 'Google ideas se') : say(english, 'Google gave no ideas, so these use your words', 'Google ne ideas nahi diye, isliye aapke shabd');
+  const host = (() => { try { return new URL(payload.website).hostname; } catch { return payload.website; } })();
+  return card([
+    header(say(english, 'Google Search Ad Plan', 'Google Search Ad Plan'), say(english, 'Draft · nothing is created yet', 'Draft · abhi kuch bana nahi hai')),
+    section('Strategy', payload.strategy),
+    section('Setup', [
+      field('Website', host),
+      field(say(english, 'Locations', 'Locations'), payload.region),
+      field(say(english, 'Daily budget', 'Daily budget'), money(payload.dailyBudget, payload.currency)),
+      field('Bidding', 'Maximize clicks'),
+      payload.path1 ? field(say(english, 'Display link', 'Display link'), `${host}/${payload.path1}${payload.path2 ? `/${payload.path2}` : ''}`) : ''
+    ]),
+    payload.sellingPoints?.length ? section('Selling points', bullets(payload.sellingPoints)) : '',
+    section(`Keywords (${payload.keywords.length})`, [hint(source), bullets(payload.keywords.map(keywordLabel))]),
+    payload.negatives?.length ? section(say(english, 'Negative keywords', 'Negative keywords'), [hint(say(english, 'The ad will not show for these', 'Inpe ad nahi dikhegi')), payload.negatives.join(' · ')]) : '',
+    section(`Headlines (${payload.headlines.length})`, numbered(payload.headlines)),
+    section(`Descriptions (${payload.descriptions.length})`, numbered(payload.descriptions)),
+    LINE,
+    section(say(english, 'What next?', 'Aage kya?'), options([
+      ['ok', say(english, 'save on Google Ads as paused', 'Google Ads pe paused save karo')],
+      ['cancel', say(english, 'stop this setup', 'setup band karo')]
+    ])),
+    section(say(english, 'Want changes?', 'Kuch badalna hai?'), [
+      say(english, 'Write your idea, e.g. _focus on ready to move flats_', 'Apna idea likho, jaise _ready to move flats pe focus karo_'),
+      say(english, 'Or edit directly:', 'Ya seedha edit karo:'),
+      '`headlines: a | b | c`',
+      '`descriptions: a | b`',
+      '`keywords: x, y`',
+      '`negatives: x, y`',
+      '`budget: 500`'
+    ])
+  ]);
+}
+
+function regionPrompt(payload, english) {
+  const cities = payload.suggestion?.cities || [];
+  if (!cities.length) return intakePrompt('region', english);
+  return card([
+    `*Step 4/5 · ${say(english, 'Locations', 'Locations')}*`,
+    section(say(english, 'AI suggested locations', 'AI suggested locations'), numbered(cities)),
+    payload.suggestion.why ? hint(`${say(english, 'Why', 'Kyun')}: ${payload.suggestion.why}`) : '',
+    section(say(english, 'Reply with', 'Reply karo'), options([
+      ['ok', say(english, 'use all of them', 'sab use karo')],
+      ['1,2', say(english, 'pick by number', 'number se chuno')],
+      ['Delhi, Pune', say(english, 'your own cities', 'apni cities')],
+      ['all India', say(english, 'whole country', 'poora desh')]
+    ]))
+  ]);
+}
+
+async function prepareRegion(organizationId, conversationId, payload, english) {
+  const profile = await businessProfile(organizationId);
+  const suggestion = await suggestTargeting({ organizationId, payload, profile, platform: 'google' });
+  if (suggestion) {
+    payload.suggestion = { cities: suggestion.cities, keywordSeeds: suggestion.keywordSeeds, why: suggestion.why };
+    payload.negatives = suggestion.negatives.map((item) => item.toLowerCase());
+    payload.sellingPoints = suggestion.sellingPoints;
+  }
+  await saveDraft(organizationId, conversationId, 'region', payload);
+  return { text: regionPrompt(payload, english) };
+}
+
+async function afterWebsite(organizationId, conversationId, payload, english) {
+  if (hasProfileDetails(await businessProfile(organizationId))) return prepareRegion(organizationId, conversationId, payload, english);
+  await saveDraft(organizationId, conversationId, 'details', payload);
+  return { text: intakePrompt('details', english) };
 }
 
 function intakePrompt(step, english) {
-  if (step === 'product') return say(english, 'I am the AIRO assistant. What should the Google ad promote? Example: 2BHK flats in Noida, dental clinic, coaching classes.', 'I am the AIRO assistant. Google ad kis cheez ki hai? Example: 2BHK flats in Noida, dental clinic, coaching classes.');
-  if (step === 'website') return say(english, 'Send the website link where people should land, starting with https.', 'Website link bhejo jahan log aayenge, https se.');
-  if (step === 'region') return say(english, 'Which city should the ad show in? Or say all India.', 'Ad kis city mein dikhani hai? Ya all India likho.');
-  return say(english, 'What daily budget should the campaign use? Send a number, for example 500.', 'Daily budget kitna rakhna hai? Number bhejo, jaise 500.');
+  if (step === 'product') {
+    return card([
+      header(say(english, 'Google Search Ad Setup', 'Google Search Ad Setup'), say(english, 'AIRO assistant · 5 quick steps', 'AIRO assistant · 5 chhote steps')),
+      fmtStep(1, 5, say(english, 'Product', 'Product'), say(english, 'What should the ad promote?', 'Ad kis cheez ki hai?'), say(english, 'Example: 2BHK flats in Noida, dental clinic, coaching classes', 'Example: 2BHK flats in Noida, dental clinic, coaching classes'))
+    ]);
+  }
+  if (step === 'website') return fmtStep(2, 5, 'Website', say(english, 'Send the link where people should land.', 'Woh link bhejo jahan log aayenge.'), say(english, 'Must start with https://', 'https:// se shuru hona chahiye'));
+  if (step === 'details') {
+    return fmtStep(
+      3, 5, say(english, 'What makes it special', 'Khaas kya hai'),
+      card([
+        say(english, 'Strong ads need real selling points. Tell me any of these:', 'Achhe ads ke liye asli selling points chahiye. Inme se jo ho batao:'),
+        bullets(say(english, ['Price or range', 'Offer', 'Location advantages', 'Experience or trust', 'Amenities or features'], ['Price ya range', 'Offer', 'Location ke fayde', 'Experience ya trust', 'Amenities ya features']))
+      ]),
+      say(english, 'Or reply skip', 'Ya skip likho')
+    );
+  }
+  if (step === 'region') return fmtStep(4, 5, say(english, 'Locations', 'Locations'), say(english, 'Which cities should the ad show in?', 'Ad kin cities mein dikhani hai?'), say(english, 'Separate with commas, or reply all India', 'Comma se alag likho, ya all India'));
+  return fmtStep(5, 5, say(english, 'Daily budget', 'Daily budget'), say(english, 'How much per day should the campaign spend?', 'Roz ka budget kitna rakhna hai?'), say(english, 'Send a number, for example 500', 'Number bhejo, jaise 500'));
 }
 
 export async function handleGoogleAdChat({ organizationId, conversationId, recognized, messages }) {
@@ -318,14 +392,21 @@ async function continueDraft(organizationId, conversationId, draft, text, englis
     if (text.length < 2) return { text: intakePrompt('product', english) };
     payload.product = text.slice(0, 120);
     const site = httpsWebsite(text);
-    if (site) payload.website = site;
-    return ask(payload.website ? 'region' : 'website', intakePrompt(payload.website ? 'region' : 'website', english));
+    if (site) {
+      payload.website = site;
+      return afterWebsite(organizationId, conversationId, payload, english);
+    }
+    return ask('website', intakePrompt('website', english));
+  }
+  if (draft.step === 'details') {
+    payload.details = /^(skip|no|nahi|nahin|none)\b/i.test(text) ? '' : text.slice(0, 500);
+    return prepareRegion(organizationId, conversationId, payload, english);
   }
   if (draft.step === 'website') {
     const site = httpsWebsite(text);
     if (site) {
       payload.website = site;
-      return ask('region', intakePrompt('region', english));
+      return afterWebsite(organizationId, conversationId, payload, english);
     }
     if (noWebsite(text)) {
       await clearGoogleDraft(conversationId);
@@ -371,6 +452,24 @@ async function pickRegion(organizationId, conversationId, draft, payload, text, 
     await saveDraft(organizationId, conversationId, 'budget', payload);
     return { text: intakePrompt('budget', english) };
   }
+  const names = chosenNames(text, payload.suggestion?.cities || []);
+  if (names.length > 1 || payload.suggestion?.cities?.length) {
+    const { found, missing } = await resolveGoogleLocations(account.input.refreshToken, names);
+    if (!found.length) {
+      return { text: say(english, 'Google did not find those locations. Send other cities, or say all India.', 'Google ko ye locations nahi mili. Doosri cities bhejo, ya all India likho.') };
+    }
+    payload.locations = found;
+    payload.region = found.map((item) => item.name.split(',')[0]).join(', ');
+    await saveDraft(organizationId, conversationId, 'budget', payload);
+    return {
+      text: card([
+        section(say(english, 'Locations set', 'Locations set'), bullets(found.map((item) => item.name))),
+        missing.length ? hint(say(english, `Not found on Google: ${missing.join(', ')}`, `Google pe nahi mili: ${missing.join(', ')}`)) : '',
+        LINE,
+        intakePrompt('budget', english)
+      ])
+    };
+  }
   let choices = [];
   try {
     choices = await suggestGoogleLocations({ refreshToken: account.input.refreshToken, query: text });
@@ -392,9 +491,35 @@ async function pickRegion(organizationId, conversationId, draft, payload, text, 
   return { text: say(english, 'Google did not find that location. Send another city, or say all India.', 'Google ko yeh location nahi mili. Doosri city bhejo, ya all India likho.') };
 }
 
+async function expertCopy(organizationId, account, payload) {
+  const profile = await businessProfile(organizationId);
+  if (!payload.keywordPool?.length) {
+    const cities = (payload.locations || []).map((item) => item.name.split(',')[0].toLowerCase());
+    const product = String(payload.product || '').toLowerCase();
+    const seeds = [...(payload.suggestion?.keywordSeeds || []), product, ...cities.slice(0, 2).map((city) => `${product} ${city}`)];
+    payload.keywordPool = await keywordCandidates(account.input, { seeds, website: payload.website, locations: (payload.locations || []).map((item) => item.id) });
+  }
+  const copy = await writeGoogleCopy({ organizationId, payload, profile, candidates: payload.keywordPool });
+  payload.headlines = copy.headlines;
+  payload.descriptions = copy.descriptions;
+  payload.path1 = copy.path1.replace(/[^\p{L}\p{N}-]/gu, '').slice(0, 15);
+  payload.path2 = copy.path2.replace(/[^\p{L}\p{N}-]/gu, '').slice(0, 15);
+  payload.keywords = copy.keywords;
+  payload.negatives = copy.negatives;
+  payload.strategy = copy.strategy;
+  payload.copyFromModel = true;
+}
+
 async function buildPlan(organizationId, conversationId, payload, english) {
   const account = await googleAccount(organizationId);
   if (!account) return { text: connectLine(english) };
+  try {
+    await expertCopy(organizationId, account, payload);
+    await saveDraft(organizationId, conversationId, 'review', payload);
+    return { text: planText(payload, english) };
+  } catch {
+    payload.copyFromModel = false;
+  }
   const picked = await pickKeywords(account, payload);
   payload.keywords = picked.keywords;
   payload.keywordsFromGoogle = picked.fromGoogle;
@@ -428,7 +553,9 @@ async function reviewPlan(organizationId, conversationId, payload, text, english
   const headlines = editField(text, 'headlines?');
   const descriptions = editField(text, 'descriptions?');
   const keywords = editField(text, 'keywords?');
+  const negatives = editField(text, 'negatives?');
   const budget = String(text).match(/^\s*budget\s*:?\s*(\d[\d,.]*)/im)?.[1] || '';
+  if (negatives) payload.negatives = uniqueTexts(negatives.split(',').map((item) => item.toLowerCase()), 40, 30);
   const notes = [];
   if (headlines) {
     const list = uniqueTexts(headlines.split('|').map(cleanHeadline), 30, 15);
@@ -453,9 +580,19 @@ async function reviewPlan(organizationId, conversationId, payload, text, english
     if (Number.isFinite(amount) && amount >= 1) payload.dailyBudget = Math.round(amount);
     else notes.push(say(english, 'Send the budget as a number.', 'Budget number mein bhejo.'));
   }
-  if (!headlines && !descriptions && !keywords && !budget) {
+  if (!headlines && !descriptions && !keywords && !budget && !negatives) {
     if (text.length < 4) return { text: planText(payload, english) };
     payload.idea = text.slice(0, 400);
+    const account = await googleAccount(organizationId);
+    if (account) {
+      try {
+        await expertCopy(organizationId, account, payload);
+        await saveDraft(organizationId, conversationId, 'review', payload);
+        return { text: planText(payload, english) };
+      } catch {
+        // Fall back to the simple writer below.
+      }
+    }
     const copy = await writeCopy(payload, english);
     if (!copy.fromModel) {
       await saveDraft(organizationId, conversationId, 'review', payload);
@@ -487,10 +624,13 @@ async function createPaused(organizationId, conversationId, payload, english) {
       dailyBudget: payload.dailyBudget,
       bidding: 'MAXIMIZE_CLICKS',
       locations: payload.locations || [],
-      keywords: payload.keywords,
+      keywords: payload.keywords.map((item) => ({ text: item.text, matchType: item.matchType })),
+      negatives: payload.negatives || [],
       finalUrl: payload.website,
       headlines: payload.headlines,
       descriptions: payload.descriptions,
+      path1: payload.path1 || '',
+      path2: payload.path1 ? payload.path2 || '' : '',
       publish: false
     });
   } catch (error) {
@@ -516,23 +656,49 @@ async function createPaused(organizationId, conversationId, payload, english) {
     organizationId,
     metadata: { channel: 'whatsapp', publish: false }
   });
-  return {
-    text: say(
-      english,
-      `Paused campaign saved on Google Ads. Campaign id ${created.campaignId}. It is not live. Reply haan to publish, or nahi to leave it paused.`,
-      `Paused campaign Google Ads pe save ho gaya. Campaign id ${created.campaignId}. Abhi live nahi hai. Publish ke liye haan likho, paused chhodne ke liye nahi.`
-    )
-  };
+  return { text: savedCard(created.campaignId, payload, english) };
+}
+
+function savedCard(campaignId, payload, english) {
+  return card([
+    header(say(english, 'Campaign saved (paused)', 'Campaign save ho gaya (paused)'), say(english, 'Not live yet · no money spent', 'Abhi live nahi · koi paisa kharch nahi')),
+    section('Google Ads', [
+      field('Campaign id', campaignId),
+      field(say(english, 'Daily budget', 'Daily budget'), money(payload.dailyBudget, payload.currency)),
+      field(say(english, 'Locations', 'Locations'), payload.region),
+      field('Keywords', payload.keywords?.length)
+    ]),
+    section(say(english, 'Publish now?', 'Ab publish karein?'), options([
+      ['haan', say(english, 'turn it on', 'on kar do')],
+      ['nahi', say(english, 'keep it paused', 'paused rehne do')]
+    ]))
+  ]);
 }
 
 async function approve(organizationId, conversationId, draft, payload, text, english) {
   const value = text.trim();
   const yes = /^(haan|han|ha|yes|y|publish|live|ok|okay)\b/i.test(value);
   const no = NO.test(value);
-  if (!yes && !no) return { text: say(english, 'Reply haan to publish this paused campaign, or nahi to leave it paused.', 'Publish ke liye haan likho, paused chhodne ke liye nahi.') };
+  if (!yes && !no) {
+    return {
+      text: card([
+        say(english, `Campaign *${draft.campaignId}* is saved and paused.`, `Campaign *${draft.campaignId}* save hai aur paused hai.`),
+        options([
+          ['haan', say(english, 'publish it', 'publish karo')],
+          ['nahi', say(english, 'keep it paused', 'paused rehne do')]
+        ]),
+        hint(say(english, 'To see competitors, send: competitors <product and city>', 'Competitors dekhne ke liye likho: competitors <product aur city>'))
+      ])
+    };
+  }
   if (no) {
     await saveDraft(organizationId, conversationId, 'done', payload, draft.campaignId);
-    return { text: say(english, `Campaign ${draft.campaignId} stays paused. You can turn it on later from Connections, Google Ads.`, `Campaign ${draft.campaignId} paused hi rahegi. Baad mein Connections, Google Ads se on kar sakte ho.`) };
+    return {
+      text: card([
+        header(say(english, 'Kept paused', 'Paused rakha'), `Campaign ${draft.campaignId}`),
+        say(english, 'Turn it on anytime from AIRO → Connections → Google Ads.', 'Kabhi bhi AIRO → Connections → Google Ads se on kar sakte ho.')
+      ])
+    };
   }
   const account = await googleAccount(organizationId);
   if (!account) return { text: connectLine(english) };
@@ -559,10 +725,12 @@ async function approve(organizationId, conversationId, draft, payload, text, eng
     metadata: { channel: 'whatsapp', publish: true }
   });
   return {
-    text: say(
-      english,
-      `Published. Campaign ${draft.campaignId} is turned on in Google Ads. Google reviews new ads before they start showing, which can take up to a day.`,
-      `Publish ho gaya. Campaign ${draft.campaignId} Google Ads mein on ho gaya. Google naye ads ko dikhane se pehle review karta hai, isme ek din tak lag sakta hai.`
-    )
+    text: card([
+      header(say(english, 'Campaign is live', 'Campaign live ho gaya'), `Campaign ${draft.campaignId}`),
+      bullets([
+        say(english, 'Google reviews new ads first, which can take up to a day.', 'Google pehle naye ads review karta hai, isme ek din tak lag sakta hai.'),
+        say(english, 'AIRO will watch results and suggest changes.', 'AIRO results dekhega aur changes suggest karega.')
+      ])
+    ])
   };
 }

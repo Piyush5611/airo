@@ -10,6 +10,7 @@ import { notifyWhatsappMessage, streamWhatsapp } from './whatsappLive.js';
 import { replyWhatsapp } from './llmService.js';
 import { handleMetaAdChat } from './metaAdChat.js';
 import { handleGoogleAdChat } from './googleAdChat.js';
+import { competitorReply, wantsCompetitorInfo } from './adsAgent/competitorResearch.js';
 
 function publicBot(row) {
   if (!row) return null;
@@ -356,6 +357,14 @@ async function answerWithModel(saved) {
         .replace(/access_token=[^&\s]+/gi, '')
         .replace(/EAA[A-Za-z0-9]+/g, '')
         .slice(0, 180);
+    }
+  }
+  const lastText = String([...messages].reverse().find((row) => row.role === 'user')?.content || '');
+  if (saved.recognized && saved.organizationId && wantsCompetitorInfo(lastText)) {
+    const report = await competitorReply({ organizationId: saved.organizationId, conversationId: saved.conversationId, text: lastText }).catch(() => '');
+    if (report) {
+      await deliverWhatsapp({ conversationId: saved.conversationId, text: report, actionTaken: 'Competitor research' });
+      return;
     }
   }
   const google = await handleGoogleAdChat({

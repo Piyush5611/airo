@@ -1100,8 +1100,9 @@ function targetingFor(input) {
   if (locales.length) targeting.locales = locales;
   const ageMin = Number(input.ageMin);
   const ageMax = Number(input.ageMax);
-  if (Number.isInteger(ageMin)) targeting.age_min = ageMin;
-  if (Number.isInteger(ageMax)) targeting.age_max = ageMax;
+  const advantage = input.advantageAudience !== false;
+  if (Number.isInteger(ageMin)) targeting.age_min = advantage ? Math.min(ageMin, 25) : ageMin;
+  if (Number.isInteger(ageMax) && !advantage) targeting.age_max = ageMax;
   if (input.gender === 'men') targeting.genders = [1];
   if (input.gender === 'women') targeting.genders = [2];
   const interests = Array.isArray(input.interests) ? input.interests : [];

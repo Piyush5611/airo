@@ -2,6 +2,14 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Meta design approval and age fix)
+
+- **Fix:** In the Meta image step, design approval now matches anywhere in the message ("Save kro", "Inhi design ko rakho", "yahi final hai", "publish kro"), unless it also has a no/change word or a question mark. Before, only a message starting with "design"/"ok" worked, so the same question repeated.
+- **Fix:** A forwarded image at the image step (WhatsApp `context.forwarded`) is taken as "use the AIRO designs". It no longer draws a design on top of the forwarded design. To use their own photo, owners send it from the camera or gallery.
+- **Fix:** `targetingFor` with Advantage+ audience caps `age_min` at 25 and leaves out `age_max`. This matches Meta's rule that caused "add a higher minimum age as a suggestion". The plan shows the real age sent, plus the model's best-fit range as a note.
+- **Note:** If the message asks to publish, the ad is still created paused and the reply asks for one more "haan" before spending.
+- **Migration/API impact:** None.
+
 ### 2026-10-06 (Meta chat budget fix)
 
 - **Fix:** At the Meta image step, a message like "budget 590" now updates the draft's daily budget. Before, it was ignored and the next photo still used the old, too-small budget.

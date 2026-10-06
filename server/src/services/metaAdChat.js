@@ -17,9 +17,10 @@ const OTHER_ADS = /\b(linkedin|youtube)\b.{0,24}\bads?\b|\b(run|start|launch|cha
 const STALE_HOURS = 24;
 const GREETING = /^(hi+|hello|hey|hlo|namaste|namaskar|good\s+(morning|afternoon|evening))[\s!.?]*$/i;
 const CANCEL = /^(cancel|stop|ruk|band|nahi chahiye|nahin chahiye)\b/i;
-const SKIP_IMAGE = /^(skip|baad mein|baad me|later|no image|image nahi|image nahin|without image)\b/i;
-const USE_DESIGN = /^(design|designs|use design|ok|okay|haan|han|yes|done|banao|bana do|theek|thik)\b/i;
-const RAW_PHOTO = /^(original|as is|as-is|raw|bina design|without design)\b/i;
+const SKIP_IMAGE = /^(skip|baad mein|baad me|later|no image|image nahi|image nahin|without image)\b|\b(bina|without) (photo|image)\b/i;
+export const USE_DESIGN = /\b(design|designs|creative|save|rakho|rakh|final|ok|okay|haan|han|yes|done|banao|bana do|publish|lagao|laga|lga|chalao|theek|thik|sahi|perfect|good|badhiya|accha|achha)\b/i;
+export const NOT_DESIGN = /\b(nahi|nahin|nhi|no|mat|change|badlo|badal|dusra|doosra|dusri|doosri|pasand nahi|achha nahi|accha nahi)\b|\?/i;
+export const RAW_PHOTO = /\b(original|as is|as-is|raw|bina design|without design)\b/i;
 const REPORT = /\b(report|nexcall|hisab|yesterday|aaj ka|calling report|kitne call)\b/i;
 const HINGLISH = /\b(kya|hai|hain|karo|chahiye|bhejo|nahi|nahin|haan|mujhe|mera|meri|chalao|banao|ruk|theek|thik|yaar|kro)\b/i;
 const CTA = new Set(['LEARN_MORE', 'SIGN_UP', 'SHOP_NOW', 'BOOK_NOW']);
@@ -304,7 +305,7 @@ async function rememberCampaign(organizationId, account, created, intake) {
   });
 }
 
-export async function handleMetaAdChat({ organizationId, conversationId, recognized, messages, imageBase64 = '', imageError = '', force = false }) {
+export async function handleMetaAdChat({ organizationId, conversationId, recognized, messages, imageBase64 = '', imageError = '', force = false, forwarded = false }) {
   const text = lastUser(messages);
   if ((!text && !imageBase64 && !imageError) || !organizationId || !conversationId) return null;
   let draft = null;
@@ -395,6 +396,12 @@ export async function handleMetaAdChat({ organizationId, conversationId, recogni
     };
   }
   if (!force && draft.step === 'approval' && !/^(haan|han|ha|yes|y|publish|live|nahi|nahin|no|mat|pause|ruk)\b/i.test(text.trim())) return null;
+  if (forwarded && (imageBase64 || imageError) && draft.step === 'image' && !draft.payload?.rawPhoto) {
+    const english = draft.payload.lang === 'en';
+    const result = await continueDraft(organizationId, conversationId, draft, 'design', messages);
+    const note = say(english, '_Forwarded image taken as "use the AIRO designs". To use your own photo, send it from the camera or gallery, not forwarded._', '_Forward ki hui image ko "AIRO designs use karo" maana. Apni photo lagani ho to camera ya gallery se bhejo, forward mat karo._');
+    return { ...result, text: `${note}\n\n${result.text}` };
+  }
   return continueDraft(organizationId, conversationId, draft, text, messages, imageBase64, imageError);
 }
 
@@ -872,11 +879,15 @@ function audienceFields(payload, english) {
     ];
   }
   const gender = payload.gender === 'men' ? 'men' : payload.gender === 'women' ? 'women' : say(english, 'everyone', 'sab');
+  const ageMin = Number(payload.ageMin) || 18;
+  const ageMax = Number(payload.ageMax) || 65;
+  const capped = ageMin > 25 || ageMax < 65;
   return [
     field(say(english, 'Locations', 'Locations'), payload.region),
-    field('Age', `${payload.ageMin || 18}-${payload.ageMax || 65}`),
+    field('Age', `${Math.min(ageMin, 25)}-65`),
     field('Gender', gender),
-    field('Advantage+ audience', 'on')
+    field('Advantage+ audience', 'on'),
+    capped ? hint(say(english, `Best fit is ${ageMin}-${ageMax}. With Advantage+ on, Meta only allows a minimum age up to 25, and it finds the best age itself.`, `Best fit ${ageMin}-${ageMax} hai. Advantage+ on hone pe Meta minimum age 25 tak hi leta hai, aur sahi age khud dhoondhta hai.`)) : ''
   ];
 }
 
@@ -1000,13 +1011,17 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
   let designs = [];
   if (photo.imageBase64) {
     designs = payload.rawPhoto ? [] : renderDesigns(payload, photo.imageBase64);
-  } else if (!photo.error && USE_DESIGN.test(text)) {
+  } else if (!photo.error && USE_DESIGN.test(text) && !NOT_DESIGN.test(text)) {
     designs = renderDesigns(payload);
     if (!designs.length) {
       return { text: say(english, `The design could not be made right now. Send a photo instead.${imageAsk(true)}`, `Design abhi nahi ban paya. Iski jagah photo bhejo.${imageAsk(false)}`) };
     }
   } else {
-    const reason = photo.error ? `${photo.error} ` : '';
+    const reason = photo.error
+      ? `${photo.error} `
+      : NOT_DESIGN.test(text)
+        ? say(english, 'What should change? Write your own copy as headline | ad text, or send your photo. ', 'Kya badalna hai? Apni copy headline | ad text likho, ya apni photo bhejo. ')
+        : '';
     return { text: `${reason}${imageAsk(english, true)}` };
   }
   imageBase64 = designs.length ? designs[0].toString('base64') : photo.imageBase64;
@@ -1066,6 +1081,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
             ? say(english, `AIRO design${photo.imageBase64 ? ' on your photo' : ''}${imageBase64B ? ', one per variant' : ''}`, `AIRO design${photo.imageBase64 ? ' aapki photo pe' : ''}${imageBase64B ? ', har variant ka alag' : ''}`)
             : say(english, 'your photo as-is', 'aapki photo as-is'))
         ]),
+        /\b(publish|live|chalao|chala do)\b/i.test(text) ? hint(say(english, 'You asked to publish. Publishing starts spending money, so reply haan once more to confirm.', 'Aapne publish bola. Publish se paisa kharch hona shuru hoga, isliye confirm ke liye ek baar haan likho.')) : '',
         publishOptions(english)
       ]),
       images: photo.imageBase64 && designs.length ? designImages(payload, english, designs) : []

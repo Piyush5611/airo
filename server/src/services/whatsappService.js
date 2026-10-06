@@ -160,7 +160,8 @@ export async function receiveWebhook(body) {
           mediaId: image?.mediaId || ''
         });
         if (saved?.reply) {
-          answerWithModel(saved).catch(async (error) => {
+          const forwarded = Boolean(message.context?.forwarded || message.context?.frequently_forwarded);
+          answerWithModel({ ...saved, forwarded }).catch(async (error) => {
             const reason = String(error?.message || 'The model did not reply.').slice(0, 180);
             console.error('WhatsApp model reply skipped:', reason);
             try {
@@ -400,7 +401,8 @@ async function answerWithModel(saved) {
     recognized: saved.recognized,
     messages,
     imageBase64,
-    imageError
+    imageError,
+    forwarded: Boolean(saved.forwarded)
   });
   if (meta?.text) {
     await deliverAdChat(saved.conversationId, meta, 'Meta ad');

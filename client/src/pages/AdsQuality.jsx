@@ -21,8 +21,78 @@ const VERDICT = {
 };
 const ROLE = { winner: 'Winner', loser: 'Weaker', tie: 'Close', learning: 'Needs more data' };
 
-export function ExperimentsPanel() {
+const GRADE = {
+  strong: ['Strong', 'good'],
+  average: ['Average', 'info'],
+  weak: ['Weak', 'bad'],
+  alone: ['Nothing to compare', 'warn'],
+  learning: ['Needs more data', 'warn']
+};
+const PLATFORM = { meta: 'Meta', google: 'Google' };
+
+export function AnalysisPanel({ connectionId }) {
+  const [days, setDays] = useState(14);
+  const { data, loading, error, reload } = useResource(`/api/ads-agent/analysis?days=${days}`);
+  const items = forConnection(data?.items, connectionId);
+  const counted = (verdict) => items.filter((row) => row.verdict === verdict).length;
+  const counts = data ? (connectionId ? { total: items.length, strong: counted('strong'), average: counted('average'), weak: counted('weak'), learning: counted('learning') + counted('alone') } : data.counts) : null;
+  return (
+    <div className="stack">
+      <section className="panel">
+        <header>
+          <h2>Ad analysis</h2>
+          <div className="filters">
+            {[7, 14, 30].map((value) => (
+              <button key={value} type="button" className={value === days ? 'btn-primary' : 'btn'} onClick={() => setDays(value)}>{value} days</button>
+            ))}
+          </div>
+        </header>
+        <p className="quiet">
+          Every ad (Meta) and campaign (Google) with spend in the period, ranked against others of the same kind on the same platform and currency.
+          Ads in campaigns that get leads or conversions are judged on cost per result (65%) and click rate (35%); the rest on click rate and cost per click.
+          A score of 50 is typical for your account. An ad needs at least 1,000 impressions and half the minimum decision spend before it is judged.
+          Numbers come from the last Meta and Google sync{data?.lastSyncedAt ? ` (${ago(data.lastSyncedAt)})` : ''}, not today.
+        </p>
+        {counts ? (
+          <p>
+            <strong>{counts.total}</strong> analysed · <Badge value={`${counts.strong} strong`} tone="good" /> <Badge value={`${counts.average} average`} tone="info" /> <Badge value={`${counts.weak} weak`} tone="bad" /> <Badge value={`${counts.learning} need data`} tone="warn" />
+          </p>
+        ) : null}
+        {data?.notes?.map((note) => <p className="quiet" key={note}>{note}</p>)}
+      </section>
+      <State loading={loading} error={error} onRetry={reload} empty={data && !items.length ? { title: 'No ad data yet', body: 'Connect Meta Ads or Google Ads and press Sync now on the Performance tab.' } : null}>
+        {items.length ? (
+          <Table
+            columns={[
+              {
+                key: 'name',
+                label: 'Ad',
+                render: (row) => (
+                  <>
+                    <strong>{row.name}</strong>
+                    <small>{PLATFORM[row.platform]} {row.level}{row.campaignName ? ` · ${row.campaignName}` : ''}{row.madeByAiro ? ' · made by AIRO' : ''}{row.status ? ` · ${String(row.status).toLowerCase()}` : ''}</small>
+                  </>
+                )
+              },
+              { key: 'score', label: 'Score', render: (row) => <><strong>{row.score ?? '—'}</strong> <Badge value={GRADE[row.verdict][0]} tone={GRADE[row.verdict][1]} /></> },
+              { key: 'spend', label: 'Spend', render: (row) => money(row.spend, row.currency) },
+              { key: 'results', label: 'Results', render: (row) => (row.results ? `${num(row.results)} ${row.resultLabel}` : '—') },
+              { key: 'costPerResult', label: 'Cost / result', render: (row) => <>{money(row.costPerResult, row.currency)}{row.benchmark.costPerResult ? <small>typical {money(row.benchmark.costPerResult, row.currency)}</small> : null}</> },
+              { key: 'ctr', label: 'Click rate', render: (row) => <>{row.ctr == null ? '—' : `${row.ctr}%`}{row.benchmark.ctr ? <small>typical {row.benchmark.ctr}%</small> : null}</> },
+              { key: 'cpc', label: 'Cost / click', render: (row) => money(row.cpc, row.currency) },
+              { key: 'reasons', label: 'Why', render: (row) => row.reasons.join(' ') }
+            ]}
+            rows={items.map((row) => ({ ...row, id: row.key }))}
+          />
+        ) : null}
+      </State>
+    </div>
+  );
+}
+
+export function ExperimentsPanel({ connectionId }) {
   const { data, loading, error, reload } = useResource('/api/ads-agent/experiments');
+  const items = forConnection(data?.items, connectionId);
   return (
     <div className="stack">
       <section className="panel">
@@ -32,8 +102,8 @@ export function ExperimentsPanel() {
           A winner needs at least 1,000 impressions and 3 days per ad, 20% better results and 95% confidence. The weaker ad then shows up as a recommendation in the Decision log.
         </p>
       </section>
-      <State loading={loading} error={error} onRetry={reload} empty={data && !data.items.length ? { title: 'No A/B tests running', body: data.adsSynced ? 'No ad set has two or more ads spending right now.' : 'Ad-level data comes in with the next Meta sync.' } : null}>
-        {data?.items?.map((group) => (
+      <State loading={loading} error={error} onRetry={reload} empty={data && !items.length ? { title: 'No A/B tests running', body: data.adsSynced ? 'No ad set has two or more ads spending right now.' : 'Ad-level data comes in with the next Meta sync.' } : null}>
+        {items.map((group) => (
           <section className="panel" key={group.key}>
             <header>
               <h2>{group.campaignName || `Campaign ${group.campaignId}`}</h2>
@@ -60,7 +130,23 @@ export function ExperimentsPanel() {
   );
 }
 
-export function QualityPanel({ canManage }) {
+function forConnection(items, connectionId) {
+  if (!connectionId) return items || [];
+  return (items || []).filter((row) => String(row.connectionId) === String(connectionId));
+}
+
+function qualityTotals(items) {
+  const sum = (key) => items.reduce((total, row) => total + Number(row[key] || 0), 0);
+  return {
+    crmLeads: sum('crmLeads'),
+    qualified: sum('qualified'),
+    booked: sum('booked'),
+    revenue: items.some((row) => row.revenue != null) ? sum('revenue') : null,
+    bookedWithoutValue: sum('bookedWithoutValue')
+  };
+}
+
+export function QualityPanel({ canManage, connectionId }) {
   const [days, setDays] = useState(30);
   const { data, loading, error, reload } = useResource(`/api/ads-agent/quality?days=${days}`);
   const [busy, setBusy] = useState(false);
@@ -84,7 +170,8 @@ export function QualityPanel({ canManage }) {
     }
   }
 
-  const totals = data?.totals;
+  const items = forConnection(data?.items, connectionId);
+  const totals = data ? (connectionId ? qualityTotals(items) : data.totals) : null;
   return (
     <div className="stack">
       <section className="panel">
@@ -107,7 +194,7 @@ export function QualityPanel({ canManage }) {
         </p>
         {note ? <p className="quiet">{note}</p> : null}
       </section>
-      <State loading={loading} error={error} onRetry={reload} empty={data && !data.items.length ? { title: 'No ad leads yet', body: 'Connect Meta Ads and run lead form ads. Leads appear here once they are imported and synced.' } : null}>
+      <State loading={loading} error={error} onRetry={reload} empty={data && !items.length ? { title: 'No ad leads yet', body: 'Connect Meta Ads and run lead form ads. Leads appear here once they are imported and synced.' } : null}>
         {totals ? (
           <div className="metric-strip">
             <div className="metric"><span>Leads from ads</span><strong>{num(totals.crmLeads)}</strong><em>in Leads</em></div>
@@ -116,7 +203,7 @@ export function QualityPanel({ canManage }) {
             <div className="metric"><span>Revenue</span><strong>{money(totals.revenue, 'INR')}</strong><em>from booked leads</em></div>
           </div>
         ) : null}
-        {data?.items?.length ? (
+        {items.length ? (
           <Table
             columns={[
               { key: 'name', label: 'Campaign', render: (row) => row.name || `Meta campaign ${row.externalId}` },
@@ -129,7 +216,7 @@ export function QualityPanel({ canManage }) {
               { key: 'revenue', label: 'Revenue', render: (row) => money(row.revenue, 'INR') },
               { key: 'roas', label: 'ROAS', render: (row) => (row.roas == null ? '—' : `${row.roas}x`) }
             ]}
-            rows={data.items.map((row) => ({ ...row, id: row.externalId }))}
+            rows={items.map((row) => ({ ...row, id: row.externalId }))}
           />
         ) : null}
       </State>

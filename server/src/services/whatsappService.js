@@ -12,6 +12,7 @@ import { handleMetaAdChat } from './metaAdChat.js';
 import { handleGoogleAdChat } from './googleAdChat.js';
 import { competitorReply, wantsCompetitorInfo } from './adsAgent/competitorResearch.js';
 import { campaignCountReply, wantsCampaignCount } from './adsAgent/campaignCount.js';
+import { analysisReply, wantsAdsAnalysis } from './adsAgent/qualityService.js';
 import { classifyMessage, withLatest } from './whatsappIntent.js';
 
 function publicBot(row) {
@@ -378,6 +379,13 @@ async function answerWithModel(saved) {
       return;
     }
   }
+  if (!route && saved.recognized && saved.organizationId && wantsAdsAnalysis(lastText)) {
+    const text = await analysisReply({ organizationId: saved.organizationId, text: lastText }).catch(() => '');
+    if (text) {
+      await deliverWhatsapp({ conversationId: saved.conversationId, text, actionTaken: 'Ad analysis' });
+      return;
+    }
+  }
   if (!route && saved.recognized && saved.organizationId && wantsCampaignCount(lastText)) {
     const list = await campaignCountReply({ organizationId: saved.organizationId, text: lastText }).catch(() => '');
     if (list) {
@@ -523,6 +531,12 @@ async function routeByIntent(saved, messages, route, lastText) {
     const list = await campaignCountReply({ organizationId: orgId, text: `${lastText}${platformWord}` }).catch(() => '');
     if (!list) return false;
     await deliverWhatsapp({ conversationId: saved.conversationId, text: list, actionTaken: 'Campaign list' });
+    return true;
+  }
+  if (intent === 'ads_analysis') {
+    const text = await analysisReply({ organizationId: orgId, text: `${route.request || ''} ${lastText}` }).catch(() => '');
+    if (!text) return false;
+    await deliverWhatsapp({ conversationId: saved.conversationId, text, actionTaken: 'Ad analysis' });
     return true;
   }
   if (intent === 'greeting') {

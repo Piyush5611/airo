@@ -2,6 +2,39 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Provider tabs on the connection detail page)
+
+- **Change (client):** `ConnectionDetail` now has page tabs picked per provider (`connectionTabs`), kept in `?section=`.
+  - Meta Ads: Overview, Campaigns, Create ad, Report, Ad analysis, Lead quality, A/B tests, Account & sync.
+  - Google Ads: Overview, Campaigns, Create campaign, Report, Ad analysis, Account & sync.
+  - Call Yatri: Report, Calls, Follow-ups, Leads, Account & sync.
+  - Other tools: Records, Webhook (only when the URL is visible), Account & sync.
+  - Create tabs only show with `connections.manage`; ad analysis tabs only with `campaigns.view`.
+- **Change (client):** `MetaAdsManager`, `GoogleAdsManager` and `CallYatriView` take an optional `section` prop and render only that part. They stay mounted behind a `hidden` wrapper, so a half-filled create wizard is kept when switching tabs. After a create, the page moves to Campaigns.
+- **Change (client):** New `ConnectionAccount` tab: account facts, sync history (`jobs`), open and resolved errors, sync log lines, and links to the pages that use the connection. It uses fields the detail API already returned.
+- **Change:** `AnalysisPanel`, `QualityPanel` and `ExperimentsPanel` accept `connectionId` and show only that account's rows; counts and totals are recalculated from those rows. Analysis items now carry `connectionId`. Scores stay ranked against all accounts of the same platform and currency.
+- **Migration/API impact:** None.
+
+### 2026-10-06 (Ad analysis: score and rank every ad)
+
+- **Change:** New pure module `services/adsAgent/adRanking.js` (`rankAds`, `adNumbers`, `campaignMetric`).
+  - Ads are compared only with peers on the same platform, in the same currency and of the same kind. Ads in campaigns that get leads or conversions form one group; the other ads form a click group.
+  - In the results group, the score is 65% cost per result and 35% click rate, both against the peer median. In the click group, it is click rate and cost per click. 50 means typical for the account.
+  - The verdicts are strong (65 or more), average (40 or more), weak, "alone" (no peer with enough data) and "learning" (under 1,000 impressions or under half the minimum decision spend).
+  - An ad in a results campaign that spent the minimum with zero results is marked weak. Every item carries plain reasons.
+- **Change:** `GET /api/ads-agent/analysis?days=7|14|30` (`campaigns.view`) in `qualityService.analysis`.
+  - Meta is judged per ad (`adWindow`), and Google per campaign, because Google ad-level data is not synced. Meta falls back to campaign level when ad rows are missing.
+  - Items are flagged "made by AIRO" (from `integration_objects` with origin `api`) and show their stored status.
+- **Change (client):** New "Ad analysis" tab in AI Ads Agent. It has a period switch, counts, and a table with score, verdict, spend, results, cost per result, click rate and cost per click (with typical values) and the reasons.
+- **Change (WhatsApp):** New router intent `ads_analysis`, plus a regex fallback (`wantsAdsAnalysis`) for when the router is unavailable. For example, "kaun sa ad sabse achha chal raha hai" gets the top 3 and the weakest 3 ads with their score, cost per result, CTR and spend, from synced data only.
+- **Migration/API impact:** None. No new API calls; it reads `ad_metrics_daily` from the existing 3-hourly sync. Lead quality from the CRM is not part of the score yet.
+
+### 2026-10-06 (Fix: "Form Name already exists" on Meta lead ads)
+
+- **Fix:** The Meta lead form name was the campaign name plus " form", which stays the same for a whole chat draft. A retry or a second ad with the same name was rejected by Meta. The new `leadFormName` adds a date and time stamp in UTC and keeps the name within 100 characters.
+- **Fix:** Two quick messages at the creative step (for example "Done" and "Publish") both started creating the ad. Now only one creation runs per chat at a time, and the other message is told to wait. The lock is in memory, which is enough for the single pm2 process.
+- **Migration/API impact:** None.
+
 ### 2026-10-06 (Sector-based types and examples on Products & Projects)
 
 - **Change:** New `catalogFor(sector)` in `domain/sectors.js`. Each of the 15 sectors has its own item types (for example, Real Estate has Residential project, Commercial project, Plots / land, Villa, Resale, Rental, Other) and its own example text for name, details, USPs, offer, price and the location field (label and example).

@@ -6,6 +6,7 @@ import { useResource } from '../data.js';
 import { day, indianDate, inr, label, num, parseIst, when } from '../format.js';
 import { providerLogo } from '../providerLogos.js';
 import { Badge, Page, State, Subnav, Table, useSection } from '../ui.jsx';
+import { AnalysisPanel, ExperimentsPanel, QualityPanel } from './AdsQuality.jsx';
 
 const CONNECTION_SECTIONS = ['Advertising', 'Real Estate Portals', 'Communication', 'Calling', 'CRM', 'Analytics', 'Developer / API'];
 const CATEGORY_KEY = {
@@ -1562,7 +1563,7 @@ function AdsTableHead({ tabs, view, onView, counts, query, onQuery, found }) {
   );
 }
 
-function MetaAdsManager({ id, data, canManage, reload }) {
+function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
   const campaigns = (data.records || []).filter((row) => row.type === 'campaign' && row.origin === 'api');
   const adsets = (data.records || []).filter((row) => row.type === 'adset' && row.origin === 'api');
   const ads = (data.records || []).filter((row) => row.type === 'ad' && row.origin === 'api');
@@ -1846,6 +1847,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
       setMessageB('');
       setStep(0);
       setCreating(false);
+      onSection?.('Campaigns');
       setNotice(saved?.notice || (publishMode.current ? 'Ad published on Meta.' : 'Ad saved on Meta as paused.'));
       reload();
     } catch (err) {
@@ -1907,6 +1909,16 @@ function MetaAdsManager({ id, data, canManage, reload }) {
     setOpened({ id: String(campaignId), name: campaignTitle.get(String(campaignId)) || row.name, currency });
   }
   const audienceFormat = audienceMetric === 'spend' ? (value) => money(value, reportCurrency) : (value) => num(value);
+  const paged = Boolean(section);
+  const showOverview = !paged || section === 'Overview';
+  const showPerformance = showOverview || section === 'Report';
+  const showTable = !paged || section === 'Campaigns' || section === 'Report';
+  const showCreate = canManage && (paged ? section === 'Create ad' : creating);
+  const tableTabs = !paged ? ['Campaigns', 'Ad sets', 'Ads', 'Report'] : section === 'Report' ? ['Report'] : ['Campaigns', 'Ad sets', 'Ads'];
+  useEffect(() => {
+    if (section === 'Report') setView('Report');
+    else if (section === 'Campaigns') setView((current) => (current === 'Report' ? 'Campaigns' : current));
+  }, [section]);
 
   return (
     <div className="stack">
@@ -1921,12 +1933,16 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           ['ads', ads.length]
         ]}
         canManage={canManage}
-        creating={creating}
-        onCreate={() => { setCreating((current) => !current); setError(''); }}
+        creating={showCreate}
+        onCreate={() => {
+          if (onSection) onSection(section === 'Create ad' ? 'Overview' : 'Create ad');
+          else setCreating((current) => !current);
+          setError('');
+        }}
         createLabel="Create ad"
       />
       <AdsAlerts notice={notice} error={error} />
-      {reportError ? (
+      {reportError && showOverview ? (
         <Tiles items={[
           { label: 'Spend · 30 days', value: money(spend, currency), hint: cpc == null ? 'No clicks yet' : `${money(cpc, currency)} per click` },
           { label: 'Impressions', value: impressions == null ? '—' : num(impressions), hint: `Across ${num(campaigns.length)} campaigns` },
@@ -1934,7 +1950,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           { label: 'Leads', value: leads == null ? '—' : num(leads), hint: cpl == null ? 'No leads yet' : `${money(cpl, currency)} per lead` }
         ]} />
       ) : null}
-      {canManage && creating ? (
+      {showCreate ? (
         <form className="form-grid panel ads-wizard" onSubmit={createAd}>
           <header>
             <div>
@@ -2288,6 +2304,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           </div>
         </form>
       ) : null}
+      {showPerformance ? (
       <AdsPerformance
         brand="meta"
         report={report}
@@ -2299,7 +2316,8 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         resultKey="leads"
         resultLabel="leads"
       />
-      {report ? (
+      ) : null}
+      {report && showOverview ? (
         <>
           <div className="split is-even">
             <section className="panel">
@@ -2349,9 +2367,10 @@ function MetaAdsManager({ id, data, canManage, reload }) {
           </div>
         </>
       ) : null}
+      {showTable ? (
       <section className="panel">
       <AdsTableHead
-        tabs={['Campaigns', 'Ad sets', 'Ads', 'Report']}
+        tabs={tableTabs}
         view={view}
         onView={setView}
         counts={{ Campaigns: campaigns.length, 'Ad sets': adsets.length, Ads: ads.length }}
@@ -2404,6 +2423,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         </div>
       )}
       </section>
+      ) : null}
       {opened ? <CampaignDrawer brand="meta" connectionId={id} campaign={opened} initialRange={range} onClose={() => setOpened(null)} canManage={canManage} onChanged={reload} /> : null}
     </div>
   );
@@ -2430,7 +2450,7 @@ function googleStatus(value) {
   return status === 'enabled' ? 'active' : status;
 }
 
-function GoogleAdsManager({ id, data, canManage, reload }) {
+function GoogleAdsManager({ id, data, canManage, reload, section, onSection }) {
   const records = (data.records || []).filter((row) => row.origin === 'api');
   const campaigns = records.filter((row) => row.type === 'campaign');
   const adGroups = records.filter((row) => row.type === 'ad_group');
@@ -2608,6 +2628,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
       setPath2('');
       setStep(0);
       setCreating(false);
+      onSection?.('Campaigns');
       setNotice(saved?.notice || 'Campaign saved on Google Ads.');
       reload();
     } catch (err) {
@@ -2645,7 +2666,16 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
   );
   const biddingName = { MAXIMIZE_CLICKS: 'Maximize clicks', MAXIMIZE_CONVERSIONS: 'Maximize conversions', MANUAL_CPC: 'Manual CPC' };
   const daily = report?.daily || [];
-  const tabs = ['Campaigns', 'Ad groups', 'Keywords', 'Ads', 'Report'];
+  const paged = Boolean(section);
+  const showOverview = !paged || section === 'Overview';
+  const showPerformance = showOverview || section === 'Report';
+  const showTable = !paged || section === 'Campaigns' || section === 'Report';
+  const showCreate = canManage && (paged ? section === 'Create campaign' : creating);
+  const tabs = !paged ? ['Campaigns', 'Ad groups', 'Keywords', 'Ads', 'Report'] : section === 'Report' ? ['Report'] : ['Campaigns', 'Ad groups', 'Keywords', 'Ads'];
+  useEffect(() => {
+    if (section === 'Report') setView('Report');
+    else if (section === 'Campaigns') setView((current) => (current === 'Report' ? 'Campaigns' : current));
+  }, [section]);
   const spend = total(campaigns, 'spend');
   const impressions = total(campaigns, 'impressions');
   const clicks = total(campaigns, 'clicks');
@@ -2684,12 +2714,16 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           ['keywords', keywordRows.length]
         ]}
         canManage={canManage}
-        creating={creating}
-        onCreate={() => { setCreating((current) => !current); setError(''); }}
+        creating={showCreate}
+        onCreate={() => {
+          if (onSection) onSection(section === 'Create campaign' ? 'Overview' : 'Create campaign');
+          else setCreating((current) => !current);
+          setError('');
+        }}
         createLabel="Create campaign"
       />
       <AdsAlerts notice={notice} error={error} />
-      {reportError ? (
+      {reportError && showOverview ? (
         <Tiles items={[
           { label: 'Spend · 30 days', value: money(spend, currency), hint: cpc == null ? 'No clicks yet' : `${money(cpc, currency)} avg. CPC` },
           { label: 'Impressions', value: countCell(impressions), hint: `Across ${num(campaigns.length)} campaigns` },
@@ -2697,7 +2731,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           { label: 'Conversions', value: countCell(conversions), hint: cpa == null ? 'No conversions yet' : `${money(cpa, currency)} per conversion` }
         ]} />
       ) : null}
-      {canManage && creating ? (
+      {showCreate ? (
         <form className="form-grid panel ads-wizard" onSubmit={createCampaign}>
           <header>
             <div>
@@ -2891,6 +2925,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           </div>
         </form>
       ) : null}
+      {showPerformance ? (
       <AdsPerformance
         brand="google"
         report={report}
@@ -2902,7 +2937,8 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
         resultKey="conversions"
         resultLabel="conversions"
       />
-      {report ? (
+      ) : null}
+      {report && showOverview ? (
         <>
           <div className="split is-even">
             <section className="panel">
@@ -2950,6 +2986,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
           </div>
         </>
       ) : null}
+      {showTable ? (
       <section className="panel">
       <AdsTableHead
         tabs={tabs}
@@ -3052,6 +3089,7 @@ function GoogleAdsManager({ id, data, canManage, reload }) {
         </div>
       ) : null}
       </section>
+      ) : null}
       {opened ? <CampaignDrawer brand="google" connectionId={id} campaign={opened} initialRange={range} onClose={() => setOpened(null)} canManage={canManage} onChanged={reload} /> : null}
     </div>
   );
@@ -3665,8 +3703,12 @@ function leadName(row) {
   return row.name || row.full_name || row.customer_name || row.lead_name || row.phone || row.mobile || '—';
 }
 
-function CallYatriView({ data, canManage }) {
-  const [tab, setTab] = useState(CALL_YATRI_TABS[0]);
+function CallYatriView({ data, canManage, section }) {
+  const [ownTab, setTab] = useState(CALL_YATRI_TABS[0]);
+  const paged = Boolean(section);
+  const tab = CALL_YATRI_TABS.includes(section) ? section : ownTab;
+  const showReport = !paged || section === 'Report';
+  const showRecords = !paged || CALL_YATRI_TABS.includes(section);
   const [scope, setScope] = useState('');
   const [queries, setQueries] = useState({});
   const query = queries[tab] || '';
@@ -3696,6 +3738,7 @@ function CallYatriView({ data, canManage }) {
 
   return (
     <div className="stack">
+      {showReport ? (
       <section className="panel cy-status">
         <header>
           <div className="cy-brand">
@@ -3718,18 +3761,24 @@ function CallYatriView({ data, canManage }) {
           </ul>
         ) : null}
       </section>
+      ) : null}
 
-      <CallYatriReport id={data.id} canManage={canManage} onScope={setScope} />
+      {showReport ? <CallYatriReport id={data.id} canManage={canManage} onScope={setScope} /> : null}
 
+      {showRecords ? (
       <section className="panel">
         <div className="cy-tab-head">
-          <div className="tabs" role="tablist">
-            {CALL_YATRI_TABS.map((item) => (
-              <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? 'is-on' : ''} onClick={() => setTab(item)}>
-                {item}{tab === item && total != null ? ` · ${num(total)}` : ''}
-              </button>
-            ))}
-          </div>
+          {paged ? (
+            <h2>{tab}{total != null ? ` · ${num(total)}` : ''}</h2>
+          ) : (
+            <div className="tabs" role="tablist">
+              {CALL_YATRI_TABS.map((item) => (
+                <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? 'is-on' : ''} onClick={() => setTab(item)}>
+                  {item}{tab === item && total != null ? ` · ${num(total)}` : ''}
+                </button>
+              ))}
+            </div>
+          )}
           <SearchBox value={query} onChange={setQuery} placeholder={hints[tab]} count={shownRows.length} />
         </div>
         <p className="quiet cy-note">
@@ -3781,6 +3830,109 @@ function CallYatriView({ data, canManage }) {
           />
         ) : null}
       </section>
+      ) : null}
+    </div>
+  );
+}
+
+const RELATED_PAGES = {
+  meta_ads: [['/app/growth/ads-agent', 'AI Ads Agent'], ['/app/growth/offerings', 'Products & Projects'], ['/app/growth/leads', 'Leads']],
+  google_ads: [['/app/growth/ads-agent', 'AI Ads Agent'], ['/app/growth/offerings', 'Products & Projects'], ['/app/growth/leads', 'Leads']],
+  nexcall: [['/app/sales/calls', 'Calls'], ['/app/growth/leads', 'Leads']],
+  whatsapp: [['/app/whatsapp', 'WhatsApp']]
+};
+
+function connectionTabs(data, can) {
+  if (!data) return ['Overview'];
+  const manage = can('connections.manage');
+  const ads = can('campaigns.view');
+  if (data.providerKey === 'meta_ads') {
+    return ['Overview', 'Campaigns', ...(manage ? ['Create ad'] : []), 'Report', ...(ads ? ['Ad analysis', 'Lead quality', 'A/B tests'] : []), 'Account & sync'];
+  }
+  if (data.providerKey === 'google_ads') {
+    return ['Overview', 'Campaigns', ...(manage ? ['Create campaign'] : []), 'Report', ...(ads ? ['Ad analysis'] : []), 'Account & sync'];
+  }
+  if (data.providerKey === 'nexcall') return ['Report', ...CALL_YATRI_TABS, 'Account & sync'];
+  return ['Records', ...(data.webhookPath ? ['Webhook'] : []), 'Account & sync'];
+}
+
+function syncLength(job) {
+  if (!job.startedAt || !job.finishedAt) return '—';
+  const seconds = Math.max(0, Math.round((new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime()) / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function ConnectionAccount({ data }) {
+  const jobs = data.jobs || [];
+  const logs = data.logs || [];
+  const errors = data.errors || [];
+  const open = errors.filter((row) => !row.resolvedAt);
+  const related = RELATED_PAGES[data.providerKey] || [];
+  return (
+    <div className="stack">
+      <section className="panel">
+        <header>
+          <h2>Account</h2>
+          <Badge value={data.status} />
+        </header>
+        <dl className="review-list">
+          <div><dt>Tool</dt><dd>{data.name}</dd></div>
+          {data.accountLabel ? <div><dt>Account</dt><dd>{data.accountLabel}{data.accountId ? ` · ${data.accountId}` : ''}</dd></div> : null}
+          <div><dt>Connected</dt><dd>{data.connectedAt ? when(data.connectedAt) : '—'}</dd></div>
+          <div><dt>Last sync</dt><dd>{when(data.lastSyncAt)}</dd></div>
+          {data.credentialPreview ? <div><dt>Credential</dt><dd>{data.credentialPreview}</dd></div> : null}
+          {data.tokenExpiresAt ? <div><dt>Login expires</dt><dd>{day(data.tokenExpiresAt)}</dd></div> : null}
+        </dl>
+        {related.length ? (
+          <p className="quiet">
+            Also uses this connection:{' '}
+            {related.map(([to, text], index) => (
+              <span key={to}>{index ? ' · ' : ''}<Link to={to}>{text}</Link></span>
+            ))}
+          </p>
+        ) : null}
+      </section>
+      <section className="panel">
+        <header>
+          <h2>Sync history</h2>
+          <p>Last {num(jobs.length)} runs</p>
+        </header>
+        {jobs.length ? (
+          <Table columns={[
+            { key: 'startedAt', label: 'Started', render: (row) => when(row.startedAt) },
+            { key: 'status', label: 'Status', render: (row) => <Badge value={row.status} /> },
+            { key: 'length', label: 'Took', render: (row) => syncLength(row) },
+            { key: 'summary', label: 'Result', render: (row) => row.summary || '—' }
+          ]} rows={jobs} />
+        ) : <p className="quiet">No sync has run yet. Press Sync at the top of the page.</p>}
+      </section>
+      <section className="panel">
+        <header>
+          <h2>Errors</h2>
+          <p>{open.length ? `${num(open.length)} open` : 'None open'}</p>
+        </header>
+        {errors.length ? (
+          <Table columns={[
+            { key: 'createdAt', label: 'When', render: (row) => when(row.createdAt) },
+            { key: 'code', label: 'Code', render: (row) => row.code || '—' },
+            { key: 'message', label: 'Message', render: (row) => row.message || '—' },
+            { key: 'resolvedAt', label: 'State', render: (row) => <Badge value={row.resolvedAt ? 'resolved' : 'open'} tone={row.resolvedAt ? 'good' : 'bad'} /> }
+          ]} rows={errors} />
+        ) : <p className="quiet">This connection has no recorded errors.</p>}
+      </section>
+      <section className="panel">
+        <header>
+          <h2>Sync log</h2>
+          <p>Latest {num(logs.length)} lines</p>
+        </header>
+        {logs.length ? (
+          <Table columns={[
+            { key: 'createdAt', label: 'When', render: (row) => when(row.createdAt) },
+            { key: 'level', label: 'Level', render: (row) => <Badge value={row.level} tone={row.level === 'error' ? 'bad' : row.level === 'warning' ? 'warn' : 'info'} /> },
+            { key: 'message', label: 'Message' }
+          ]} rows={logs.map((row, index) => ({ ...row, id: `${row.jobId}-${index}` }))} />
+        ) : <p className="quiet">No log lines yet.</p>}
+      </section>
     </div>
   );
 }
@@ -3794,6 +3946,12 @@ export function ConnectionDetail() {
   const google = data?.providerKey === 'google_ads';
   const callYatri = data?.providerKey === 'nexcall';
   const meta = metaOnly || google;
+  const tabs = connectionTabs(data, can);
+  const [section, setSection] = useSection(tabs);
+  const managerSections = ['Overview', 'Campaigns', 'Create ad', 'Create campaign', 'Report'];
+  const inManager = managerSections.includes(section);
+  const inCallYatri = section === 'Report' || CALL_YATRI_TABS.includes(section);
+  const expiresSoon = data?.tokenExpiresAt && new Date(data.tokenExpiresAt).getTime() - Date.now() < 10 * 86400000;
   const records = metaOnly
     ? (data?.records || []).filter((row) => row.type !== 'campaign' && row.type !== 'adset' && row.type !== 'ad')
     : google
@@ -3832,23 +3990,40 @@ export function ConnectionDetail() {
         {data?.linked ? (
           <div className="stack">
             <p><Badge value={data.status} /> <span className="quiet">Last sync {when(data.lastSyncAt)}.</span></p>
-            {data.tokenExpiresAt ? (
-              <p className={new Date(data.tokenExpiresAt).getTime() - Date.now() < 10 * 86400000 ? 'delta-down' : 'quiet'}>
+            {data.tokenExpiresAt && (expiresSoon || section === 'Account & sync') ? (
+              <p className={expiresSoon ? 'delta-down' : 'quiet'}>
                 The Facebook login expires on {day(data.tokenExpiresAt)}. Use Connect with Facebook again before then.
               </p>
             ) : null}
-            {callYatri ? <CallYatriView key={data.lastSyncAt || 'never'} data={data} canManage={can('connections.manage')} /> : null}
             {meta ? <AdAccountBar provider={google ? 'google' : 'meta'} current={id} accounts={data.accounts || []} canManage={can('connections.manage')} /> : null}
-            {metaOnly ? <MetaAdsManager key={id} id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
-            {google ? <GoogleAdsManager key={id} id={id} data={data} canManage={can('connections.manage')} reload={reload} /> : null}
-            {!meta && !callYatri && data.webhookPath ? (
+            <Subnav items={tabs} value={section} onChange={setSection} />
+            {callYatri ? (
+              <div hidden={!inCallYatri}>
+                <CallYatriView key={data.lastSyncAt || 'never'} data={data} canManage={can('connections.manage')} section={inCallYatri ? section : 'Report'} />
+              </div>
+            ) : null}
+            {metaOnly ? (
+              <div hidden={!inManager}>
+                <MetaAdsManager key={id} id={id} data={data} canManage={can('connections.manage')} reload={reload} section={inManager ? section : 'Overview'} onSection={setSection} />
+              </div>
+            ) : null}
+            {google ? (
+              <div hidden={!inManager}>
+                <GoogleAdsManager key={id} id={id} data={data} canManage={can('connections.manage')} reload={reload} section={inManager ? section : 'Overview'} onSection={setSection} />
+              </div>
+            ) : null}
+            {meta && section === 'Ad analysis' ? <AnalysisPanel connectionId={id} /> : null}
+            {metaOnly && section === 'Lead quality' ? <QualityPanel connectionId={id} canManage={can('campaigns.update')} /> : null}
+            {metaOnly && section === 'A/B tests' ? <ExperimentsPanel connectionId={id} /> : null}
+            {section === 'Account & sync' ? <ConnectionAccount data={data} /> : null}
+            {!meta && !callYatri && section === 'Webhook' && data.webhookPath ? (
               <section className="panel">
                 <h2>Webhook</h2>
-                <p className="quiet">POST JSON here. Each object from the webhook is listed below.</p>
+                <p className="quiet">POST JSON here. Each object from the webhook shows up on the Records tab.</p>
                 <p><code>{`${window.location.origin}${data.webhookPath}`}</code></p>
               </section>
             ) : null}
-            {!meta && !callYatri && records.length ? (
+            {!meta && !callYatri && section === 'Records' && records.length ? (
               <Table columns={[
                 { key: 'origin', label: 'Source', render: (row) => label(row.origin) },
                 { key: 'type', label: 'Type', render: (row) => label(row.type) },
@@ -3856,7 +4031,7 @@ export function ConnectionDetail() {
                 ...fieldKeys.map((key) => ({ key, label: label(key), render: (row) => fieldText(row.fields?.[key]) }))
               ]} rows={records} />
             ) : null}
-            {!meta && !callYatri && !records.length ? (
+            {!meta && !callYatri && section === 'Records' && !records.length ? (
               <div className="empty">
                 <strong>No API or webhook records.</strong>
                 <p className="quiet">{`This page stays empty until ${data.name} returns data. Sample campaigns, leads, and spend are not listed here.`}</p>

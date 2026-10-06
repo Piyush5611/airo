@@ -6,9 +6,9 @@ import { ago, day, num } from '../format.js';
 import { Badge, LineChart, Page, State, Subnav, Table, useSection } from '../ui.jsx';
 import { ProfileForm, StrategyPanel } from './AdsStrategy.jsx';
 import { LaunchPanel } from './AdsLaunch.jsx';
-import { ExperimentsPanel, QualityPanel } from './AdsQuality.jsx';
+import { AnalysisPanel, ExperimentsPanel, QualityPanel } from './AdsQuality.jsx';
 
-const SECTIONS = ['Performance', 'Lead quality', 'A/B tests', 'Business profile', 'Strategy', 'Launch'];
+const SECTIONS = ['Performance', 'Ad analysis', 'Lead quality', 'A/B tests', 'Business profile', 'Strategy', 'Launch'];
 
 const MODES = [
   { key: 'off', label: 'Off', note: 'The agent does nothing.' },
@@ -248,6 +248,7 @@ export function AdsAgent() {
       )}
     >
       <Subnav items={SECTIONS} value={section} onChange={setSection} />
+      {section === 'Ad analysis' ? <AnalysisPanel /> : null}
       {section === 'Lead quality' ? <QualityPanel canManage={canManage} /> : null}
       {section === 'A/B tests' ? <ExperimentsPanel /> : null}
       {section === 'Business profile' ? <ProfileForm canManage={canManage} /> : null}

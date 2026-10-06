@@ -1232,9 +1232,14 @@ async function uploadImage(act, apiKey, bytes) {
   return image.hash;
 }
 
+export function leadFormName(name, now = new Date()) {
+  const stamp = now.toISOString().slice(0, 19).replace('T', ' ');
+  return `${String(name || 'AIRO').slice(0, 74)} form ${stamp}`;
+}
+
 async function createLeadForm(pageId, pageToken, name, link) {
   const created = await graph(`${pageId}/leadgen_forms`, pageToken, {
-    name: `${name} form`.slice(0, 100),
+    name: leadFormName(name),
     questions: JSON.stringify([{ type: 'FULL_NAME' }, { type: 'PHONE' }, { type: 'EMAIL' }]),
     privacy_policy: JSON.stringify({ url: link, link_text: 'Privacy Policy' }),
     follow_up_action_url: link

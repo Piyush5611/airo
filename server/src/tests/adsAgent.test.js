@@ -27,6 +27,9 @@ import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
 } from '../services/offeringService.js';
 import { itemsReady, itemsSection } from '../services/metaAdChat.js';
+import { leadFormName } from '../integrations/metaAds.js';
+import { campaignMetric, rankAds } from '../services/adsAgent/adRanking.js';
+import { analysisDays, analysisText, wantsAdsAnalysis } from '../services/adsAgent/qualityService.js';
 
 const SAVED = [
   { id: 11, kind: 'project', name: 'Green Heights', priceText: '45 lakh onwards', offer: 'Free site visit', usps: 'Near metro, 2 min to school', details: '2 and 3 BHK', locations: 'Noida Sector 150', website: 'https://green.example.com', photoCount: 2 },
@@ -658,6 +661,62 @@ test('ad design svg escapes text and renders one png per variant', () => {
   const pngs = variantCreatives({ cta: 'LEARN_MORE', variants: [{ headline: 'One' }, { headline: 'Two' }, { headline: 'Three' }] });
   assert.equal(pngs.length, 2);
   for (const png of pngs) assert.equal(png[0], 0x89);
+});
+
+test('meta lead form names are unique per attempt and within 100 characters', () => {
+  const long = 'Green Heights | Noida, Gurgaon +2 | Leads | 06 Oct'.repeat(3);
+  const first = leadFormName(long, new Date('2026-10-06T13:18:00Z'));
+  const second = leadFormName(long, new Date('2026-10-06T13:18:05Z'));
+  assert.notEqual(first, second);
+  assert.ok(first.length <= 100);
+  assert.match(first, / form 2026-10-06 13:18:00$/);
+});
+
+test('ad ranking scores against same-kind peers and waits for enough data', () => {
+  const base = { platform: 'meta', level: 'ad', currency: 'INR', metric: 'results', resultLabel: 'leads' };
+  const { items, benchmarks } = rankAds([
+    { ...base, key: 'a', name: 'Cheap leads', spend: 3000, impressions: 40000, clicks: 800, results: 30 },
+    { ...base, key: 'b', name: 'Typical', spend: 3000, impressions: 40000, clicks: 500, results: 15 },
+    { ...base, key: 'c', name: 'No leads', spend: 3000, impressions: 40000, clicks: 300, results: 0 },
+    { ...base, key: 'd', name: 'New ad', spend: 100, impressions: 300, clicks: 4, results: 0 },
+    { ...base, key: 'e', name: 'Traffic ad', metric: 'clicks', spend: 2000, impressions: 30000, clicks: 600, results: 0 }
+  ], { minSpend: 500 });
+  const by = Object.fromEntries(items.map((row) => [row.key, row]));
+  assert.equal(items[0].key, 'a');
+  assert.equal(by.a.verdict, 'strong');
+  assert.equal(by.c.verdict, 'weak');
+  assert.match(by.c.reasons[0], /no leads/);
+  assert.equal(by.d.verdict, 'learning');
+  assert.equal(by.d.score, null);
+  assert.equal(by.e.verdict, 'alone');
+  assert.ok(by.a.score > by.b.score && by.b.score > by.c.score);
+  assert.equal(benchmarks.find((row) => row.metric === 'results').costPerResult, 150);
+  const meta = campaignMetric([{ campaignId: 1, results: 3 }, { campaignId: 2, results: 0 }], (row) => row.campaignId);
+  assert.equal(meta({ campaignId: 1 }), 'results');
+  assert.equal(meta({ campaignId: 2 }), 'clicks');
+});
+
+test('whatsapp ad analysis is asked in plain words and answered without invented numbers', () => {
+  assert.ok(wantsAdsAnalysis('kaun sa ad sabse achha chal raha hai'));
+  assert.ok(wantsAdsAnalysis('analyze my ads'));
+  assert.ok(wantsAdsAnalysis('best campaign last 30 days'));
+  assert.ok(!wantsAdsAnalysis('run meta ads for best flats'));
+  assert.ok(!wantsAdsAnalysis('ads report'));
+  assert.equal(analysisDays('last 30 days'), 30);
+  assert.equal(analysisDays('is hafte'), 7);
+  assert.equal(analysisDays('kaunsa ad'), 14);
+  assert.match(analysisText({ days: 14, items: [], counts: {}, notes: [] }, true), /No ad data/);
+  const text = analysisText({
+    days: 14,
+    counts: { total: 2, strong: 1, average: 0, weak: 1, learning: 0 },
+    notes: [],
+    items: [
+      { name: 'Green Heights A', platform: 'meta', level: 'ad', currency: 'INR', score: 80, verdict: 'strong', costPerResult: 150.4, resultLabel: 'leads', results: 20, ctr: 2.1, spend: 3008, madeByAiro: true },
+      { name: 'Old banner', platform: 'meta', level: 'ad', currency: 'INR', score: 20, verdict: 'weak', costPerResult: null, resultLabel: 'leads', results: 0, cpc: 12.5, ctr: 0.4, spend: 2500 }
+    ]
+  }, false);
+  assert.match(text, /Sabse achhe chal rahe\*\n1\. \*Green Heights A\* \(Meta, AIRO\) · score 80 · ₹150\/lead/);
+  assert.match(text, /Sabse kamzor\*\n1\. \*Old banner\* \(Meta\) · score 20 · ₹13\/click/);
 });
 
 test('ad design puts the uploaded logo on the image', () => {

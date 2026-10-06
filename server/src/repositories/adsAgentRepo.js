@@ -354,6 +354,17 @@ export function adWindow(organizationId, days) {
   );
 }
 
+export function adObjects(organizationId) {
+  return many(
+    `SELECT object_type AS type, external_id AS externalId,
+            JSON_UNQUOTE(JSON_EXTRACT(payload, '$.origin')) AS origin,
+            JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status')) AS status
+     FROM integration_objects
+     WHERE organization_id = ? AND object_type IN ('campaign', 'ad')`,
+    [organizationId]
+  );
+}
+
 export function openDecisions(organizationId, limit) {
   return many(
     `SELECT id, platform, decision_type AS type, target_name AS targetName, reason, status, created_at AS createdAt

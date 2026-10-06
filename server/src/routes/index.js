@@ -177,6 +177,7 @@ client.post('/ads-agent/decisions/:id/dismiss', requirePermission('campaigns.upd
   ok(res, await adsMonitor.dismiss(req.auth, req, req.params.id));
 }));
 client.get('/ads-agent/quality', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsQuality.quality(req.auth, req.query))));
+client.get('/ads-agent/analysis', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsQuality.analysis(req.auth, req.query))));
 client.get('/ads-agent/experiments', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsQuality.experiments(req.auth))));
 client.post('/ads-agent/leads/import', requirePermission('campaigns.update'), asyncHandler(async (req, res) => ok(res, await adsQuality.importNow(req.auth, req))));
 client.post('/ads-agent/decisions/:id/apply', requirePermission('campaigns.update', 'connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {

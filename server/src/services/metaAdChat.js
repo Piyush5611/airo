@@ -30,6 +30,7 @@ export const RAW_PHOTO = /\b(original|as is|as-is|raw|bina design|without design
 const REPORT = /\b(report|nexcall|hisab|yesterday|aaj ka|calling report|kitne call)\b/i;
 const HINGLISH = /\b(kya|hai|hain|karo|chahiye|bhejo|nahi|nahin|haan|mujhe|mera|meri|chalao|banao|ruk|theek|thik|yaar|kro)\b/i;
 const CTA = new Set(['LEARN_MORE', 'SIGN_UP', 'SHOP_NOW', 'BOOK_NOW']);
+const CREATING = new Set();
 
 export function budgetAmount(text) {
   const value = String(text || '');
@@ -1485,6 +1486,10 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
   const account = await metaAccount(organizationId);
   if (!account) return { text: connectLine(english) };
   if (copied) await saveDraft(organizationId, conversationId, 'image', payload);
+  if (CREATING.has(conversationId)) {
+    return { text: say(english, 'The ad is already being created from your last message. Please wait a few seconds.', 'Pichhle message se ad ban rahi hai. Kuch second ruko.') };
+  }
+  CREATING.add(conversationId);
   try {
     const created = await createMetaAd({
       items,
@@ -1551,6 +1556,8 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
   } catch (error) {
     const reason = String(error.message || 'Meta did not save the ad.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
     return { text: say(english, `Meta did not save the ad. ${reason}${budgetHint(reason, true)} Reply design or send the photo again, or say cancel.`, `Meta ne ad save nahi kiya. ${reason}${budgetHint(reason, false)} design likho ya photo dubara bhejo, ya cancel likho.`) };
+  } finally {
+    CREATING.delete(conversationId);
   }
 }
 

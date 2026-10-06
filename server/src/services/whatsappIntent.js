@@ -11,6 +11,7 @@ export const INTENTS = [
   'campaign_list',
   'ads_report',
   'ads_advice',
+  'ads_analysis',
   'call_report',
   'crm_report',
   'greeting',
@@ -56,6 +57,7 @@ Intents:
 - campaign_list: asks how many campaigns exist, or their names or status (not results).
 - ads_report: asks ad results: spend, leads from ads, clicks, CPL, campaign wise results, ad charts.
 - ads_advice: asks what to change or improve in ads, or AI recommendations.
+- ads_analysis: asks which ads are good or bad, best or worst ad, how well each ad performs, an ad ranking, score or analysis (per ad, not totals).
 - call_report: asks about phone calls: call report, calls by an employee, missed calls, best time to call, who called whom.
 - crm_report: asks about CRM leads, bookings, site visits, follow ups, team or employee performance that is not about calls or ads.
 - greeting: only a greeting.

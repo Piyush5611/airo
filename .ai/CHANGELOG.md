@@ -2,6 +2,13 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Campaign on/off without a full re-sync)
+
+- **Fix:** Turning a Meta or Google campaign on or off ran a full account sync each time, and a few clicks hit Meta's "too many calls from this ad account" limit. The status endpoints now only patch the stored campaign (and, for Meta turn-on, its ad sets and ads) with `connectionRepo.setCampaignStatus`. The scheduled sync still corrects delivery later.
+- **Change:** Meta rate-limit errors (codes 4, 17, 32, 613, 800xx or "too many calls") become a 429 `rate_limited` with a plain message (`isMetaRateLimit`).
+- **Change (client):** Campaign rows have an on/off switch with a pending state, a confirm before turning on (shows the budget), an inline result under the row, a delivery pill, avatar initials, budget per day or lifetime, and one "Results · 30 days" cell.
+- **Migration/API impact:** The status endpoints now return `{ notice }` instead of the full detail.
+
 ### 2026-10-06 (Provider tabs on the connection detail page)
 
 - **Change (client):** `ConnectionDetail` now has page tabs picked per provider (`connectionTabs`), kept in `?section=`.

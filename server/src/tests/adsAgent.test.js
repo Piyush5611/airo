@@ -27,7 +27,7 @@ import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
 } from '../services/offeringService.js';
 import { itemsReady, itemsSection } from '../services/metaAdChat.js';
-import { leadFormName } from '../integrations/metaAds.js';
+import { isMetaRateLimit, leadFormName } from '../integrations/metaAds.js';
 import { campaignMetric, rankAds } from '../services/adsAgent/adRanking.js';
 import { analysisDays, analysisText, wantsAdsAnalysis } from '../services/adsAgent/qualityService.js';
 
@@ -723,4 +723,9 @@ test('ad design puts the uploaded logo on the image', () => {
   const logo = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(40)]).toString('base64');
   assert.match(creativeSvg({ headline: 'Homes', cta: 'LEARN_MORE', logoBase64: logo }), /data:image\/png;base64,/);
   assert.doesNotMatch(creativeSvg({ headline: 'Homes', cta: 'LEARN_MORE' }), /<image/);
+});
+test('meta rate limit errors are recognised by code or message', () => {
+  assert.equal(isMetaRateLimit({ code: 17, message: 'User request limit reached' }), true);
+  assert.equal(isMetaRateLimit({ code: 80004, message: 'There have been too many calls from this ad account. Please wait a bit and try again.' }), true);
+  assert.equal(isMetaRateLimit({ code: 100, message: 'Invalid parameter' }), false);
 });

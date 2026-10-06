@@ -759,12 +759,8 @@ export async function updateMetaCampaignStatus(auth, req, id) {
     status: req.body.status
   });
   await recordAudit(req, { action: 'connection.meta_campaign_updated', resource: 'connection', resourceId: id, metadata: { status: req.body.status } });
-  const synced = await sync(auth, req, id);
-  const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
-  synced.notice = failed
-    ? `Campaign was updated in Meta. Sync failed: ${failed}`
-    : 'Campaign updated in Meta Ads.';
-  return synced;
+  await repo.setCampaignStatus(id, req.body.campaignId, req.body.status, { children: req.body.status === 'ACTIVE' });
+  return { notice: req.body.status === 'ACTIVE' ? 'Campaign is on in Meta Ads.' : 'Campaign paused in Meta Ads.' };
 }
 
 const CONNECTIONS_BACK = '/app/connections?section=Advertising';
@@ -1074,7 +1070,8 @@ export async function updateGoogleCampaignStatus(auth, req, id) {
   const input = await googleSecret(auth, id);
   await setGoogleCampaignStatus({ ...input, campaignId: req.body.campaignId, status: req.body.status });
   await recordAudit(req, { action: 'connection.google_campaign_updated', resource: 'connection', resourceId: id, metadata: { status: req.body.status } });
-  return syncWithNotice(auth, req, id, req.body.status === 'ENABLED' ? 'Campaign is live on Google Ads.' : 'Campaign paused on Google Ads.');
+  await repo.setCampaignStatus(id, req.body.campaignId, req.body.status);
+  return { notice: req.body.status === 'ENABLED' ? 'Campaign is live on Google Ads.' : 'Campaign paused on Google Ads.' };
 }
 
 async function pullConnection(connection, id) {

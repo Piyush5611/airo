@@ -111,6 +111,25 @@ export function upsertObject(row) {
   );
 }
 
+export async function setCampaignStatus(connectionId, campaignId, status, { children = false } = {}) {
+  const set = `payload = JSON_SET(COALESCE(payload, JSON_OBJECT()), '$.status', ?, '$.delivery', ?)`;
+  await run(
+    `UPDATE integration_objects SET ${set} WHERE connection_id = ? AND object_type = 'campaign' AND external_id = ?`,
+    [status, status, connectionId, String(campaignId)]
+  );
+  if (!children) return;
+  const adsets = await many(
+    `SELECT external_id AS id FROM integration_objects WHERE connection_id = ? AND object_type = 'adset' AND parent_external_id = ?`,
+    [connectionId, String(campaignId)]
+  );
+  if (!adsets.length) return;
+  const ids = adsets.map((row) => row.id);
+  await run(
+    `UPDATE integration_objects SET ${set} WHERE connection_id = ? AND object_type IN ('adset', 'ad') AND (external_id IN (?) OR parent_external_id IN (?))`,
+    [status, status, connectionId, ids, ids]
+  );
+}
+
 export function setWebhookToken(id, token) {
   return run(
     `UPDATE integration_connections SET webhook_token = ? WHERE id = ? AND webhook_token IS NULL`,

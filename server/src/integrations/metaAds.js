@@ -18,8 +18,17 @@ function quiet() {
   return new ApiError(422, 'The API did not respond.', 'validation_error');
 }
 
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80000, 80003, 80004, 80005, 80008, 80014]);
+
+export function isMetaRateLimit(error) {
+  return RATE_LIMIT_CODES.has(Number(error?.code)) || /too many calls|request limit|rate limit/i.test(String(error?.message || ''));
+}
+
 function metaError(data) {
   const error = data?.error || {};
+  if (isMetaRateLimit(error)) {
+    return new ApiError(429, 'Meta is limiting requests for this ad account right now. Wait a few minutes and try again; nothing was lost.', 'rate_limited');
+  }
   const detail = String(error.error_user_msg || error.error_user_title || '').trim();
   const base = String(error.message || 'Meta Ads rejected the request.').trim();
   const blame = Array.isArray(error.error_data?.blame_field_specs)

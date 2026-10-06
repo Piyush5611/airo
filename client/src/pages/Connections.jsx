@@ -738,11 +738,29 @@ function AdsPerformance({ brand, report, busy, error, range, onRange, fallbackCu
   );
 }
 
-function CampaignName({ name }) {
+const GOAL_PART = /^(leads|engagement|traffic|sales|awareness|messages)\b/i;
+
+function CampaignName({ name, sub }) {
+  const parts = String(name || '').split(' | ').map((part) => part.trim()).filter(Boolean);
+  const extra = sub ? parts.slice(1).filter((part) => !GOAL_PART.test(part)) : parts.slice(1);
+  const details = [sub, ...extra].filter(Boolean);
   return (
-    <span className="campaign-name">
-      <strong>{name || '—'}</strong>
-      <em>View details →</em>
+    <span className="campaign-name" title={name || ''}>
+      <strong>{parts[0] || '—'}</strong>
+      {details.length ? <small>{details.join(' · ')}</small> : null}
+    </span>
+  );
+}
+
+function Cell({ value }) {
+  return value === '—' || value == null || value === '' ? <span className="is-empty">—</span> : value;
+}
+
+function RowActions({ busy, active, onEdit, onToggle }) {
+  return (
+    <span className="row-buttons" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+      <button className="btn is-xs" type="button" disabled={busy} onClick={onEdit}>Edit</button>
+      <button className={`btn is-xs ${active ? '' : 'is-go'}`} type="button" disabled={busy} onClick={onToggle}>{active ? 'Pause' : 'Turn on'}</button>
     </span>
   );
 }
@@ -778,7 +796,8 @@ function StatLine({ row, currency, resultKey, resultLabel }) {
 
 function metaObjective(objective, viaMessenger) {
   if (objective === 'OUTCOME_ENGAGEMENT' && viaMessenger) return 'Leads · Messenger';
-  return label(String(objective || '').replace('OUTCOME_', '').toLowerCase()) || '—';
+  const text = label(String(objective || '').replace('OUTCOME_', '').toLowerCase());
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : '—';
 }
 
 function MetaAdCard({ ad, adsetName, currency, actions }) {
@@ -2382,6 +2401,7 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
         <p className="quiet cy-note">Campaign results for {String(GOOGLE_RANGES.find(([key]) => key === range)?.[1] || '').toLowerCase()}, live from Meta. Change the range in Performance above.</p>
       ) : null}
       {rows.length && view === 'Report' ? (
+        <div className="ads-table">
         <Table onRow={openCampaign} columns={[
           { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} /> },
           { key: 'spend', label: 'Spend', render: (row) => money(row.fields.spend, reportCurrency) },
@@ -2393,29 +2413,31 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
           { key: 'leads', label: 'Leads', render: (row) => countCell(row.fields.leads) },
           { key: 'cpl', label: 'Cost / lead', render: (row) => money(ratio(row.fields.spend, row.fields.leads), reportCurrency) }
         ]} rows={rows} />
+        </div>
       ) : rows.length ? (
+        <div className="ads-table">
         <Table onRow={openCampaign} columns={view === 'Campaigns' ? [
-          { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} /> },
+          { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} sub={metaObjective(row.fields?.objective, row.fields?.goal === 'messages')} /> },
           { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.status || '').toLowerCase()} /> },
-          { key: 'objective', label: 'Objective', render: (row) => metaObjective(row.fields?.objective, row.fields?.goal === 'messages') },
-          { key: 'budget', label: 'Budget', render: (row) => money(row.fields?.budget, row.fields?.currency) },
-          { key: 'spend', label: 'Spend', render: (row) => money(row.fields?.spend, row.fields?.currency) },
-          { key: 'clicks', label: 'Clicks', render: (row) => row.fields?.clicks == null || row.fields?.clicks === '' ? '—' : num(row.fields.clicks) },
-          { key: 'leads', label: 'Leads', render: (row) => row.fields?.leads == null || row.fields?.leads === '' ? '—' : num(row.fields.leads) },
+          { key: 'budget', label: 'Budget', render: (row) => <Cell value={money(row.fields?.budget, row.fields?.currency)} /> },
+          { key: 'spend', label: 'Spend', render: (row) => <Cell value={money(row.fields?.spend, row.fields?.currency)} /> },
+          { key: 'clicks', label: 'Clicks', render: (row) => <Cell value={countCell(row.fields?.clicks)} /> },
+          { key: 'leads', label: 'Leads', render: (row) => <Cell value={countCell(row.fields?.leads)} /> },
           { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ACTIVE' || row.fields?.status === 'PAUSED') ? (
-            <span className="page-actions" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-              <button className="btn" type="button" disabled={busy} onClick={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })}>Edit</button>
-              <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE')}>
-                {row.fields.status === 'ACTIVE' ? 'Pause' : 'Turn on'}
-              </button>
-            </span>
+            <RowActions
+              busy={busy}
+              active={row.fields.status === 'ACTIVE'}
+              onEdit={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })}
+              onToggle={() => setCampaignStatus(row.externalId, row.fields.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE')}
+            />
           ) : null }
         ] : [
           { key: 'name', label: view === 'Ads' ? 'Ad' : 'Ad set', render: (row) => <CampaignName name={row.name} /> },
           { key: 'campaign', label: 'Campaign', render: (row) => campaignTitle.get(view === 'Ad sets' ? row.parent : row.fields?.campaignId || adsetCampaign.get(row.parent)) || '—' },
           { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.delivery || row.fields?.status || '').toLowerCase().replace(/_/g, ' ')} /> },
-          ...(view === 'Ad sets' ? [{ key: 'budget', label: 'Budget', render: (row) => money(row.fields?.budget, row.fields?.currency) }] : [])
+          ...(view === 'Ad sets' ? [{ key: 'budget', label: 'Budget', render: (row) => <Cell value={money(row.fields?.budget, row.fields?.currency)} /> }] : [])
         ]} rows={rows} />
+        </div>
       ) : (
         <div className="empty">
           <strong>{query ? `No ${view.toLowerCase()} match "${query}".` : `No ${view.toLowerCase()} from Meta.`}</strong>
@@ -2999,23 +3021,24 @@ function GoogleAdsManager({ id, data, canManage, reload, section, onSection }) {
       />
       {view === 'Campaigns' ? (
         listed.Campaigns.length ? (
+          <div className="ads-table">
           <Table onRow={(row) => openCampaign(row.externalId, row.name)} columns={[
-            { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} /> },
+            { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} sub={label(String(row.fields?.channel || '').toLowerCase())} /> },
             { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> },
-            { key: 'channel', label: 'Type', render: (row) => label(String(row.fields?.channel || '').toLowerCase()) || '—' },
-            { key: 'budget', label: 'Daily budget', render: (row) => money(row.fields?.budget, row.fields?.currency) },
-            { key: 'spend', label: 'Spend', render: (row) => money(row.fields?.spend, row.fields?.currency) },
-            { key: 'clicks', label: 'Clicks', render: (row) => countCell(row.fields?.clicks) },
-            { key: 'conversions', label: 'Conversions', render: (row) => countCell(row.fields?.conversions) },
+            { key: 'budget', label: 'Daily budget', render: (row) => <Cell value={money(row.fields?.budget, row.fields?.currency)} /> },
+            { key: 'spend', label: 'Spend', render: (row) => <Cell value={money(row.fields?.spend, row.fields?.currency)} /> },
+            { key: 'clicks', label: 'Clicks', render: (row) => <Cell value={countCell(row.fields?.clicks)} /> },
+            { key: 'conversions', label: 'Conversions', render: (row) => <Cell value={countCell(row.fields?.conversions)} /> },
             { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ENABLED' || row.fields?.status === 'PAUSED') ? (
-              <span className="page-actions" onClick={(event) => event.stopPropagation()}>
-                <button className="btn" type="button" disabled={busy} onClick={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })}>Edit</button>
-                <button className="btn" type="button" disabled={busy} onClick={() => setCampaignStatus(row.externalId, row.fields.status === 'ENABLED' ? 'PAUSED' : 'ENABLED')}>
-                  {row.fields.status === 'ENABLED' ? 'Pause' : 'Turn on'}
-                </button>
-              </span>
+              <RowActions
+                busy={busy}
+                active={row.fields.status === 'ENABLED'}
+                onEdit={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })}
+                onToggle={() => setCampaignStatus(row.externalId, row.fields.status === 'ENABLED' ? 'PAUSED' : 'ENABLED')}
+              />
             ) : null }
           ]} rows={listed.Campaigns} />
+          </div>
         ) : (
           <div className="empty">
             <strong>{query ? `No campaigns match "${query}".` : 'No campaigns from Google Ads.'}</strong>

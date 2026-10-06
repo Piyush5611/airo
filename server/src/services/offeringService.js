@@ -3,23 +3,11 @@ import * as repo from '../repositories/offeringRepo.js';
 import { ApiError } from '../utils/errors.js';
 import { recordAudit } from './auditService.js';
 import { structuredLlm } from './llmService.js';
-import { sectorOf } from '../domain/sectors.js';
+import { catalogFor, sectorOf } from '../domain/sectors.js';
+import { organizationSector } from '../repositories/workspaceRepo.js';
 import { card, options } from './adsAgent/waFormat.js';
 
-export const OFFERING_KINDS = ['product', 'project', 'service', 'course', 'package', 'other'];
-
-const SECTOR_KIND = {
-  real_estate: 'project',
-  edtech: 'course',
-  college: 'course',
-  hotel: 'package',
-  travel: 'package',
-  it_saas: 'service',
-  healthcare: 'service',
-  beauty_fitness: 'service',
-  local_services: 'service',
-  finance: 'service'
-};
+const KIND = /^[a-z_]{2,40}$/;
 
 const FILLER = /^(hi|hello|hey|ok|okay|yes|no|haan|han|nahi|thanks|thank you|done|best|cancel|skip|meta ads?|google ads?|run (meta|google) ads?)$/i;
 const PHONE = /\+?\d[\d\s-]{8,}\d/g;
@@ -34,8 +22,9 @@ export function cleanText(value, max) {
   return String(value || '').replace(PHONE, '').replace(EMAIL, '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-export function kindForSector(sector) {
-  return SECTOR_KIND[sector] || 'product';
+export function kindForSector(sector, wanted = '') {
+  const kinds = catalogFor(sector).kinds.map((kind) => kind.key);
+  return kinds.includes(wanted) ? wanted : kinds[0];
 }
 
 function mergeDetails(oldText, newText) {
@@ -49,7 +38,7 @@ export async function rememberOffering(organizationId, item, source = 'ad_chat')
   const name = cleanText(item?.name, 160);
   if (!organizationId || name.length < 2 || FILLER.test(name)) return null;
   const next = {
-    kind: OFFERING_KINDS.includes(item.kind) ? item.kind : 'product',
+    kind: KIND.test(String(item.kind || '')) ? item.kind : 'product',
     name,
     details: cleanText(item.details, 1000),
     usps: cleanText(item.usps, 1000),
@@ -123,7 +112,7 @@ export async function markOfferingsUsed(organizationId, ids) {
 
 const captureSchema = z.object({
   items: z.array(z.object({
-    kind: z.enum(OFFERING_KINDS).default('product'),
+    kind: z.string().trim().max(40).default(''),
     name: z.string().trim().min(2).max(80),
     details: z.string().trim().max(400).default(''),
     price: z.string().trim().max(120).default(''),
@@ -149,22 +138,24 @@ export function worthReading(text) {
 
 export async function captureFromMessage({ organizationId, text, source = 'whatsapp' }) {
   if (!organizationId || !worthReading(text)) return [];
-  const saved = await savedOfferings(organizationId, 30);
+  const [saved, sector] = await Promise.all([savedOfferings(organizationId, 30), organizationSector(organizationId).catch(() => '')]);
+  const kinds = catalogFor(sector).kinds;
   const { data } = await structuredLlm({
     organizationId,
     schema: captureSchema,
     system: CAPTURE_BRIEF,
     facts: [
+      `Allowed kinds (use the key): ${kinds.map((kind) => `${kind.key} = ${kind.label}`).join('; ')}`,
       saved.length ? `Saved items: ${saved.map((item) => item.name).join('; ')}` : 'Saved items: none',
       `Message: ${cleanText(text, 1500)}`
     ].join('\n'),
-    task: 'Reply as JSON: {"items":[{"kind":"product","name":"","details":"","price":"","locations":"","website":""}]}',
+    task: `Reply as JSON: {"items":[{"kind":"${kinds[0].key}","name":"","details":"","price":"","locations":"","website":""}]}`,
     maxTokens: 800,
     purposes: ['whatsapp', 'ads', 'assistant']
   });
   const ids = [];
   for (const item of data.items) {
-    const id = await rememberOffering(organizationId, { ...item, priceText: item.price }, source);
+    const id = await rememberOffering(organizationId, { ...item, kind: kindForSector(sector, item.kind), priceText: item.price }, source);
     if (id) ids.push(id);
   }
   return ids;
@@ -375,15 +366,17 @@ export async function offeringAssets(organizationId, ids) {
 
 export async function listOfferings(auth) {
   try {
-    const [items, media, mark] = await Promise.all([
+    const [items, media, mark, sector] = await Promise.all([
       repo.list(auth.organizationId, { status: 'all' }),
       repo.photoIds(auth.organizationId),
-      repo.logo(auth.organizationId)
+      repo.logo(auth.organizationId),
+      organizationSector(auth.organizationId)
     ]);
     const byItem = {};
     for (const row of media) (byItem[row.offeringId] ||= []).push(row.id);
     return {
       ready: true,
+      catalog: catalogFor(sector),
       logoId: mark?.id || null,
       maxPhotos: MAX_PHOTOS,
       items: items.map((item) => ({ ...item, photoIds: byItem[item.id] || [] }))

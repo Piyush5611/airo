@@ -2,6 +2,13 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Sector-based types and examples on Products & Projects)
+
+- **Change:** New `catalogFor(sector)` in `domain/sectors.js`. Each of the 15 sectors has its own item types (for example, Real Estate has Residential project, Commercial project, Plots / land, Villa, Resale, Rental, Other) and its own example text for name, details, USPs, offer, price and the location field (label and example).
+- **Change:** `GET /api/offerings` returns `catalog` for the organization's sector. The add/edit form shows the sector's types and examples, and names the sector with a pointer to Settings → Organization.
+- **Change:** `kind` is now free text (`[a-z_]`, up to 40 characters) instead of a fixed list. The WhatsApp LLM capture is given the sector's types, and anything outside them falls back to the sector's first type.
+- **Migration/API impact:** Run `npm run migrate` (`023_offering_kind_text.sql` changes `offerings.kind` from ENUM to VARCHAR(40)). Old values (product, project, …) stay valid and are shown as plain text.
+
 ### 2026-10-06 (Products & Projects catalog and pick-from-list in the ad chat)
 
 - **Change (panel):** New Growth page "Products & Projects" (`/app/growth/offerings`, `Offerings.jsx`). It lists everything the business sells and supports add, edit, archive and delete.

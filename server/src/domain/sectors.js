@@ -342,6 +342,95 @@ const PRODUCT_ASK = {
   other: ['What should the ad sell?', 'Ad kis cheez ka hai?', 'Your product or service, with the city if it is local']
 };
 
+// kinds, then: name, details, usps, offer, price, [location label, location example]
+const CATALOG = {
+  real_estate: {
+    kinds: [['residential_project', 'Residential project'], ['commercial_project', 'Commercial project'], ['plots', 'Plots / land'], ['villa', 'Villa / independent house'], ['resale', 'Resale property'], ['rental', 'Rental / lease']],
+    name: 'Prestige Lakeside 3BHK', details: '2 and 3 BHK, 1150-1650 sq ft, RERA approved, possession Dec 2027', usps: 'Near metro, clubhouse and pool, 5 min to school', offer: 'Free site visit, no pre-EMI till possession', price: '85 lakh onwards', location: ['PROJECT LOCATION', 'Sector 150, Noida']
+  },
+  ecommerce: {
+    kinds: [['product', 'Product'], ['collection', 'Collection'], ['combo', 'Combo / bundle'], ['gift', 'Gift hamper'], ['subscription', 'Subscription box']],
+    name: 'Cotton kurti set', details: 'Sizes S-XXL, 6 colours, pure cotton, machine wash', usps: 'Free shipping, COD, 7-day easy returns', offer: 'Buy 2 get 1 free', price: '₹799 (MRP ₹1,499)', location: ['DELIVERS TO', 'All India']
+  },
+  it_saas: {
+    kinds: [['software', 'Software / app'], ['saas_plan', 'SaaS plan'], ['dev_service', 'Development service'], ['support', 'Support / AMC'], ['consulting', 'Consulting']],
+    name: 'CRM for real estate brokers', details: 'Lead capture, WhatsApp follow-ups, site visit tracking, mobile app', usps: '14-day free trial, setup in one day, Hindi support', offer: '2 months free on yearly plan', price: '₹999 per user per month', location: ['SERVES', 'All India, online']
+  },
+  edtech: {
+    kinds: [['course', 'Course'], ['batch', 'Batch'], ['test_series', 'Test series'], ['crash_course', 'Crash course'], ['one_on_one', '1-on-1 classes']],
+    name: 'NEET 2027 dropper batch', details: '10 months, live + recorded classes, weekly tests, doubt sessions', usps: 'Top 100 rankers last year, IIT/AIIMS faculty', offer: 'Free demo class, early bird 20% off', price: '₹45,000 full course', location: ['CENTRE / MODE', 'Online and Kota centre']
+  },
+  college: {
+    kinds: [['ug_course', 'UG course'], ['pg_course', 'PG course'], ['diploma', 'Diploma'], ['admission', 'Admission drive'], ['scholarship', 'Scholarship']],
+    name: 'BBA admissions 2027', details: '3 years, AICTE approved, internships in 2nd year', usps: '95% placement, NAAC A+, hostel on campus', offer: 'Scholarship up to 50% on entrance score', price: '₹1.2 lakh per year', location: ['CAMPUS', 'Greater Noida campus']
+  },
+  restaurant: {
+    kinds: [['outlet', 'Outlet / cafe'], ['dish', 'Dish / menu item'], ['combo_meal', 'Combo / thali'], ['buffet', 'Buffet'], ['catering', 'Catering / party order'], ['delivery', 'Delivery offer']],
+    name: 'Weekend buffet', details: '40+ dishes, live counters, veg and non-veg', usps: 'Rooftop seating, free parking, kids zone', offer: '20% off on Swiggy/Zomato this week', price: '₹699 per person', location: ['OUTLET LOCATION', 'Indiranagar, Bengaluru']
+  },
+  hotel: {
+    kinds: [['room', 'Room type'], ['package', 'Stay package'], ['venue', 'Wedding / event venue'], ['dining', 'Restaurant / dining'], ['spa', 'Spa / experience']],
+    name: 'Weekend getaway package', details: '2 nights, breakfast and dinner, river view room', usps: 'Private beach, pool, 10 min from airport', offer: 'Stay 3 pay 2', price: '₹12,999 for 2 people', location: ['PROPERTY LOCATION', 'Rishikesh']
+  },
+  healthcare: {
+    kinds: [['treatment', 'Treatment'], ['consultation', 'Consultation'], ['checkup', 'Health checkup package'], ['surgery', 'Surgery / procedure'], ['diagnostic', 'Lab / diagnostic test']],
+    name: 'Dental implants', details: 'Single tooth and full mouth, 3D scan, done in 2 visits', usps: '15 years experience, painless, EMI available', offer: 'Free first consultation', price: '₹25,000 per implant', location: ['CLINIC LOCATION', 'Andheri West, Mumbai']
+  },
+  beauty_fitness: {
+    kinds: [['service', 'Service'], ['package', 'Package'], ['membership', 'Membership'], ['bridal', 'Bridal / event'], ['class', 'Class / training']],
+    name: 'Bridal makeup', details: 'HD and airbrush, trial session, hair styling included', usps: 'Certified artists, branded products, home visit', offer: 'Free pre-bridal facial with booking', price: '₹15,000 onwards', location: ['SALON / STUDIO', 'Rajouri Garden, Delhi']
+  },
+  travel: {
+    kinds: [['tour_package', 'Tour package'], ['destination', 'Destination'], ['pilgrimage', 'Pilgrimage / yatra'], ['honeymoon', 'Honeymoon package'], ['visa_ticket', 'Visa / tickets']],
+    name: 'Kashmir 5 day package', details: 'Srinagar, Gulmarg, Pahalgam, houseboat stay, all transfers', usps: 'Local team, 24x7 support, no hidden charges', offer: 'Early booking 10% off', price: '₹18,999 per person', location: ['DEPARTS FROM', 'Delhi']
+  },
+  automobile: {
+    kinds: [['new_car', 'New vehicle / model'], ['used_car', 'Used vehicle'], ['service', 'Service / repair'], ['accessories', 'Accessories'], ['insurance', 'Insurance / finance']],
+    name: 'New Creta on-road offer', details: 'Petrol and diesel, all variants, test drive at home', usps: 'Authorised dealer, quick delivery, exchange bonus', offer: '₹50,000 exchange bonus', price: '₹11 lakh onwards ex-showroom', location: ['SHOWROOM', 'Sector 18, Noida']
+  },
+  finance: {
+    kinds: [['loan', 'Loan'], ['insurance', 'Insurance policy'], ['investment', 'Investment / SIP'], ['card', 'Credit card'], ['advisory', 'Tax / advisory']],
+    name: 'Home loan', details: 'Up to 90% of property value, 30 year tenure, balance transfer', usps: 'Approval in 48 hours, minimal documents', offer: 'Zero processing fee this month', price: 'Interest from 8.5% p.a.', location: ['SERVES', 'Delhi NCR']
+  },
+  local_services: {
+    kinds: [['service', 'Service'], ['repair', 'Repair'], ['installation', 'Installation'], ['amc', 'Annual contract (AMC)'], ['project', 'Project / interiors']],
+    name: 'AC repair and service', details: 'Split and window AC, gas refill, all brands', usps: 'Same day visit, trained technicians, 30-day warranty', offer: 'Service at ₹399 this summer', price: '₹399 onwards', location: ['SERVICE AREA', 'South Delhi and Gurgaon']
+  },
+  retail_store: {
+    kinds: [['store', 'Store'], ['product_range', 'Product range'], ['brand', 'Brand'], ['sale', 'Sale / offer'], ['product', 'Product']],
+    name: 'Furniture showroom sale', details: 'Sofas, beds, dining sets, custom sizes', usps: 'Free delivery and fitting, 5 year warranty', offer: 'Flat 40% off till Sunday', price: 'Sofas from ₹19,999', location: ['STORE LOCATION', 'Kirti Nagar, Delhi']
+  },
+  b2b_manufacturing: {
+    kinds: [['product', 'Product'], ['product_line', 'Product line'], ['bulk', 'Bulk / wholesale offer'], ['custom', 'Custom manufacturing'], ['dealership', 'Dealership / distribution']],
+    name: 'PVC pipes wholesale', details: '20-110 mm, ISI marked, pressure rated, custom lengths', usps: 'Factory price, pan-India dispatch, GST invoice', offer: 'Extra 5% on orders above 500 units', price: 'From ₹48 per metre (MOQ 200 m)', location: ['SUPPLIES TO', 'All India']
+  },
+  other: {
+    kinds: [['product', 'Product'], ['service', 'Service'], ['package', 'Package']],
+    name: 'Your product or service', details: 'What it is, sizes or options, what is included', usps: 'Why people should choose you', offer: 'Discount or free extra', price: '₹999 onwards', location: ['LOCATION', 'Where it is or where you sell it']
+  }
+};
+
+export function catalogFor(key) {
+  const sector = sectorOf(key);
+  const config = CATALOG[sector?.key] || CATALOG.other;
+  const kinds = config.kinds.map(([kind, label]) => ({ key: kind, label }));
+  if (!kinds.some((kind) => kind.key === 'other')) kinds.push({ key: 'other', label: 'Other' });
+  return {
+    sector: sector?.key || '',
+    sectorLabel: sector?.label || '',
+    kinds,
+    fields: {
+      name: `For example ${config.name}`,
+      details: `For example ${config.details}`,
+      usps: `For example ${config.usps}`,
+      offer: `For example ${config.offer}`,
+      price: `For example ${config.price}`,
+      locationLabel: config.location[0],
+      location: `For example ${config.location[1]}`
+    }
+  };
+}
+
 export function productAsk(key, english) {
   const [en, hi, examples] = PRODUCT_ASK[key] || ['What should the ad sell?', 'Ad kis cheez ka hai?', '2BHK flats in Noida, dental clinic, coaching classes'];
   return { question: english ? en : hi, example: `Example: ${examples}` };

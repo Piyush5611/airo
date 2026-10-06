@@ -1,0 +1,1 @@
+ALTER TABLE offerings MODIFY kind VARCHAR(40) NOT NULL DEFAULT 'product';

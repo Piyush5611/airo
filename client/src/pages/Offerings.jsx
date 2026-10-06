@@ -5,14 +5,21 @@ import { useResource } from '../data.js';
 import { day, label } from '../format.js';
 import { Badge, Page, State, Table } from '../ui.jsx';
 
-const KINDS = ['product', 'project', 'service', 'course', 'package', 'other'];
+const FALLBACK = {
+  kinds: [{ key: 'product', label: 'Product' }, { key: 'service', label: 'Service' }, { key: 'package', label: 'Package' }, { key: 'other', label: 'Other' }],
+  fields: { name: '', details: 'What it is, sizes or options, what is included', usps: 'Why people should choose it', offer: 'Discount or free extra', price: '₹999 onwards', locationLabel: 'LOCATION', location: 'Where it is or where you sell it' }
+};
 const SOURCE = { manual: 'Added here', whatsapp: 'From WhatsApp chat', ad_chat: 'From ad setup' };
 const EMPTY = { kind: 'product', name: '', details: '', usps: '', offer: '', priceText: '', locations: '', website: '', status: 'active' };
 const MAX_BYTES = 2 * 1024 * 1024;
 
-function toForm(item) {
-  if (!item) return { ...EMPTY };
+function toForm(item, catalog) {
+  if (!item) return { ...EMPTY, kind: catalog.kinds[0]?.key || 'product' };
   return Object.fromEntries(Object.keys(EMPTY).map((key) => [key, item[key] || EMPTY[key]]));
+}
+
+function kindLabel(catalog, kind) {
+  return catalog.kinds.find((row) => row.key === kind)?.label || label(kind);
 }
 
 function readImage(file) {
@@ -148,8 +155,10 @@ function LogoPanel({ logoId, canManage, onChange }) {
   );
 }
 
-function OfferingForm({ item, onDone, onCancel }) {
-  const [form, setForm] = useState(toForm(item));
+function OfferingForm({ item, catalog, onDone, onCancel }) {
+  const [form, setForm] = useState(toForm(item, catalog));
+  const hint = catalog.fields;
+  const kinds = catalog.kinds.some((row) => row.key === form.kind) ? catalog.kinds : [...catalog.kinds, { key: form.kind, label: label(form.kind) }];
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -171,16 +180,19 @@ function OfferingForm({ item, onDone, onCancel }) {
 
   return (
     <form className="panel form-grid" onSubmit={save}>
-      <header><h2>{item ? `Edit ${item.name}` : 'Add a product, project or service'}</h2></header>
+      <header>
+        <h2>{item ? `Edit ${item.name}` : 'Add a product, project or service'}</h2>
+        {catalog.sectorLabel ? <p className="quiet">Types and examples are for your sector: {catalog.sectorLabel}. Change the sector in Settings, Organization.</p> : null}
+      </header>
       <label className="stack-field">TYPE
-        <select value={form.kind} onChange={set('kind')}>{KINDS.map((kind) => <option key={kind} value={kind}>{label(kind)}</option>)}</select>
+        <select value={form.kind} onChange={set('kind')}>{kinds.map((kind) => <option key={kind.key} value={kind.key}>{kind.label}</option>)}</select>
       </label>
-      <label className="stack-field">NAME<input value={form.name} onChange={set('name')} required minLength={2} maxLength={160} /></label>
-      <label className="stack-field">DETAILS<textarea value={form.details} onChange={set('details')} maxLength={2000} placeholder="What it is: sizes, configuration, duration, what is included" /></label>
-      <label className="stack-field">SELLING POINTS (USPs)<textarea value={form.usps} onChange={set('usps')} maxLength={1000} placeholder="Why people should choose it, for example near metro, 10 years experience, free trial" /></label>
-      <label className="stack-field">OFFER<input value={form.offer} onChange={set('offer')} maxLength={300} placeholder="For example 10% off till 31 Oct, free site visit" /></label>
-      <label className="stack-field">PRICE<input value={form.priceText} onChange={set('priceText')} maxLength={160} placeholder="For example 45 lakh onwards" /></label>
-      <label className="stack-field">LOCATION<input value={form.locations} onChange={set('locations')} maxLength={400} placeholder="Where it is or where you sell it" /></label>
+      <label className="stack-field">NAME<input value={form.name} onChange={set('name')} required minLength={2} maxLength={160} placeholder={hint.name} /></label>
+      <label className="stack-field">DETAILS<textarea value={form.details} onChange={set('details')} maxLength={2000} placeholder={hint.details} /></label>
+      <label className="stack-field">SELLING POINTS (USPs)<textarea value={form.usps} onChange={set('usps')} maxLength={1000} placeholder={hint.usps} /></label>
+      <label className="stack-field">OFFER<input value={form.offer} onChange={set('offer')} maxLength={300} placeholder={hint.offer} /></label>
+      <label className="stack-field">PRICE<input value={form.priceText} onChange={set('priceText')} maxLength={160} placeholder={hint.price} /></label>
+      <label className="stack-field">{hint.locationLabel}<input value={form.locations} onChange={set('locations')} maxLength={400} placeholder={hint.location} /></label>
       <label className="stack-field">WEBSITE OR LANDING PAGE<input type="url" value={form.website} onChange={set('website')} placeholder="https://" /></label>
       {item ? (
         <label className="stack-field">STATUS
@@ -207,6 +219,7 @@ export function Offerings() {
   const [editing, setEditing] = useState(null);
   const [note, setNote] = useState('');
   const items = data?.items || [];
+  const catalog = data?.catalog?.kinds?.length ? data.catalog : FALLBACK;
   const refresh = () => reload({ silent: true });
 
   async function remove(item) {
@@ -226,7 +239,7 @@ export function Offerings() {
   };
 
   const columns = [
-    { key: 'name', label: 'Name', render: (row) => <><strong>{row.name}</strong><small>{label(row.kind)}</small></> },
+    { key: 'name', label: 'Name', render: (row) => <><strong>{row.name}</strong><small>{kindLabel(catalog, row.kind)}</small></> },
     {
       key: 'details',
       label: 'Details',
@@ -240,7 +253,7 @@ export function Offerings() {
       )
     },
     { key: 'priceText', label: 'Price', render: (row) => row.priceText || '—' },
-    { key: 'locations', label: 'Location', render: (row) => row.locations || '—' },
+    { key: 'locations', label: catalog.fields.locationLabel.charAt(0) + catalog.fields.locationLabel.slice(1).toLowerCase(), render: (row) => row.locations || '—' },
     { key: 'photos', label: 'Photos', render: (row) => <Photos item={row} maxPhotos={data?.maxPhotos || 5} canManage={canManage} onChange={refresh} /> },
     { key: 'source', label: 'Saved from', render: (row) => SOURCE[row.source] || label(row.source) },
     { key: 'status', label: 'Status', render: (row) => <Badge value={row.status} /> },
@@ -275,7 +288,7 @@ export function Offerings() {
         {data && !data.ready ? <p className="quiet">{data.note}</p> : (
           <div className="stack">
             <LogoPanel logoId={data?.logoId} canManage={canManage} onChange={refresh} />
-            {editing !== null ? <OfferingForm key={editing?.id || 'new'} item={editing || null} onDone={done} onCancel={() => setEditing(null)} /> : null}
+            {editing !== null ? <OfferingForm key={editing?.id || 'new'} item={editing || null} catalog={catalog} onDone={done} onCancel={() => setEditing(null)} /> : null}
             {note ? <p className="quiet">{note}</p> : null}
             {items.length ? <Table columns={columns} rows={items} /> : (
               <p className="quiet">Nothing saved yet. Press Add new, or tell AIRO about a product, project or service on WhatsApp.</p>

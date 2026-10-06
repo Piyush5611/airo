@@ -21,10 +21,10 @@ import { usableInterest } from '../services/adsAgent/chatPlanner.js';
 import { menuMessage, messageParts } from '../services/whatsappService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
-import { GOAL_LABELS, SECTORS, SECTOR_KEYS, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
+import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
 import { imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
 import {
-  MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
+  MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
 } from '../services/offeringService.js';
 import { itemsReady, itemsSection } from '../services/metaAdChat.js';
 
@@ -85,6 +85,23 @@ test('multi item plan shows one ad set per item with the budget split', () => {
   assert.match(text, /Ad sets \(3, one per item\)/);
   assert.match(text, /300/);
   assert.match(text, /3\. Sunrise Plots/);
+});
+
+test('every sector has its own catalog types and form examples', () => {
+  for (const key of SECTOR_KEYS) {
+    const catalog = catalogFor(key);
+    assert.ok(catalog.kinds.length >= 3, key);
+    assert.equal(catalog.kinds.at(-1).key, 'other', key);
+    assert.ok(catalog.kinds.every((kind) => /^[a-z_]{2,40}$/.test(kind.key) && kind.label), key);
+    assert.equal(new Set(catalog.kinds.map((kind) => kind.key)).size, catalog.kinds.length, key);
+    for (const field of ['name', 'details', 'usps', 'offer', 'price', 'locationLabel', 'location']) assert.ok(catalog.fields[field], `${key} ${field}`);
+  }
+  assert.equal(catalogFor('real_estate').kinds[0].label, 'Residential project');
+  assert.equal(catalogFor('real_estate').fields.locationLabel, 'PROJECT LOCATION');
+  assert.equal(catalogFor('nope').sector, '');
+  assert.equal(kindForSector('real_estate'), 'residential_project');
+  assert.equal(kindForSector('real_estate', 'plots'), 'plots');
+  assert.equal(kindForSector('real_estate', 'dish'), 'residential_project');
 });
 
 test('save question and catalog input are checked', () => {

@@ -339,7 +339,7 @@ export const organizationSchema = body({
 const httpsLink = z.union([z.string().trim().url().max(500).regex(/^https:\/\//i, 'Website must start with https://'), z.literal('')]).optional().default('');
 
 export const offeringSchema = body({
-  kind: z.enum(['product', 'project', 'service', 'course', 'package', 'other']),
+  kind: z.string().trim().regex(/^[a-z_]{2,40}$/, 'Choose a type'),
   name: z.string().trim().min(2).max(160),
   details: z.string().trim().max(2000).optional().default(''),
   usps: z.string().trim().max(1000).optional().default(''),

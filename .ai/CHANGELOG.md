@@ -48,6 +48,7 @@ Significant structural changes only. Newest first.
   - College: the places students come from.
   - B2B: trade hubs.
 - **Change:** The suggestion returns `cityNotes` (a reason per city) and `bestPick`. The Meta and Google chat city steps show each city with its reason and a "Best to start" line. When the office city was left out, they add a note saying so, and the owner can still add it.
+- **Change:** The first question in the Meta and Google ad chats fits the sector, using `productAsk`. Real estate asks which property (project, type, location), with property examples instead of salon/coaching. With a sector set, the Meta draft category is the sector label, and the owner's answer becomes the product.
 - **Migration/API impact:** Run `npm run migrate` (020_org_sector.sql) before restarting. The login query reads `o.sector`.
 
 ### 2026-10-06 (Meta detailed targeting and plan research)

@@ -4,7 +4,7 @@ import { ApiError } from '../utils/errors.js';
 import { addMetaImageAd, campaignObjective, createMetaAd, createMetaAdSet, createMetaCampaign, listMetaPages, metaAudienceEstimate, metaLocationSize, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
 import { upsertObject } from '../repositories/connectionRepo.js';
 import { organizationSector } from '../repositories/workspaceRepo.js';
-import { sectorOf } from '../domain/sectors.js';
+import { productAsk, sectorOf } from '../domain/sectors.js';
 import { recordAudit } from './auditService.js';
 import { writeAdPlan } from './llmService.js';
 import { clearGoogleDraft } from './googleAdChat.js';
@@ -515,14 +515,15 @@ function nextIntake(payload) {
 
 function intakePrompt(step, english, payload) {
   const sector = sectorOf(payload?.sector);
+  const ask = productAsk(payload?.sector, english);
   if (step === 'category') {
     return card([
       header('Meta Ad Setup', say(english, 'Facebook + Instagram · 5 quick steps', 'Facebook + Instagram · 5 chhote steps')),
       sector ? hint(say(english, `Business sector: ${sector.label}. AIRO will plan the ad for this sector.`, `Business sector: ${sector.label}. AIRO isi sector ke hisaab se ad plan karega.`)) : '',
-      fmtStep(1, 5, 'Product', say(english, 'What should the ad sell?', 'Ad kis cheez ka hai?'), 'Example: 2BHK flats in Noida, salon, coaching classes')
+      fmtStep(1, 5, 'Product', ask.question, ask.example)
     ]);
   }
-  if (step === 'product') return fmtStep(1, 5, 'Product', say(english, 'What product or service should the ad sell?', 'Product ya service kya hai?'));
+  if (step === 'product') return fmtStep(1, 5, 'Product', ask.question, ask.example);
   if (step === 'website') {
     return fmtStep(
       2, 5, 'Website',
@@ -653,9 +654,9 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
 
   if (draft.step === 'category') {
     if (text.length < 2 || FILLER.test(text)) {
-      return { text: say(english, 'Tell me what the ad should sell.', 'Ad kis cheez ka hai, woh likho.') };
+      return { text: productAsk(payload.sector, english).question };
     }
-    payload.category = text.slice(0, 80);
+    payload.category = sectorOf(payload.sector)?.label || text.slice(0, 80);
     payload.product = text.slice(0, 120);
     const site = httpsWebsite(text);
     if (site) {

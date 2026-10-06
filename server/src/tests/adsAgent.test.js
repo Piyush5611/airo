@@ -21,7 +21,7 @@ import { usableInterest } from '../services/adsAgent/chatPlanner.js';
 import { menuMessage, messageParts } from '../services/whatsappService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
-import { GOAL_LABELS, SECTORS, SECTOR_KEYS, sectorFacts, sectorOf } from '../domain/sectors.js';
+import { GOAL_LABELS, SECTORS, SECTOR_KEYS, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
 import { organizationSchema } from '../validators/schemas.js';
 
 test('sectors are complete and give guidance, not claims', () => {
@@ -49,6 +49,16 @@ test('meta goal choices list every sector goal, or all goals without a sector', 
   assert.match(restaurant, /Table bookings/);
   const plain = goalChoices(null, true);
   for (const key of ['leads', 'appointments', 'sales', 'awareness', 'traffic']) assert.match(plain, new RegExp(`\\*${key}\\*`));
+});
+
+test('the first ad question fits the business sector', () => {
+  const estate = productAsk('real_estate', false);
+  assert.match(estate.question, /property/);
+  assert.match(estate.example, /2BHK flats/);
+  assert.doesNotMatch(estate.example, /salon|coaching/i);
+  assert.match(productAsk('edtech', true).question, /course or batch/);
+  assert.match(productAsk('', true).question, /What should the ad sell/);
+  for (const key of SECTOR_KEYS) assert.ok(productAsk(key, true).question.length > 10, key);
 });
 
 test('sector reaches the ad planner facts', () => {

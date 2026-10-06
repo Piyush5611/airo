@@ -2,6 +2,8 @@ import { one, run } from '../db/sql.js';
 import { decryptJson } from '../utils/cryptoBox.js';
 import { createGoogleSearchCampaign, googleKeywordIdeas, setGoogleCampaignStatus, suggestGoogleLocations } from '../integrations/googleAds.js';
 import { upsertObject } from '../repositories/connectionRepo.js';
+import { organizationSector } from '../repositories/workspaceRepo.js';
+import { productAsk, sectorOf } from '../domain/sectors.js';
 import { recordAudit } from './auditService.js';
 import { writeGoogleAdPlan } from './llmService.js';
 import { LINE, bullets, card, field, header, hint, money, numbered, options, section, step as fmtStep } from './adsAgent/waFormat.js';
@@ -327,11 +329,14 @@ async function afterWebsite(organizationId, conversationId, payload, english) {
   return { text: intakePrompt('details', english) };
 }
 
-function intakePrompt(step, english) {
+function intakePrompt(step, english, sectorKey = '') {
   if (step === 'product') {
+    const sector = sectorOf(sectorKey);
+    const ask = productAsk(sectorKey, english);
     return card([
       header(say(english, 'Google Search Ad Setup', 'Google Search Ad Setup'), say(english, 'AIRO assistant · 5 quick steps', 'AIRO assistant · 5 chhote steps')),
-      fmtStep(1, 5, say(english, 'Product', 'Product'), say(english, 'What should the ad promote?', 'Ad kis cheez ki hai?'), say(english, 'Example: 2BHK flats in Noida, dental clinic, coaching classes', 'Example: 2BHK flats in Noida, dental clinic, coaching classes'))
+      sector ? hint(say(english, `Business sector: ${sector.label}. AIRO will plan the ad for this sector.`, `Business sector: ${sector.label}. AIRO isi sector ke hisaab se ad plan karega.`)) : '',
+      fmtStep(1, 5, say(english, 'Product', 'Product'), ask.question, ask.example)
     ]);
   }
   if (step === 'website') return fmtStep(2, 5, 'Website', say(english, 'Send the link where people should land.', 'Woh link bhejo jahan log aayenge.'), say(english, 'Must start with https://', 'https:// se shuru hona chahiye'));
@@ -393,10 +398,10 @@ async function begin(organizationId, conversationId, text, english) {
   const account = await googleAccount(organizationId);
   if (!account) return { text: `I am the AIRO assistant. ${connectLine(english)}` };
   const closedMeta = await clearMetaDraft(conversationId);
-  const payload = { lang: english ? 'en' : 'hi', currency: account.input.currency };
+  const payload = { lang: english ? 'en' : 'hi', currency: account.input.currency, sector: await organizationSector(organizationId) };
   await saveDraft(organizationId, conversationId, 'product', payload);
   const note = closedMeta ? say(english, 'The open Meta ad setup in this chat is closed. ', 'Is chat ka khula Meta ad setup band kar diya. ') : '';
-  return { text: `${note}${intakePrompt('product', english)}` };
+  return { text: `${note}${intakePrompt('product', english, payload.sector)}` };
 }
 
 async function continueDraft(organizationId, conversationId, draft, text, english) {
@@ -404,7 +409,7 @@ async function continueDraft(organizationId, conversationId, draft, text, englis
   const ask = (step, message) => saveDraft(organizationId, conversationId, step, payload, draft.campaignId).then(() => ({ text: message }));
 
   if (draft.step === 'product') {
-    if (text.length < 2) return { text: intakePrompt('product', english) };
+    if (text.length < 2) return { text: intakePrompt('product', english, payload.sector) };
     payload.product = text.slice(0, 120);
     const site = httpsWebsite(text);
     if (site) {

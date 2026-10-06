@@ -323,6 +323,30 @@ export const SECTORS = PLAYBOOKS.map((sector) => ({
 
 export const SECTOR_KEYS = SECTORS.map((sector) => sector.key);
 
+const PRODUCT_ASK = {
+  real_estate: ['Which property is this ad for? Write the project, type and location.', 'Kaunsi property ka ad hai? Project, type aur location likho.', '2BHK flats in Sector 150 Noida, plots in Greater Noida, Prestige Lakeside 3BHK'],
+  ecommerce: ['Which product or collection is this ad for?', 'Kaunse product ya collection ka ad hai?', 'Cotton kurtis for women, wireless earbuds, festive gift hampers'],
+  it_saas: ['Which software or service is this ad for?', 'Kaunsi software ya service ka ad hai?', 'CRM for real estate brokers, website development, school ERP'],
+  edtech: ['Which course or batch is this ad for?', 'Kaunse course ya batch ka ad hai?', 'NEET 2027 dropper batch, spoken English course, CA foundation classes'],
+  college: ['Which course or admission is this ad for?', 'Kaunse course ya admission ka ad hai?', 'BBA admissions 2027, B.Tech CSE, MBA with placements'],
+  restaurant: ['What should the ad promote: the outlet, a dish or an offer?', 'Ad kis cheez ka hai: outlet, koi dish ya offer?', 'New cafe in Indiranagar, weekend buffet, party orders'],
+  hotel: ['Which property, room or package is this ad for?', 'Kaunsi property, room ya package ka ad hai?', 'Resort in Rishikesh, weekend getaway package, wedding venue'],
+  healthcare: ['Which treatment or service is this ad for?', 'Kaunse treatment ya service ka ad hai?', 'Dental implants, full body checkup, IVF consultation'],
+  beauty_fitness: ['Which service or membership is this ad for?', 'Kaunsi service ya membership ka ad hai?', 'Bridal makeup, hair spa offer, gym membership'],
+  travel: ['Which package or destination is this ad for?', 'Kaunse package ya destination ka ad hai?', 'Kashmir 5 day package, Dubai tour, Char Dham yatra'],
+  automobile: ['Which model or service is this ad for?', 'Kaunse model ya service ka ad hai?', 'New Creta on-road offer, car service at home, used cars'],
+  finance: ['Which loan, policy or product is this ad for?', 'Kaunse loan, policy ya product ka ad hai?', 'Home loan, term insurance, mutual fund SIP'],
+  local_services: ['Which service is this ad for?', 'Kaunsi service ka ad hai?', 'AC repair, home interiors, GST filing'],
+  retail_store: ['Which store, product range or offer is this ad for?', 'Kaunse store, product range ya offer ka ad hai?', 'Furniture showroom sale, mobile store, saree collection'],
+  b2b_manufacturing: ['Which product or bulk offer is this ad for?', 'Kaunse product ya bulk offer ka ad hai?', 'PVC pipes wholesale, packaging boxes, industrial valves'],
+  other: ['What should the ad sell?', 'Ad kis cheez ka hai?', 'Your product or service, with the city if it is local']
+};
+
+export function productAsk(key, english) {
+  const [en, hi, examples] = PRODUCT_ASK[key] || ['What should the ad sell?', 'Ad kis cheez ka hai?', '2BHK flats in Noida, dental clinic, coaching classes'];
+  return { question: english ? en : hi, example: `Example: ${examples}` };
+}
+
 export function sectorOf(key) {
   return SECTORS.find((sector) => sector.key === key) || null;
 }

@@ -205,7 +205,7 @@ async function whatsappFacts({ organizationId, recognized, businessLabel, messag
     ? `This WhatsApp number is registered to ${name} (${businessLabel}).`
     : `This WhatsApp number is registered to ${name}.`);
   const sector = sectorOf(await organizationSector(organizationId));
-  if (sector) lines.push(`Business sector (set by the owner): ${sector.label}. Usual ad goal for this sector: ${sector.goal}.`);
+  if (sector) lines.push(`Business sector (set by the owner): ${sector.label}. Ad goals that fit this sector, most common first: ${sector.goals.map((goal) => goal.key).join(', ')}. The goal is chosen per campaign.`);
   try {
     const links = await many(
       `SELECT p.name AS providerName, c.status, c.mode,

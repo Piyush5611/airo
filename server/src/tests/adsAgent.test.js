@@ -6,23 +6,31 @@ import {
   budgetTotal, campaignFindings, experimentFindings, experimentGroups, mergeQuality, pacingFindings, qualityFindings,
   scaleBudgets, scaleFindings, splitWindows, zScore
 } from '../services/adsAgent/monitorRules.js';
-import { chosenNames, hasProfileDetails, intakeFacts } from '../services/adsAgent/chatPlanner.js';
+import {
+  bestCities, chosenNames, cityChoices, cityMenu, cityPick, droppedCity, hasProfileDetails, intakeFacts, meansAll, officeCityNote, wantsOtherCity
+} from '../services/adsAgent/chatPlanner.js';
 import { competitorTopic, libraryStats, wantsCompetitorInfo } from '../services/adsAgent/competitorResearch.js';
 import { platformsAsked, statusGroups, wantsCampaignCount } from '../services/adsAgent/campaignCount.js';
 import { reportRequest } from '../services/whatsappReport.js';
 import { chatFacts, withLatest } from '../services/whatsappIntent.js';
-import { NOT_DESIGN, RAW_PHOTO, USE_DESIGN, budgetAmount, campaignName, peopleCount } from '../services/metaAdChat.js';
+import {
+  NOT_DESIGN, RAW_PHOTO, USE_DESIGN, budgetAmount, campaignName, goalChoices, peopleCount, radiusFrom, radiusMenu, withRadius
+} from '../services/metaAdChat.js';
+import { demandSection } from '../services/googleAdChat.js';
 import { usableInterest } from '../services/adsAgent/chatPlanner.js';
-import { messageParts } from '../services/whatsappService.js';
+import { menuMessage, messageParts } from '../services/whatsappService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
-import { SECTORS, SECTOR_KEYS, sectorFacts, sectorOf } from '../domain/sectors.js';
+import { GOAL_LABELS, SECTORS, SECTOR_KEYS, sectorFacts, sectorOf } from '../domain/sectors.js';
 import { organizationSchema } from '../validators/schemas.js';
 
 test('sectors are complete and give guidance, not claims', () => {
   assert.equal(new Set(SECTOR_KEYS).size, SECTORS.length);
   for (const sector of SECTORS) {
-    assert.ok(sector.label && sector.goal && sector.leadPath, sector.key);
+    assert.ok(sector.label && sector.leadPath, sector.key);
+    assert.ok(sector.goals.length >= 3, sector.key);
+    assert.equal(new Set(sector.goals.map((goal) => goal.key)).size, sector.goals.length, sector.key);
+    for (const goal of sector.goals) assert.ok(GOAL_LABELS[goal.key] && goal.when, `${sector.key} ${goal.key}`);
     assert.ok(sector.angles.length && sector.creatives.length && sector.kpis.length, sector.key);
   }
   assert.equal(sectorOf('real_estate').special, 'HOUSING');
@@ -31,6 +39,16 @@ test('sectors are complete and give guidance, not claims', () => {
   const facts = sectorFacts('edtech').join('\n');
   assert.match(facts, /Business sector: /);
   assert.match(facts, /general guidance, not facts/);
+  assert.match(facts, /never assume leads/);
+  assert.match(facts, /awareness \(/);
+});
+
+test('meta goal choices list every sector goal, or all goals without a sector', () => {
+  const restaurant = goalChoices(sectorOf('restaurant'), true);
+  assert.ok(restaurant.indexOf('*awareness*') < restaurant.indexOf('*leads*'));
+  assert.match(restaurant, /Table bookings/);
+  const plain = goalChoices(null, true);
+  for (const key of ['leads', 'appointments', 'sales', 'awareness', 'traffic']) assert.match(plain, new RegExp(`\\*${key}\\*`));
 });
 
 test('sector reaches the ad planner facts', () => {
@@ -38,6 +56,96 @@ test('sector reaches the ad planner facts', () => {
   assert.match(facts, /Business sector: Real estate/);
   assert.match(facts, /suggest only, never force/);
   assert.doesNotMatch(intakeFacts({ product: 'Flats' }, { category: 'Shop' }).join('\n'), /Business sector/);
+});
+
+test('office city is told to the planner as the office, not the ad target', () => {
+  const facts = intakeFacts({ product: 'Online course' }, { officeCity: 'Indore' }).join('\n');
+  assert.match(facts, /Office city \(where the business sits; not automatically where buyers are\): Indore/);
+  assert.doesNotMatch(facts, /Target locations/);
+});
+
+test('city suggestions show a reason each and flag an office city left out', () => {
+  const suggestion = {
+    cities: ['Bangalore', 'Pune'],
+    cityNotes: [{ city: 'bangalore', why: 'Most IT buyers' }],
+    officeCity: 'Indore'
+  };
+  assert.deepEqual(cityChoices(suggestion), ['Bangalore - Most IT buyers', 'Pune']);
+  assert.match(officeCityNote(suggestion, true), /office is in Indore/);
+  assert.equal(officeCityNote({ ...suggestion, cities: ['Indore', 'Bhopal'] }, true), '');
+  assert.equal(officeCityNote({ cities: ['Pune'] }, true), '');
+});
+
+test('city taps add and remove one by one, then Done, Best or typed names finish', () => {
+  const suggestion = { cities: ['Noida', 'Gurgaon', 'Ghaziabad'], bestCities: ['gurgaon'], cityNotes: [{ city: 'Noida', why: 'Project city' }] };
+  let pick = cityPick('Noida', suggestion, []);
+  assert.deepEqual(pick, { kind: 'toggle', picked: ['Noida'], added: true, city: 'Noida' });
+  pick = cityPick('Gurgaon', suggestion, pick.picked);
+  assert.deepEqual(pick.picked, ['Noida', 'Gurgaon']);
+  assert.deepEqual(cityPick('✓ Noida', suggestion, pick.picked).picked, ['Gurgaon']);
+  assert.deepEqual(cityPick('Done', suggestion, ['Noida', 'Gurgaon']), { kind: 'final', names: ['Noida', 'Gurgaon'] });
+  assert.deepEqual(cityPick('done', suggestion, []), { kind: 'empty' });
+  assert.deepEqual(cityPick('Best pick', suggestion, []), { kind: 'final', names: ['Gurgaon'] });
+  assert.deepEqual(bestCities({ cities: ['A', 'B', 'C'] }), ['A', 'B']);
+  assert.equal(cityPick('Delhi, Pune', suggestion, []), null);
+  assert.equal(cityPick('All suggested', suggestion, []), null);
+});
+
+test('meta radius reads taps and typed km, inside Meta limits', () => {
+  assert.deepEqual(radiusFrom('City only'), { km: 0 });
+  assert.deepEqual(radiusFrom('sirf city'), { km: 0 });
+  assert.deepEqual(radiusFrom('+25 km'), { km: 25, asked: 25, adjusted: false });
+  assert.deepEqual(radiusFrom('10 km'), { km: 17, asked: 10, adjusted: true });
+  assert.deepEqual(radiusFrom('150km'), { km: 80, asked: 150, adjusted: true });
+  assert.deepEqual(radiusFrom('3'), { km: 25 });
+  assert.equal(radiusFrom('haan'), null);
+  const located = withRadius([{ key: '1', name: 'Noida', radiusMode: 'city' }], 40);
+  assert.deepEqual(located, [{ key: '1', name: 'Noida', radiusMode: 'radius', radius: 40 }]);
+  assert.deepEqual(withRadius(located, 0), [{ key: '1', name: 'Noida', radiusMode: 'city' }]);
+  const menu = radiusMenu([{ km: 0, sizeLow: 4000000, sizeHigh: 4700000 }, { km: 25, sizeLow: null, sizeHigh: null }], false);
+  assert.equal(menu.rows[0].title, 'City only');
+  assert.match(menu.rows[0].description, /40 lakh-47 lakh log/);
+  assert.match(menu.rows[1].description, /andaaza nahi mila/);
+  for (const row of menu.rows) assert.ok(row.title.length <= 24 && row.description.length <= 72 && /^radius_/.test(row.id));
+});
+
+test('google location step shows real monthly searches only', () => {
+  const text = demandSection([{ text: '2bhk flats noida', searches: 5400 }, { text: 'flats noida', searches: null }], true);
+  assert.match(text, /2bhk flats noida: \*5,400\*/);
+  assert.doesNotMatch(text, /null/);
+  assert.equal((text.match(/: \*/g) || []).length, 1);
+  assert.match(demandSection([], true), /did not return search numbers/);
+});
+
+test('cities outside the list can be added and removed by text', () => {
+  for (const value of ['Add other city', 'other city', 'apni city likho', 'aur city add karo', 'doosri city']) assert.equal(wantsOtherCity(value), true, value);
+  for (const value of ['Lucknow', 'Noida', 'other city Lucknow ok?']) assert.equal(wantsOtherCity(value), false, value);
+  assert.deepEqual(droppedCity('remove Lucknow', ['Noida', 'Lucknow']), { city: 'Lucknow', picked: ['Noida'] });
+  assert.deepEqual(droppedCity('lucknow hatao', ['Noida', 'Lucknow']), { city: 'Lucknow', picked: ['Noida'] });
+  assert.equal(droppedCity('remove Pune', ['Noida']), null);
+  assert.equal(droppedCity('Lucknow', ['Lucknow']), null);
+  assert.equal(meansAll('All suggested'), true);
+  assert.equal(meansAll('Lucknow'), false);
+});
+
+test('city menu fits WhatsApp list limits and marks picked cities', () => {
+  const suggestion = { cities: ['Noida', 'Gurgaon', 'Ghaziabad', 'Delhi', 'Faridabad', 'Greater Noida'], bestPick: 'Start with Noida and Gurgaon', cityNotes: [{ city: 'Noida', why: 'Project city' }] };
+  const menu = cityMenu(suggestion, ['Noida'], true);
+  assert.ok(menu.rows.length <= 10);
+  assert.equal(menu.rows[0].title, 'Done');
+  assert.ok(menu.rows.some((row) => row.title === '✓ Noida'));
+  assert.ok(menu.rows.some((row) => row.title === 'All India'));
+  assert.ok(menu.rows.some((row) => row.title === 'Add other city'));
+  assert.equal(cityMenu(suggestion, [], true).rows.filter((row) => !['city_best', 'city_all', 'city_other', 'city_india'].includes(row.id)).length, 6);
+  for (const row of menu.rows) {
+    assert.ok(row.title.length <= 24 && (row.description || '').length <= 72);
+    assert.match(row.id, /^city_/);
+  }
+  assert.equal(new Set(menu.rows.map((row) => row.id)).size, menu.rows.length);
+  assert.equal(cityMenu({ cities: [] }, [], true), null);
+  const message = menuMessage(menu);
+  assert.equal(message.interactive.type, 'list');
+  assert.ok(message.interactive.action.button.length <= 20);
 });
 
 test('organization form accepts only known sectors', () => {

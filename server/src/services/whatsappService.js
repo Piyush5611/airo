@@ -161,7 +161,8 @@ export async function receiveWebhook(body) {
         });
         if (saved?.reply) {
           const forwarded = Boolean(message.context?.forwarded || message.context?.frequently_forwarded);
-          answerWithModel({ ...saved, forwarded }).catch(async (error) => {
+          const tapId = String(message.interactive?.list_reply?.id || message.interactive?.button_reply?.id || '');
+          answerWithModel({ ...saved, forwarded, tapId }).catch(async (error) => {
             const reason = String(error?.message || 'The model did not reply.').slice(0, 180);
             console.error('WhatsApp model reply skipped:', reason);
             try {
@@ -363,6 +364,9 @@ async function answerWithModel(saved) {
     }
   }
   const lastText = String([...messages].reverse().find((row) => row.role === 'user')?.content || '');
+  if (/^(city|radius)_/.test(String(saved.tapId || '')) && saved.recognized && saved.organizationId) {
+    if (await sendAdChat(saved, messages, { force: true })) return;
+  }
   const route = saved.recognized && saved.organizationId && lastText && !imageBase64 && !imageError
     ? await classifyMessage({ organizationId: saved.organizationId, conversationId: saved.conversationId, messages })
     : null;
@@ -388,11 +392,7 @@ async function answerWithModel(saved) {
     messages
   });
   if (google?.text) {
-    await deliverWhatsapp({
-      conversationId: saved.conversationId,
-      text: String(google.text).slice(0, 4000),
-      actionTaken: 'Google ad'
-    });
+    await deliverAdChat(saved.conversationId, google, 'Google ad');
     return;
   }
   const meta = await handleMetaAdChat({
@@ -423,6 +423,40 @@ async function deliverAdChat(conversationId, reply, actionTaken) {
   for (const part of messageParts(String(reply.text))) {
     await deliverWhatsapp({ conversationId, text: part, actionTaken });
   }
+  if (reply.menu?.rows?.length) {
+    try {
+      await deliverWhatsappMenu({ conversationId, menu: reply.menu, actionTaken: `${actionTaken} options` });
+    } catch (error) {
+      console.error('WhatsApp ad options skipped:', String(error?.message || 'failed').slice(0, 180));
+    }
+  }
+}
+
+export function menuMessage(menu) {
+  return {
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: String(menu.body || 'Choose an option').slice(0, 1024) },
+      action: {
+        button: String(menu.button || 'Choose').slice(0, 20),
+        sections: [{
+          title: String(menu.title || 'Options').slice(0, 24),
+          rows: menu.rows.slice(0, 10).map((row) => ({
+            id: String(row.id).slice(0, 200),
+            title: String(row.title).slice(0, 24),
+            ...(row.description ? { description: String(row.description).slice(0, 72) } : {})
+          }))
+        }]
+      }
+    }
+  };
+}
+
+async function deliverWhatsappMenu({ conversationId, menu, actionTaken }) {
+  const target = await whatsappTarget(conversationId);
+  await postWhatsapp(target, menuMessage(menu));
+  await saveOutbound(conversationId, `${menu.body}\n\n[${menu.rows.map((row) => row.title).join(' | ')}]`, actionTaken);
 }
 
 export function messageParts(text, limit = 3800) {
@@ -450,7 +484,7 @@ async function sendAdChat(saved, messages, { force = false, only = '' } = {}) {
     force
   });
   if (google?.text) {
-    await deliverWhatsapp({ conversationId: saved.conversationId, text: String(google.text).slice(0, 4000), actionTaken: 'Google ad' });
+    await deliverAdChat(saved.conversationId, google, 'Google ad');
     return true;
   }
   const meta = only === 'google' ? null : await handleMetaAdChat({

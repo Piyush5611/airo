@@ -1,7 +1,7 @@
 import { one, run } from '../db/sql.js';
 import { decryptJson } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
-import { addMetaImageAd, campaignObjective, createMetaAd, createMetaAdSet, createMetaCampaign, listMetaPages, metaAudienceEstimate, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
+import { addMetaImageAd, campaignObjective, createMetaAd, createMetaAdSet, createMetaCampaign, listMetaPages, metaAudienceEstimate, metaLocationSize, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
 import { upsertObject } from '../repositories/connectionRepo.js';
 import { organizationSector } from '../repositories/workspaceRepo.js';
 import { sectorOf } from '../domain/sectors.js';
@@ -10,7 +10,7 @@ import { writeAdPlan } from './llmService.js';
 import { clearGoogleDraft } from './googleAdChat.js';
 import { LINE, bullets, card, field, header, hint, money, numbered, options, section, step as fmtStep } from './adsAgent/waFormat.js';
 import {
-  businessProfile, chosenNames, hasProfileDetails, pickMetaAudience, resolveMetaCities, suggestTargeting, usableInterest, writeMetaCopy
+  businessProfile, chosenNames, cityChoices, cityMenu, cityPick, droppedCity, hasProfileDetails, meansAll, officeCityNote, pickMetaAudience, wantsOtherCity, resolveMetaCities, suggestTargeting, usableInterest, writeMetaCopy
 } from './adsAgent/chatPlanner.js';
 import { variantCreatives } from './adsAgent/adCreative.js';
 
@@ -480,6 +480,27 @@ function impliedSpecial(text) {
   return '';
 }
 
+const GOAL_WORDS = {
+  leads: ['enquiries with name and phone', 'naam aur phone wali enquiries'],
+  appointments: ['bookings or visits', 'booking ya visit'],
+  sales: ['online orders', 'online orders'],
+  awareness: ['reach many people, launch or offer', 'zyada logon tak pahuncho, launch ya offer'],
+  traffic: ['visits to your website or page', 'website ya page pe visits']
+};
+
+export function goalChoices(sector, english) {
+  if (!sector) {
+    return bullets(Object.entries(GOAL_WORDS).map(([key, words]) => `*${key}* - ${say(english, words[0], words[1])}`));
+  }
+  return card([
+    say(english, `Goals that work for ${sector.label}:`, `${sector.label} ke liye ye goals chalte hain:`),
+    bullets(sector.goals.map((goal) => `*${goal.key}* - ${goal.when}`)),
+    hint(say(english, 'Any other goal is fine too: leads, appointments, sales, awareness, traffic.', 'Koi aur goal bhi chalega: leads, appointments, sales, awareness, traffic.'))
+  ]);
+}
+
+const LINK_GOALS = ['OUTCOME_SALES', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS'];
+
 function nextIntake(payload) {
   if (!payload.category) return 'category';
   if (!payload.product) return 'product';
@@ -488,7 +509,7 @@ function nextIntake(payload) {
   if (!payload.region && !(Array.isArray(payload.locations) && payload.locations.length)) return 'region';
   if (!payload.dailyBudget) return 'budget';
   if (!payload.objectiveKey) return 'objective';
-  if (payload.noWebsite && payload.objectiveKey === 'OUTCOME_SALES' && !payload.website) return 'shop';
+  if (payload.noWebsite && LINK_GOALS.includes(payload.objectiveKey) && !payload.website) return 'shop';
   return 'ready';
 }
 
@@ -526,10 +547,14 @@ function intakePrompt(step, english, payload) {
     return card([
       `*Step 4/5 · ${say(english, 'Audience', 'Audience')}*`,
       noSite,
-      section(say(english, 'AI suggested cities', 'AI suggested cities'), numbered(s.cities)),
+      section(say(english, 'Where your buyers are (AIRO suggestion)', 'Buyers kahan hain (AIRO suggestion)'), numbered(cityChoices(s))),
+      s.bestPick ? `*${say(english, 'Best to start', 'Shuru karne ke liye best')}:* ${s.bestPick}` : '',
+      hint(officeCityNote(s, english)),
       section(say(english, 'AI suggested audience', 'AI suggested audience'), [field('Age', `${s.ageMin}-${s.ageMax}`), field('Gender', gender)]),
       s.why ? hint(`${say(english, 'Why', 'Kyun')}: ${s.why}`) : '',
-      section(say(english, 'Reply with', 'Reply karo'), options([
+      section(say(english, 'Choose', 'Chuno'), options([
+        [say(english, 'Choose cities', 'Cities chuno'), say(english, 'tap the button below and add cities one by one', 'neeche button dabao aur cities ek-ek add karo')],
+        ['best', say(english, 'use the best pick', 'best pick use karo')],
         ['ok', say(english, 'use all cities', 'sab cities use karo')],
         ['1,2', say(english, 'pick by number', 'number se chuno')],
         ['Delhi, Pune', say(english, 'your own cities', 'apni cities')],
@@ -544,25 +569,25 @@ function intakePrompt(step, english, payload) {
     return fmtStep(
       5, 5, say(english, 'Budget and goal', 'Budget aur goal'),
       card([
-        say(english, 'Send the daily budget and what you want:', 'Roz ka budget aur goal bhejo:'),
-        bullets(say(english, ['*leads* - enquiries with name and phone', '*appointments* - bookings or visits', '*sales* - ecommerce orders'], ['*leads* - naam aur phone wali enquiries', '*appointments* - booking ya visit', '*sales* - ecommerce orders']))
+        say(english, 'Send the daily budget and what you want from this campaign:', 'Roz ka budget aur is campaign ka goal bhejo:'),
+        goalChoices(sector, english)
       ]),
-      sector
-        ? say(english, `Example: 500 ${sector.goal}  ·  ${sector.label} usually runs on *${sector.goal}*`, `Example: 500 ${sector.goal}  ·  ${sector.label} ke liye aksar *${sector.goal}* chalta hai`)
-        : say(english, 'Example: 500 leads', 'Example: 500 leads')
+      `Example: 500 ${sector?.goals[0]?.key || 'leads'}`
     );
   }
   if (step === 'objective') {
     return card([
-      `*${say(english, 'What is the goal?', 'Goal kya hai?')}*`,
-      sector ? hint(say(english, `Usual for ${sector.label}: ${sector.goal}`, `${sector.label} ke liye aksar: ${sector.goal}`)) : '',
-      options([['leads', say(english, 'enquiries', 'enquiries')], ['appointments', say(english, 'bookings or visits', 'booking ya visit')], ['sales', say(english, 'ecommerce orders', 'ecommerce orders')]])
+      `*${say(english, 'What is the goal of this campaign?', 'Is campaign ka goal kya hai?')}*`,
+      goalChoices(sector, english)
     ]);
   }
   if (step === 'shop') {
+    const sales = payload?.objectiveKey === 'OUTCOME_SALES';
     return card([
-      say(english, 'Ecommerce sales need an https shop link.', 'Ecommerce sales ke liye https shop link chahiye.'),
-      options([['https://...', say(english, 'your shop link', 'aapka shop link')], ['leads', say(english, 'switch to enquiries', 'enquiries pe switch')], ['appointments', say(english, 'switch to bookings', 'booking pe switch')]])
+      sales
+        ? say(english, 'Ecommerce sales need an https shop link.', 'Ecommerce sales ke liye https shop link chahiye.')
+        : say(english, `${payload?.objectiveLabel || 'This goal'} sends people to a link. Send any https link: website, Instagram, Zomato, Google Maps or a landing page.`, `${payload?.objectiveLabel || 'Is goal'} mein log ek link pe jaate hain. Koi bhi https link bhejo: website, Instagram, Zomato, Google Maps ya landing page.`),
+      options([['https://...', say(english, 'your link', 'aapka link')], ['leads', say(english, 'switch to enquiries', 'enquiries pe switch')], ['appointments', say(english, 'switch to bookings', 'booking pe switch')]])
     ]);
   }
   return card([
@@ -595,7 +620,10 @@ function langOf(draft, text) {
 async function continueDraft(organizationId, conversationId, draft, text, messages, imageBase64 = '', imageError = '') {
   const english = langOf(draft, text);
   const payload = { ...draft.payload, lang: english ? 'en' : 'hi' };
-  const ask = (step, message) => saveDraft(organizationId, conversationId, step, payload, draft.campaignId).then(() => ({ text: message }));
+  const ask = (step, message) => saveDraft(organizationId, conversationId, step, payload, draft.campaignId).then(() => ({
+    text: message,
+    menu: step === 'region' ? cityMenu(payload.suggestion, payload.pickedCities || [], english) : null
+  }));
   const goNext = async () => {
     let step = nextIntake(payload);
     if (step === 'details' && hasProfileDetails(await businessProfile(organizationId))) {
@@ -603,9 +631,10 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
       step = nextIntake(payload);
     }
     if (step === 'region' && !payload.suggestion) {
-      const suggestion = await suggestTargeting({ organizationId, payload, profile: await businessProfile(organizationId), platform: 'meta' });
+      const profile = await businessProfile(organizationId);
+      const suggestion = await suggestTargeting({ organizationId, payload, profile, platform: 'meta' });
       if (suggestion) {
-        payload.suggestion = suggestion;
+        payload.suggestion = { ...suggestion, officeCity: profile?.officeCity || '' };
         payload.sellingPoints = suggestion.sellingPoints;
       }
     }
@@ -658,6 +687,16 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
   if (draft.step === 'region' || draft.step === 'region_pick') {
     return pickRegion(organizationId, conversationId, payload, text, english, draft.step);
   }
+  if (draft.step === 'radius') {
+    const choice = radiusFrom(text, (payload.radiusOptions || []).length || undefined);
+    if (!choice) {
+      return {
+        text: say(english, 'Tap a radius, or type city only or a number like 30 km.', 'Radius tap karo, ya city only ya 30 km jaisa number likho.'),
+        menu: payload.radiusOptions?.length ? radiusMenu(payload.radiusOptions, english) : null
+      };
+    }
+    return applyRadius(organizationId, conversationId, payload, english, choice);
+  }
   if (draft.step === 'budget') {
     const amount = budgetAmount(text);
     if (amount < 1) {
@@ -674,7 +713,7 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
   if (draft.step === 'objective') {
     const objective = objectiveFrom(text);
     if (!objective) {
-      return { text: say(english, 'Reply with leads, appointments, or ecommerce sales.', 'Leads, appointments, ya ecommerce sales likho.') };
+      return { text: say(english, 'Reply with leads, appointments, sales, awareness or traffic.', 'Leads, appointments, sales, awareness ya traffic likho.') };
     }
     applyObjective(payload, objective);
     return goNext();
@@ -684,14 +723,16 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
     if (website) {
       payload.website = website;
       payload.noWebsite = false;
-      payload.objectiveKey = 'OUTCOME_SALES';
-      payload.objectiveLabel = 'ecommerce sales';
       payload.conversion = 'website';
-      payload.cta = 'SHOP_NOW';
+      if (!LINK_GOALS.includes(payload.objectiveKey)) {
+        payload.objectiveKey = 'OUTCOME_SALES';
+        payload.objectiveLabel = 'ecommerce sales';
+      }
+      payload.cta = payload.objectiveKey === 'OUTCOME_SALES' ? 'SHOP_NOW' : 'LEARN_MORE';
     } else {
       const objective = objectiveFrom(text);
-      if (!objective || objective.key === 'OUTCOME_SALES') {
-        return { text: say(english, 'Send the https shop link, or reply leads or appointments.', 'https shop link bhejo, ya leads ya appointments likho.') };
+      if (!objective || LINK_GOALS.includes(objective.key)) {
+        return { text: say(english, 'Send an https link, or reply leads or appointments.', 'https link bhejo, ya leads ya appointments likho.') };
       }
       payload.objectiveKey = objective.key;
       payload.objectiveLabel = objective.label;
@@ -759,26 +800,64 @@ async function pickRegion(organizationId, conversationId, payload, text, english
     payload.region = picked.region ? `${picked.name}, ${picked.region}` : picked.name;
     payload.locations = [{ key: picked.key, name: picked.name, radiusMode: 'city' }];
     delete payload.locationChoices;
-    await saveDraft(organizationId, conversationId, 'budget', payload);
-    return { text: intakePrompt('budget', english, payload) };
+    return askRadius(account, organizationId, conversationId, payload, english);
   }
-  const names = chosenNames(text, payload.suggestion?.cities || []);
+  const tapped = payload.pickedCities || [];
+  const pick = step === 'region' ? cityPick(text, payload.suggestion, tapped) : null;
+  if (pick?.kind === 'toggle' || pick?.kind === 'empty') {
+    if (pick.kind === 'toggle') payload.pickedCities = pick.picked;
+    await saveDraft(organizationId, conversationId, 'region', payload);
+    const note = pick.kind === 'empty'
+      ? say(english, 'No city selected yet. Tap a city first.', 'Abhi koi city select nahi hui. Pehle city tap karo.')
+      : pick.added ? say(english, `${pick.city} added.`, `${pick.city} add ho gaya.`) : say(english, `${pick.city} removed.`, `${pick.city} hata diya.`);
+    return { text: note, menu: cityMenu(payload.suggestion, payload.pickedCities || [], english) };
+  }
+  if (step === 'region' && payload.suggestion?.cities?.length && !pick) {
+    const menu = () => cityMenu(payload.suggestion, payload.pickedCities || [], english);
+    if (wantsOtherCity(text)) {
+      payload.addingCity = true;
+      await saveDraft(organizationId, conversationId, 'region', payload);
+      return { text: say(english, 'Type the city name. For more than one, separate with commas (example: Lucknow, Kanpur).', 'City ka naam likho. Ek se zyada ho to comma se alag karo (example: Lucknow, Kanpur).') };
+    }
+    const dropped = droppedCity(text, tapped);
+    if (dropped) {
+      payload.pickedCities = dropped.picked;
+      await saveDraft(organizationId, conversationId, 'region', payload);
+      return { text: say(english, `${dropped.city} removed.`, `${dropped.city} hata diya.`), menu: menu() };
+    }
+    if ((tapped.length || payload.addingCity) && !meansAll(text) && !/^\s*\d+(\s*[, ]\s*\d+)*\s*$/.test(text)) {
+      const { found, missing } = await resolveMetaCities(account.apiKey, chosenNames(text, []));
+      if (!found.length) {
+        return { text: say(english, 'Meta did not find that city. Check the spelling and type it again.', 'Meta ko ye city nahi mili. Spelling check karke dobara likho.'), menu: menu() };
+      }
+      const added = found.map((city) => city.name);
+      payload.pickedCities = [...new Set([...tapped, ...added])];
+      delete payload.addingCity;
+      await saveDraft(organizationId, conversationId, 'region', payload);
+      return {
+        text: card([
+          say(english, `${added.join(', ')} added.`, `${added.join(', ')} add ho gaya.`),
+          missing.length ? hint(say(english, `Not found on Meta: ${missing.join(', ')}`, `Meta pe nahi mili: ${missing.join(', ')}`)) : ''
+        ]),
+        menu: menu()
+      };
+    }
+  }
+  const typed = pick?.kind === 'final' ? pick.names : chosenNames(text, payload.suggestion?.cities || []);
+  const names = pick?.kind === 'final' ? typed : [...new Set([...tapped, ...typed])];
   if (names.length > 1 || payload.suggestion?.cities?.length) {
+    delete payload.pickedCities;
+    delete payload.addingCity;
     const { found, missing } = await resolveMetaCities(account.apiKey, names);
     if (!found.length) {
       return { text: say(english, 'Meta did not find those cities. Send other cities, or say all India.', 'Meta ko ye cities nahi mili. Doosri cities bhejo, ya all India likho.') };
     }
     payload.locations = found.map(({ key, name, radiusMode }) => ({ key, name, radiusMode }));
     payload.region = found.map((city) => (city.region ? `${city.name}, ${city.region}` : city.name)).join('; ');
-    await saveDraft(organizationId, conversationId, 'budget', payload);
-    return {
-      text: card([
-        section(say(english, 'Cities set', 'Cities set'), bullets(found.map((city) => (city.region ? `${city.name}, ${city.region}` : city.name)))),
-        missing.length ? hint(say(english, `Not found on Meta: ${missing.join(', ')}`, `Meta pe nahi mili: ${missing.join(', ')}`)) : '',
-        LINE,
-        intakePrompt('budget', english, payload)
-      ])
-    };
+    return askRadius(account, organizationId, conversationId, payload, english, card([
+      section(say(english, 'Cities set', 'Cities set'), bullets(found.map((city) => (city.region ? `${city.name}, ${city.region}` : city.name)))),
+      missing.length ? hint(say(english, `Not found on Meta: ${missing.join(', ')}`, `Meta pe nahi mili: ${missing.join(', ')}`)) : ''
+    ]));
   }
   try {
     choices = await searchMetaAudience({ apiKey: account.apiKey, kind: 'city', query: text });
@@ -790,8 +869,7 @@ async function pickRegion(organizationId, conversationId, payload, text, english
   if (picked) {
     payload.region = picked.region ? `${picked.name}, ${picked.region}` : picked.name;
     payload.locations = [{ key: picked.key, name: picked.name, radiusMode: 'city' }];
-    await saveDraft(organizationId, conversationId, 'budget', payload);
-    return { text: intakePrompt('budget', english, payload) };
+    return askRadius(account, organizationId, conversationId, payload, english);
   }
   if (choices.length > 1) {
     payload.locationChoices = choices.slice(0, 5);
@@ -800,6 +878,109 @@ async function pickRegion(organizationId, conversationId, payload, text, english
     return { text: say(english, `Which city?\n${lines.join('\n')}`, `Kaunsi city?\n${lines.join('\n')}`) };
   }
   return { text: say(english, 'Meta did not find that city. Send another city, or say all India.', 'Meta ko yeh city nahi mili. Doosri city bhejo, ya all India likho.') };
+}
+
+const RADIUS_OPTIONS = [0, 17, 25, 40, 80];
+
+export function withRadius(locations, km) {
+  return (locations || []).map(({ radius, ...loc }) => (km ? { ...loc, radiusMode: 'radius', radius: km } : { ...loc, radiusMode: 'city' }));
+}
+
+export function radiusFrom(text, optionCount = RADIUS_OPTIONS.length) {
+  const value = String(text || '').trim().toLowerCase();
+  if (/(city only|only city|sirf city|city hi|no radius|bina radius)/.test(value) || /^0\s*(km)?$/.test(value)) return { km: 0 };
+  const index = value.match(/^([1-9])$/);
+  if (index && Number(index[1]) <= optionCount) return { km: RADIUS_OPTIONS[Number(index[1]) - 1] ?? 0 };
+  const match = value.match(/(\d{1,3})\s*(km|kilomet|k\.m)?/);
+  if (!match) return null;
+  const asked = Number(match[1]);
+  if (!asked) return { km: 0 };
+  const km = Math.min(80, Math.max(17, asked));
+  return { km, asked, adjusted: km !== asked };
+}
+
+function radiusLabel(km, english) {
+  return km ? say(english, `City + ${km} km around`, `City + ${km} km aas-paas`) : say(english, 'City only', 'Sirf city');
+}
+
+function sizeText(row, english) {
+  return row?.sizeHigh ? `${audienceSize(row)} ${say(english, 'people', 'log')}` : say(english, 'no estimate', 'andaaza nahi mila');
+}
+
+export function radiusMenu(options, english) {
+  return {
+    body: say(english, 'Tap a radius. A bigger radius reaches more people, but also people further away.', 'Radius tap karo. Bada radius = zyada log, par door ke log bhi.'),
+    button: say(english, 'Choose radius', 'Radius chuno'),
+    title: 'Radius',
+    rows: options.map((option) => ({
+      id: `radius_${option.km}`,
+      title: option.km ? `+${option.km} km` : 'City only',
+      description: `${radiusLabel(option.km, english)} · ${sizeText(option, english)}`.slice(0, 72)
+    }))
+  };
+}
+
+function sizeInput(account, payload) {
+  const special = Boolean(payload.specialCategory);
+  const gender = payload.suggestion?.gender && payload.suggestion.gender !== 'all' ? payload.suggestion.gender : '';
+  return {
+    apiKey: account.apiKey,
+    accountId: account.accountId,
+    ageMin: special ? undefined : payload.suggestion?.ageMin,
+    gender: special ? '' : gender
+  };
+}
+
+async function askRadius(account, organizationId, conversationId, payload, english, intro = '') {
+  const input = sizeInput(account, payload);
+  const sizes = await Promise.all(RADIUS_OPTIONS.map((km) => metaLocationSize({ ...input, locations: withRadius(payload.locations, km) }).catch(() => null)));
+  payload.radiusOptions = RADIUS_OPTIONS.map((km, index) => ({ km, sizeLow: sizes[index]?.sizeLow || null, sizeHigh: sizes[index]?.sizeHigh || null }));
+  payload.regionBase = payload.region;
+  await saveDraft(organizationId, conversationId, 'radius', payload);
+  const counted = payload.radiusOptions.some((option) => option.sizeHigh);
+  const who = input.ageMin ? say(english, `people aged ${input.ageMin}+`, `${input.ageMin}+ age ke log`) : say(english, 'all adults', 'sab adults');
+  return {
+    text: card([
+      intro,
+      `*${say(english, 'Audience size and radius', 'Audience size aur radius')}*`,
+      counted
+        ? section(say(english, `Meta estimate (${who}, before interests)`, `Meta ka andaaza (${who}, interests se pehle)`), bullets(payload.radiusOptions.map((option) => `${radiusLabel(option.km, english)}: *${sizeText(option, english)}*`)))
+        : hint(say(english, 'Meta did not return audience numbers right now. You can still choose the radius.', 'Meta ne abhi audience number nahi diya. Radius phir bhi chun sakte ho.')),
+      hint(say(english, 'This is Meta\'s own estimate of people on Facebook and Instagram in the area, not a promise.', 'Yeh Meta ka apna andaaza hai ki is area mein Facebook aur Instagram pe kitne log hain, guarantee nahi.')),
+      section(say(english, 'Choose', 'Chuno'), options([
+        [say(english, 'Choose radius', 'Radius chuno'), say(english, 'tap the button below', 'neeche button dabao')],
+        ['city only', say(english, 'only inside the city', 'sirf city ke andar')],
+        ['30 km', say(english, 'any number from 17 to 80 km', '17 se 80 km tak koi bhi number')]
+      ]))
+    ]),
+    menu: radiusMenu(payload.radiusOptions, english)
+  };
+}
+
+async function applyRadius(organizationId, conversationId, payload, english, choice) {
+  payload.locations = withRadius(payload.locations, choice.km);
+  payload.radiusKm = choice.km;
+  const base = payload.regionBase || payload.region;
+  payload.region = choice.km ? `${base} (+${choice.km} km)` : base;
+  let size = (payload.radiusOptions || []).find((option) => option.km === choice.km) || null;
+  if (!size?.sizeHigh) {
+    const account = await metaAccount(organizationId);
+    size = account ? await metaLocationSize({ ...sizeInput(account, payload), locations: payload.locations }).catch(() => null) : null;
+  }
+  payload.locationSize = size?.sizeHigh ? { sizeLow: size.sizeLow || null, sizeHigh: size.sizeHigh } : null;
+  delete payload.radiusOptions;
+  await saveDraft(organizationId, conversationId, 'budget', payload);
+  return {
+    text: card([
+      section(say(english, 'Location set', 'Location set'), [
+        field(say(english, 'Area', 'Area'), payload.region),
+        payload.locationSize ? field(say(english, 'Audience (Meta)', 'Audience (Meta)'), sizeText(payload.locationSize, english)) : ''
+      ]),
+      choice.adjusted ? hint(say(english, `Meta allows 17 to 80 km around a city, so ${choice.asked} km became ${choice.km} km.`, `Meta mein city ke around 17 se 80 km tak hi radius hota hai, isliye ${choice.asked} km ko ${choice.km} km kiya.`)) : '',
+      LINE,
+      intakePrompt('budget', english, payload)
+    ])
+  };
 }
 
 async function choosePage(organizationId, conversationId, payload, english) {

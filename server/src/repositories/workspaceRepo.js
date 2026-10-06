@@ -113,6 +113,15 @@ export function updateOrganization(id, { name, legalName, city, sector }) {
   );
 }
 
+export async function organizationBasics(id) {
+  try {
+    const row = await one(`SELECT sector, city FROM organizations WHERE id = ?`, [id]);
+    return { sector: row?.sector || '', city: row?.city || '' };
+  } catch {
+    return { sector: '', city: '' };
+  }
+}
+
 export async function organizationSector(id) {
   try {
     const row = await one(`SELECT sector FROM organizations WHERE id = ?`, [id]);

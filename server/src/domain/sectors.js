@@ -1,8 +1,21 @@
-export const SECTORS = [
+export const GOAL_LABELS = {
+  leads: 'Leads (enquiries)',
+  appointments: 'Appointments (bookings, visits)',
+  sales: 'Sales (online orders)',
+  awareness: 'Awareness (reach people)',
+  traffic: 'Traffic (website visits)'
+};
+
+const PLAYBOOKS = [
   {
     key: 'real_estate',
     label: 'Real estate',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Site visit and price enquiries; the everyday campaign'],
+      ['awareness', 'New project launch or entering a new city'],
+      ['traffic', 'Project page or virtual tour, to build a retargeting audience'],
+      ['appointments', 'Booked site visits on fixed dates or open-house weekends']
+    ],
     leadPath: 'Meta instant form or WhatsApp/Messenger chat for site visits; Google search for project + city',
     special: 'HOUSING',
     ages: [25, 55],
@@ -17,7 +30,12 @@ export const SECTORS = [
   {
     key: 'ecommerce',
     label: 'Ecommerce / D2C',
-    goal: 'sales',
+    goals: [
+      ['sales', 'Orders on the website; needs the Meta pixel for best results'],
+      ['traffic', 'New store or before the pixel has purchase data; builds retargeting audiences'],
+      ['awareness', 'New brand, new product line or a big sale coming up'],
+      ['leads', 'COD or WhatsApp orders, bulk or custom orders']
+    ],
     leadPath: 'Website purchase with the Meta pixel; Google Shopping and search',
     ages: [18, 45],
     interests: ['Online shopping', 'Engaged shoppers', 'Amazon', 'Flipkart', 'Myntra', 'Fashion', 'Discounts and offers'],
@@ -31,7 +49,12 @@ export const SECTORS = [
   {
     key: 'it_saas',
     label: 'IT / Software / SaaS',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Demo or quote requests'],
+      ['appointments', 'Booked demo calls'],
+      ['traffic', 'Blog, free tool or pricing page, to build a retargeting audience'],
+      ['awareness', 'New product or feature launch']
+    ],
     leadPath: 'Demo request form on website or Meta instant form; Google search for the problem the software solves',
     ages: [24, 55],
     interests: ['Software', 'Small business', 'Entrepreneurship', 'Business software', 'Startup company', 'Technology'],
@@ -45,7 +68,12 @@ export const SECTORS = [
   {
     key: 'edtech',
     label: 'Edtech / Coaching',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Course and counselling enquiries'],
+      ['appointments', 'Free demo class or counselling slot bookings'],
+      ['awareness', 'New batch, new centre or results announcement'],
+      ['traffic', 'Webinar or course landing page']
+    ],
     leadPath: 'Meta instant form or WhatsApp for counselling; Google search for course + city',
     ages: [17, 35],
     interests: ['Education', 'Online learning', 'Competitive exams', 'Career', 'Students', 'Higher education'],
@@ -59,7 +87,12 @@ export const SECTORS = [
   {
     key: 'college',
     label: 'College / University / School',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Admission enquiries during admission season'],
+      ['awareness', 'Off-season brand building: results, placements, campus life'],
+      ['appointments', 'Campus visits and counselling sessions'],
+      ['traffic', 'Prospectus, fee or course pages']
+    ],
     leadPath: 'Admission enquiry form; Google search for course + college + city',
     ages: [17, 45],
     interests: ['Higher education', 'University', 'Engineering', 'MBA', 'Students', 'Parenting'],
@@ -73,7 +106,12 @@ export const SECTORS = [
   {
     key: 'restaurant',
     label: 'Restaurant / Cafe / Cloud kitchen',
-    goal: 'leads',
+    goals: [
+      ['awareness', 'People near the outlet; new outlet, new menu or festival offer'],
+      ['leads', 'WhatsApp or Messenger orders, party and catering enquiries'],
+      ['appointments', 'Table bookings'],
+      ['traffic', 'Zomato/Swiggy page or online menu']
+    ],
     leadPath: 'Calls, WhatsApp orders, directions or Zomato/Swiggy link; local radius targeting',
     ages: [18, 45],
     interests: ['Restaurants', 'Food', 'Zomato', 'Swiggy', 'Dining out', 'Cafe'],
@@ -87,7 +125,12 @@ export const SECTORS = [
   {
     key: 'hotel',
     label: 'Hotel / Resort / Homestay',
-    goal: 'sales',
+    goals: [
+      ['sales', 'Direct bookings on the website'],
+      ['leads', 'WhatsApp booking, wedding and event enquiries'],
+      ['awareness', 'New property, season or festival packages'],
+      ['traffic', 'Rooms and packages pages, to build a retargeting audience']
+    ],
     leadPath: 'Direct booking website or WhatsApp booking; target source cities of travellers',
     ages: [25, 55],
     interests: ['Travel', 'Hotels', 'Weekend getaways', 'Frequent travellers', 'MakeMyTrip', 'Booking.com', 'Vacations'],
@@ -101,7 +144,12 @@ export const SECTORS = [
   {
     key: 'healthcare',
     label: 'Clinic / Hospital / Diagnostics',
-    goal: 'leads',
+    goals: [
+      ['appointments', 'Consultation or test bookings'],
+      ['leads', 'Treatment and package enquiries'],
+      ['awareness', 'New clinic, health camp or a new doctor or service'],
+      ['traffic', 'Treatment or health package pages']
+    ],
     leadPath: 'Appointment booking by call, WhatsApp or form; local radius',
     ages: [25, 65],
     interests: ['Health', 'Practo', 'Health and wellness', 'Family', 'Parenting'],
@@ -115,7 +163,12 @@ export const SECTORS = [
   {
     key: 'beauty_fitness',
     label: 'Salon / Spa / Gym',
-    goal: 'leads',
+    goals: [
+      ['appointments', 'Service bookings or a free trial session'],
+      ['leads', 'Membership, bridal and package enquiries'],
+      ['awareness', 'New branch, festival or wedding season offer near the outlet'],
+      ['traffic', 'Price list or Instagram profile']
+    ],
     leadPath: 'Booking by WhatsApp or call; local radius',
     ages: [18, 45],
     interests: ['Beauty salons', 'Fitness', 'Gym', 'Spa', 'Skin care', 'Bridal makeup'],
@@ -129,7 +182,12 @@ export const SECTORS = [
   {
     key: 'travel',
     label: 'Travel agency / Tours',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Package enquiries'],
+      ['awareness', 'New destination or season (summer, holidays, honeymoon)'],
+      ['traffic', 'Package pages, to build a retargeting audience'],
+      ['sales', 'Direct package bookings on the website']
+    ],
     leadPath: 'WhatsApp or form enquiry for packages',
     ages: [24, 55],
     interests: ['Travel', 'Frequent travellers', 'International travel', 'Honeymoon', 'Adventure travel'],
@@ -143,7 +201,12 @@ export const SECTORS = [
   {
     key: 'automobile',
     label: 'Automobile dealer / Service',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Price quote, exchange and finance enquiries'],
+      ['appointments', 'Test drive or service bookings'],
+      ['awareness', 'New model launch or festival offers'],
+      ['traffic', 'Model or offer pages']
+    ],
     leadPath: 'Test drive or service booking form, call or WhatsApp',
     ages: [22, 55],
     interests: ['Cars', 'Automobiles', 'Car dealership', 'Two-wheelers', 'Auto loans'],
@@ -157,7 +220,12 @@ export const SECTORS = [
   {
     key: 'finance',
     label: 'Loans / Insurance / Finance',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Loan, policy or investment enquiries'],
+      ['awareness', 'Trust building for a new brand or branch'],
+      ['traffic', 'EMI calculator, plan comparison or landing page'],
+      ['appointments', 'Advisor call bookings']
+    ],
     leadPath: 'Instant form or website form with eligibility questions',
     special: 'CREDIT',
     ages: [23, 60],
@@ -172,7 +240,12 @@ export const SECTORS = [
   {
     key: 'local_services',
     label: 'Local services (repair, cleaning, interiors, legal, CA)',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Service enquiries and calls'],
+      ['appointments', 'Home visit or consultation bookings'],
+      ['awareness', 'Starting in a new area or a seasonal service'],
+      ['traffic', 'Portfolio or price page']
+    ],
     leadPath: 'Calls and WhatsApp; Google search "near me"',
     ages: [25, 60],
     interests: ['Home improvement', 'Interior design', 'Homeowners', 'Small business'],
@@ -186,7 +259,12 @@ export const SECTORS = [
   {
     key: 'retail_store',
     label: 'Retail store / Showroom',
-    goal: 'leads',
+    goals: [
+      ['awareness', 'Footfall from people near the store; sale, festival or new stock'],
+      ['leads', 'Product and price enquiries on WhatsApp or form'],
+      ['traffic', 'Catalogue or store location page'],
+      ['sales', 'Online orders, if the store sells on a website']
+    ],
     leadPath: 'Store visits, calls, WhatsApp catalogue; local radius',
     ages: [18, 55],
     interests: ['Shopping', 'Fashion', 'Jewellery', 'Electronics', 'Home furnishings'],
@@ -200,7 +278,12 @@ export const SECTORS = [
   {
     key: 'b2b_manufacturing',
     label: 'B2B / Manufacturing / Wholesale',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Bulk order, dealer and quote (RFQ) enquiries'],
+      ['traffic', 'Product catalogue pages'],
+      ['awareness', 'Trade show, new product range or a new region'],
+      ['appointments', 'Factory visit or sales call bookings']
+    ],
     leadPath: 'Website enquiry or form; Google search for product + supplier',
     ages: [25, 60],
     interests: ['Small business', 'Manufacturing', 'Wholesale', 'Business owners', 'IndiaMART'],
@@ -214,7 +297,13 @@ export const SECTORS = [
   {
     key: 'other',
     label: 'Other',
-    goal: 'leads',
+    goals: [
+      ['leads', 'Enquiries with name and phone'],
+      ['awareness', 'Launch or reaching many people nearby'],
+      ['traffic', 'Website or page visits'],
+      ['sales', 'Online orders'],
+      ['appointments', 'Bookings or visits']
+    ],
     leadPath: 'Instant form, WhatsApp or website, whichever the business uses to close',
     ages: [18, 55],
     interests: [],
@@ -226,6 +315,11 @@ export const SECTORS = [
     tips: []
   }
 ];
+
+export const SECTORS = PLAYBOOKS.map((sector) => ({
+  ...sector,
+  goals: sector.goals.map(([key, when]) => ({ key, label: GOAL_LABELS[key], when }))
+}));
 
 export const SECTOR_KEYS = SECTORS.map((sector) => sector.key);
 
@@ -239,7 +333,8 @@ export function sectorFacts(key) {
   return [
     `Business sector: ${sector.label}`,
     `Sector playbook (general guidance, not facts about this business; never present it as a claim):`,
-    `- Usual goal: ${sector.goal}. Lead path: ${sector.leadPath}`,
+    `- Possible goals, most common first (the goal depends on this campaign; use the owner's goal, never assume leads): ${sector.goals.map((goal) => `${goal.key} (${goal.when})`).join('; ')}`,
+    `- Lead path: ${sector.leadPath}`,
     sector.special ? `- Meta special category that may apply: ${sector.special} (suggest only, never force)` : '',
     sector.interests.length ? `- Buyer interest ideas: ${sector.interests.join(', ')}` : '',
     `- Angles that work: ${sector.angles.join('; ')}`,

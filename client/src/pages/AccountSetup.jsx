@@ -22,7 +22,15 @@ export function SectorPlaybook({ sector }) {
         <p>General guidance AIRO uses when it plans ads for this sector.</p>
       </header>
       <dl className="sector-facts">
-        <div><dt>Usual goal</dt><dd>{sector.goal}</dd></div>
+        <div>
+          <dt>Ad goals that fit</dt>
+          <dd>
+            <ul className="sector-goals">
+              {sector.goals.map((goal) => <li key={goal.key}><strong>{goal.label}</strong><span>{goal.when}</span></li>)}
+            </ul>
+            <span className="quiet">You choose the goal for each campaign. These are the usual ones, most common first.</span>
+          </dd>
+        </div>
         <div><dt>Lead path</dt><dd>{sector.leadPath}</dd></div>
         {sector.special ? <div><dt>Meta special category</dt><dd>{sector.special} may apply. AIRO suggests it, you decide.</dd></div> : null}
         <div><dt>Ad angles</dt><dd>{sector.angles.join(' · ')}</dd></div>
@@ -81,8 +89,9 @@ export function OrganizationForm({ data, canEdit, onSaved, submitLabel = 'Save' 
           <label className="stack-field">Legal name
             <input value={form.legalName} onChange={set('legalName')} maxLength={180} placeholder="Optional" />
           </label>
-          <label className="stack-field">City
+          <label className="stack-field">Office city
             <input value={form.city} onChange={set('city')} maxLength={80} placeholder="Optional" />
+            <span className="quiet">Only where your office is. AIRO suggests the best ad locations for each campaign separately.</span>
           </label>
         </fieldset>
         {canEdit

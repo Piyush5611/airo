@@ -1090,6 +1090,12 @@ export async function metaAudienceEstimate({ apiKey, accountId, objective, conve
   };
 }
 
+export async function metaLocationSize({ apiKey, accountId, locations, ageMin, gender }) {
+  const estimate = await metaAudienceEstimate({ apiKey, accountId, objective: 'OUTCOME_AWARENESS', locations, ageMin, gender });
+  if (!estimate || (!estimate.sizeLow && !estimate.sizeHigh)) return null;
+  return { sizeLow: estimate.sizeLow, sizeHigh: estimate.sizeHigh };
+}
+
 export async function listMetaPixels({ apiKey, accountId }) {
   const rows = await list(`act_${actId(accountId)}/adspixels`, apiKey, { fields: 'id,name', limit: '50' });
   return rows

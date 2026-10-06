@@ -6,7 +6,7 @@ import { recordAudit } from './auditService.js';
 import { writeGoogleAdPlan } from './llmService.js';
 import { LINE, bullets, card, field, header, hint, money, numbered, options, section, step as fmtStep } from './adsAgent/waFormat.js';
 import {
-  businessProfile, chosenNames, hasProfileDetails, keywordCandidates, resolveGoogleLocations, suggestTargeting, writeGoogleCopy
+  businessProfile, chosenNames, cityChoices, cityMenu, cityPick, droppedCity, hasProfileDetails, keywordCandidates, meansAll, officeCityNote, wantsOtherCity, resolveGoogleLocations, suggestTargeting, writeGoogleCopy
 } from './adsAgent/chatPlanner.js';
 
 const START = /\b(run|start|launch|create|chalao|chala|chalana|chalani|banao|bana|banana|banani|lagao|lagana)\b.{0,40}\bgoogle\b|\bgoogle\s+ads?\b.{0,24}\b(run|start|launch|create|chalao|chala|chalana|chalani|banao|bana|banana|banani|lagao|lagana)\b/i;
@@ -286,9 +286,13 @@ function regionPrompt(payload, english) {
   if (!cities.length) return intakePrompt('region', english);
   return card([
     `*Step 4/5 · ${say(english, 'Locations', 'Locations')}*`,
-    section(say(english, 'AI suggested locations', 'AI suggested locations'), numbered(cities)),
+    section(say(english, 'Where your buyers search from (AIRO suggestion)', 'Buyers kahan se search karte hain (AIRO suggestion)'), numbered(cityChoices(payload.suggestion))),
+    payload.suggestion.bestPick ? `*${say(english, 'Best to start', 'Shuru karne ke liye best')}:* ${payload.suggestion.bestPick}` : '',
+    hint(officeCityNote(payload.suggestion, english)),
     payload.suggestion.why ? hint(`${say(english, 'Why', 'Kyun')}: ${payload.suggestion.why}`) : '',
-    section(say(english, 'Reply with', 'Reply karo'), options([
+    section(say(english, 'Choose', 'Chuno'), options([
+      [say(english, 'Choose cities', 'Cities chuno'), say(english, 'tap the button below and add cities one by one', 'neeche button dabao aur cities ek-ek add karo')],
+      ['best', say(english, 'use the best pick', 'best pick use karo')],
       ['ok', say(english, 'use all of them', 'sab use karo')],
       ['1,2', say(english, 'pick by number', 'number se chuno')],
       ['Delhi, Pune', say(english, 'your own cities', 'apni cities')],
@@ -301,12 +305,20 @@ async function prepareRegion(organizationId, conversationId, payload, english) {
   const profile = await businessProfile(organizationId);
   const suggestion = await suggestTargeting({ organizationId, payload, profile, platform: 'google' });
   if (suggestion) {
-    payload.suggestion = { cities: suggestion.cities, keywordSeeds: suggestion.keywordSeeds, why: suggestion.why };
+    payload.suggestion = {
+      cities: suggestion.cities,
+      cityNotes: suggestion.cityNotes,
+      bestCities: suggestion.bestCities,
+      bestPick: suggestion.bestPick,
+      officeCity: profile?.officeCity || '',
+      keywordSeeds: suggestion.keywordSeeds,
+      why: suggestion.why
+    };
     payload.negatives = suggestion.negatives.map((item) => item.toLowerCase());
     payload.sellingPoints = suggestion.sellingPoints;
   }
   await saveDraft(organizationId, conversationId, 'region', payload);
-  return { text: regionPrompt(payload, english) };
+  return { text: regionPrompt(payload, english), menu: cityMenu(payload.suggestion, [], english) };
 }
 
 async function afterWebsite(organizationId, conversationId, payload, english) {
@@ -446,32 +458,69 @@ async function pickRegion(organizationId, conversationId, draft, payload, text, 
     payload.region = picked.name;
     payload.locations = [{ id: picked.id, name: picked.name }];
     delete payload.locationChoices;
-    await saveDraft(organizationId, conversationId, 'budget', payload);
-    return { text: intakePrompt('budget', english) };
+    return locationsReady(account, organizationId, conversationId, payload, english);
   }
   if (indiaWide(text)) {
     payload.region = 'India';
     payload.locations = [];
-    await saveDraft(organizationId, conversationId, 'budget', payload);
-    return { text: intakePrompt('budget', english) };
+    return locationsReady(account, organizationId, conversationId, payload, english);
   }
-  const names = chosenNames(text, payload.suggestion?.cities || []);
+  const tapped = payload.pickedCities || [];
+  const pick = cityPick(text, payload.suggestion, tapped);
+  if (pick?.kind === 'toggle' || pick?.kind === 'empty') {
+    if (pick.kind === 'toggle') payload.pickedCities = pick.picked;
+    await saveDraft(organizationId, conversationId, 'region', payload);
+    const note = pick.kind === 'empty'
+      ? say(english, 'No location selected yet. Tap a city first.', 'Abhi koi location select nahi hui. Pehle city tap karo.')
+      : pick.added ? say(english, `${pick.city} added.`, `${pick.city} add ho gaya.`) : say(english, `${pick.city} removed.`, `${pick.city} hata diya.`);
+    return { text: note, menu: cityMenu(payload.suggestion, payload.pickedCities || [], english) };
+  }
+  if (payload.suggestion?.cities?.length && !pick) {
+    const menu = () => cityMenu(payload.suggestion, payload.pickedCities || [], english);
+    if (wantsOtherCity(text)) {
+      payload.addingCity = true;
+      await saveDraft(organizationId, conversationId, 'region', payload);
+      return { text: say(english, 'Type the city name. For more than one, separate with commas (example: Lucknow, Kanpur).', 'City ka naam likho. Ek se zyada ho to comma se alag karo (example: Lucknow, Kanpur).') };
+    }
+    const dropped = droppedCity(text, tapped);
+    if (dropped) {
+      payload.pickedCities = dropped.picked;
+      await saveDraft(organizationId, conversationId, 'region', payload);
+      return { text: say(english, `${dropped.city} removed.`, `${dropped.city} hata diya.`), menu: menu() };
+    }
+    if ((tapped.length || payload.addingCity) && !meansAll(text) && !/^\s*\d+(\s*[, ]\s*\d+)*\s*$/.test(text)) {
+      const { found, missing } = await resolveGoogleLocations(account.input.refreshToken, chosenNames(text, []));
+      if (!found.length) {
+        return { text: say(english, 'Google did not find that city. Check the spelling and type it again.', 'Google ko ye city nahi mili. Spelling check karke dobara likho.'), menu: menu() };
+      }
+      const added = found.map((item) => item.name.split(',')[0].trim());
+      payload.pickedCities = [...new Set([...tapped, ...added])];
+      delete payload.addingCity;
+      await saveDraft(organizationId, conversationId, 'region', payload);
+      return {
+        text: card([
+          say(english, `${added.join(', ')} added.`, `${added.join(', ')} add ho gaya.`),
+          missing.length ? hint(say(english, `Not found on Google: ${missing.join(', ')}`, `Google pe nahi mili: ${missing.join(', ')}`)) : ''
+        ]),
+        menu: menu()
+      };
+    }
+  }
+  const typed = pick?.kind === 'final' ? pick.names : chosenNames(text, payload.suggestion?.cities || []);
+  const names = pick?.kind === 'final' ? typed : [...new Set([...tapped, ...typed])];
   if (names.length > 1 || payload.suggestion?.cities?.length) {
+    delete payload.pickedCities;
+    delete payload.addingCity;
     const { found, missing } = await resolveGoogleLocations(account.input.refreshToken, names);
     if (!found.length) {
       return { text: say(english, 'Google did not find those locations. Send other cities, or say all India.', 'Google ko ye locations nahi mili. Doosri cities bhejo, ya all India likho.') };
     }
     payload.locations = found;
     payload.region = found.map((item) => item.name.split(',')[0]).join(', ');
-    await saveDraft(organizationId, conversationId, 'budget', payload);
-    return {
-      text: card([
-        section(say(english, 'Locations set', 'Locations set'), bullets(found.map((item) => item.name))),
-        missing.length ? hint(say(english, `Not found on Google: ${missing.join(', ')}`, `Google pe nahi mili: ${missing.join(', ')}`)) : '',
-        LINE,
-        intakePrompt('budget', english)
-      ])
-    };
+    return locationsReady(account, organizationId, conversationId, payload, english, card([
+      section(say(english, 'Locations set', 'Locations set'), bullets(found.map((item) => item.name))),
+      missing.length ? hint(say(english, `Not found on Google: ${missing.join(', ')}`, `Google pe nahi mili: ${missing.join(', ')}`)) : ''
+    ]));
   }
   let choices = [];
   try {
@@ -482,8 +531,7 @@ async function pickRegion(organizationId, conversationId, draft, payload, text, 
   if (choices.length === 1) {
     payload.region = choices[0].name;
     payload.locations = [{ id: choices[0].id, name: choices[0].name }];
-    await saveDraft(organizationId, conversationId, 'budget', payload);
-    return { text: intakePrompt('budget', english) };
+    return locationsReady(account, organizationId, conversationId, payload, english);
   }
   if (choices.length > 1) {
     payload.locationChoices = choices.slice(0, 5).map((item) => ({ id: item.id, name: item.name }));
@@ -494,14 +542,44 @@ async function pickRegion(organizationId, conversationId, draft, payload, text, 
   return { text: say(english, 'Google did not find that location. Send another city, or say all India.', 'Google ko yeh location nahi mili. Doosri city bhejo, ya all India likho.') };
 }
 
+async function fillKeywordPool(account, payload) {
+  const cities = (payload.locations || []).map((item) => item.name.split(',')[0].toLowerCase());
+  const product = String(payload.product || '').toLowerCase();
+  const seeds = [...(payload.suggestion?.keywordSeeds || []), product, ...cities.slice(0, 2).map((city) => `${product} ${city}`)].filter(Boolean);
+  payload.keywordPool = await keywordCandidates(account.input, { seeds, website: payload.website, locations: (payload.locations || []).map((item) => item.id) });
+}
+
+export function demandSection(pool, english) {
+  const top = (pool || []).filter((item) => Number(item.searches) > 0).slice(0, 3);
+  if (!top.length) {
+    return hint(say(english, 'Google did not return search numbers for these locations yet.', 'Google ne in locations ke search numbers abhi nahi diye.'));
+  }
+  return card([
+    section(
+      say(english, 'Google searches per month here (Keyword Planner)', 'Yahan Google pe har mahine searches (Keyword Planner)'),
+      bullets(top.map((item) => `${item.text}: *${Number(item.searches).toLocaleString('en-IN')}*`))
+    ),
+    hint(say(english, 'Google\'s monthly average for these locations. Search ads reach people when they search, so this is the real audience size on Google.', 'Yeh Google ka in locations ka monthly average hai. Search ads tab dikhte hain jab log search karte hain, isliye Google pe asli audience yahi hai.'))
+  ]);
+}
+
+async function locationsReady(account, organizationId, conversationId, payload, english, intro = '') {
+  await fillKeywordPool(account, payload).catch(() => { payload.keywordPool = []; });
+  await saveDraft(organizationId, conversationId, 'budget', payload);
+  return {
+    text: card([
+      intro,
+      demandSection(payload.keywordPool, english),
+      payload.locations?.length ? hint(say(english, 'Google targets the whole of each location here; a km radius is not set from chat yet.', 'Google pe yahan poori location target hoti hai; km radius abhi chat se set nahi hota.')) : '',
+      LINE,
+      intakePrompt('budget', english)
+    ])
+  };
+}
+
 async function expertCopy(organizationId, account, payload) {
   const profile = await businessProfile(organizationId);
-  if (!payload.keywordPool?.length) {
-    const cities = (payload.locations || []).map((item) => item.name.split(',')[0].toLowerCase());
-    const product = String(payload.product || '').toLowerCase();
-    const seeds = [...(payload.suggestion?.keywordSeeds || []), product, ...cities.slice(0, 2).map((city) => `${product} ${city}`)];
-    payload.keywordPool = await keywordCandidates(account.input, { seeds, website: payload.website, locations: (payload.locations || []).map((item) => item.id) });
-  }
+  if (!payload.keywordPool?.length) await fillKeywordPool(account, payload);
   const copy = await writeGoogleCopy({ organizationId, payload, profile, candidates: payload.keywordPool });
   payload.headlines = copy.headlines;
   payload.descriptions = copy.descriptions;

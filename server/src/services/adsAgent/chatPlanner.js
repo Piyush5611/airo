@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { googleKeywordIdeas, suggestGoogleLocations } from '../../integrations/googleAds.js';
 import { listMetaBehaviors, searchMetaAudience } from '../../integrations/metaAds.js';
 import * as repo from '../../repositories/adsAgentRepo.js';
-import { organizationSector } from '../../repositories/workspaceRepo.js';
+import { organizationBasics } from '../../repositories/workspaceRepo.js';
 import { sectorFacts } from '../../domain/sectors.js';
 import { structuredLlm } from '../llmService.js';
 
@@ -17,12 +17,26 @@ const suggestionSchema = z.object({
   keywordSeeds: z.array(text(2, 60)).max(10).default([]),
   negatives: z.array(text(2, 40)).max(20).default([]),
   sellingPoints: z.array(text(3, 90)).max(5).default([]),
+  cityNotes: z.array(z.object({ city: text(2, 40), why: text(3, 140) })).max(6).default([]),
+  bestCities: z.array(text(2, 40)).max(6).default([]),
+  bestPick: text(0, 240).default(''),
   why: text(0, 300).default('')
 }).refine((value) => value.ageMin <= value.ageMax, { message: 'ageMin must not be above ageMax', path: ['ageMin'] });
 
 const SUGGEST_BRIEF = `You are a senior performance marketer in India planning one ad for a small business.
 From the facts, suggest targeting the owner can accept or change:
-- cities: 2 to 6 Indian cities or localities where likely buyers are. Start with the business city if the facts give one. For local services (clinic, salon, coaching, restaurant, shop) stay in that city and nearby areas. For real estate include the project city and nearby cities buyers move from.
+- cities: 2 to 6 Indian cities or localities where the BUYERS of this product are, not where the office is.
+  The office city is only where the business sits. Use it only when buyers really come from there:
+  - Local walk-in business (clinic, salon, gym, restaurant, shop, coaching centre): the city where the outlet or service is, plus nearby localities.
+  - Real estate: the project location plus the cities buyers move or invest from (nearby metros, NRI-heavy or IT cities for that market).
+  - Ecommerce, online courses, SaaS, delivery anywhere: the cities with the most buyers for this product (metros and big tier-2 cities), or all India, not the office city.
+  - Hotel, resort, travel: the cities travellers come FROM, not the destination.
+  - College: the cities and states students come from.
+  - B2B: the industrial or trading hubs where the buyers are.
+  If the owner's preferred ad locations are in the facts, start from them. Fewer cities for a small budget.
+- cityNotes: one entry per city in "cities" with a short reason why buyers there fit (from the facts and common market knowledge, no invented numbers).
+- bestCities: the 1 to 3 cities from "cities" that are the best start (exact same spelling).
+- bestPick: one short line on the best choice to start with and why (for example: start with the top 2 cities for a small budget, or all India for online sales). Say plainly if the office city is not a good target.
 - ageMin / ageMax / gender: the likely buyer. Use all genders unless the product is clearly for one.
 - interestSeeds: 8 to 12 short Meta interest topics that BUYERS follow, not sellers or workers in the field. Mix:
   1) the core topic (Real estate, Dentistry, Fitness),
@@ -90,7 +104,8 @@ function profileLines(profile) {
     profile.businessName ? `Business name: ${profile.businessName}` : '',
     profile.category ? `Business category: ${profile.category}` : '',
     profile.offering ? `What it sells: ${profile.offering}` : '',
-    list(profile.locations) ? `Business locations: ${list(profile.locations)}` : '',
+    profile.officeCity ? `Office city (where the business sits; not automatically where buyers are): ${profile.officeCity}` : '',
+    list(profile.locations) ? `Owner's preferred ad locations: ${list(profile.locations)}` : '',
     profile.audience ? `Audience: ${profile.audience}` : '',
     list(profile.usps) ? `Selling points: ${list(profile.usps)}` : '',
     profile.priceMin || profile.priceMax ? `Price range: ${profile.priceMin || '?'} to ${profile.priceMax || '?'} ${profile.currency || ''}`.trim() : '',
@@ -101,7 +116,7 @@ function profileLines(profile) {
 }
 
 export async function businessProfile(organizationId) {
-  const sector = await organizationSector(organizationId);
+  const { sector, city: officeCity } = await organizationBasics(organizationId);
   let profile = null;
   try {
     const row = await repo.profile(organizationId);
@@ -109,8 +124,92 @@ export async function businessProfile(organizationId) {
   } catch {
     profile = null;
   }
-  if (!profile && !sector) return null;
-  return { ...(profile || {}), sector };
+  if (!profile && !sector && !officeCity) return null;
+  return { ...(profile || {}), sector, officeCity };
+}
+
+export function cityChoices(suggestion) {
+  const notes = new Map((suggestion?.cityNotes || []).map((note) => [String(note.city).trim().toLowerCase(), note.why]));
+  return (suggestion?.cities || []).map((city) => {
+    const why = notes.get(String(city).trim().toLowerCase());
+    return why ? `${city} - ${why}` : city;
+  });
+}
+
+const DONE_WORDS = /^(done|ho gaya|ho gya|hogaya|bas|aage|next|continue|chalo|finish)\b/i;
+const BEST_WORDS = /^(best|best pick|best wale|best wali)\b/i;
+const tapName = (value) => String(value || '').replace(/^[\s✓✔+\-]+/, '').trim().toLowerCase();
+
+export function bestCities(suggestion) {
+  const cities = suggestion?.cities || [];
+  const best = (suggestion?.bestCities || []).map((name) => cities.find((city) => tapName(city) === tapName(name))).filter(Boolean);
+  return best.length ? [...new Set(best)] : cities.slice(0, 2);
+}
+
+export function wantsOtherCity(textValue) {
+  return /^\+?\s*(add\s+)?(other|another|more|apni|doosri|dusri|aur|nayi|new)\s+cit(y|ies)(\s+(add|likho|daalo|dalo)(\s+(karo|kro|karna))?)?\s*$/i.test(String(textValue || '').trim());
+}
+
+export function droppedCity(textValue, picked = []) {
+  const value = String(textValue || '').trim();
+  const match = value.match(/^(?:remove|hatao|hata do|delete)\s+(.+)$/i) || value.match(/^(.+?)\s+(?:hatao|hata do|remove|nikalo|nikal do)$/i);
+  if (!match) return null;
+  const city = picked.find((item) => tapName(item) === tapName(match[1]));
+  return city ? { city, picked: picked.filter((item) => item !== city) } : null;
+}
+
+export function cityPick(textValue, suggestion, picked = []) {
+  const value = String(textValue || '').trim();
+  const cities = suggestion?.cities || [];
+  if (DONE_WORDS.test(value)) return picked.length ? { kind: 'final', names: picked } : { kind: 'empty' };
+  if (cities.length && BEST_WORDS.test(value)) return { kind: 'final', names: bestCities(suggestion) };
+  const city = cities.find((item) => tapName(item) === tapName(value));
+  if (city) {
+    const next = picked.includes(city) ? picked.filter((item) => item !== city) : [...picked, city];
+    return { kind: 'toggle', picked: next, added: !picked.includes(city), city };
+  }
+  return null;
+}
+
+export function cityMenu(suggestion, picked = [], english = false) {
+  const say = (en, hi) => (english ? en : hi);
+  const notes = new Map((suggestion?.cityNotes || []).map((note) => [tapName(note.city), note.why]));
+  const all = suggestion?.cities || [];
+  if (!all.length) return null;
+  const rows = [];
+  if (picked.length) {
+    rows.push({ id: 'city_done', title: say('Done', 'Done'), description: `${say('Use', 'Use karo')}: ${picked.join(', ')}`.slice(0, 72) });
+  }
+  rows.push({ id: 'city_best', title: 'Best pick', description: (suggestion.bestPick || bestCities(suggestion).join(', ')).slice(0, 72) });
+  rows.push({ id: 'city_all', title: 'All suggested', description: all.join(', ').slice(0, 72) });
+  rows.push({ id: 'city_other', title: 'Add other city', description: say('City not in this list? Type its name', 'List mein city nahi hai? Naam likh ke add karo') });
+  const cities = all.slice(0, 10 - rows.length - 1);
+  for (const city of cities) {
+    const on = picked.includes(city);
+    rows.push({
+      id: `city_${rows.length}`,
+      title: `${on ? '✓ ' : ''}${city}`.slice(0, 24),
+      description: (on ? say('Selected. Tap again to remove.', 'Selected. Hatane ke liye dobara tap karo.') : notes.get(tapName(city)) || say('Tap to add', 'Add karne ke liye tap karo')).slice(0, 72)
+    });
+  }
+  rows.push({ id: 'city_india', title: 'All India', description: say('Whole country', 'Poora desh') });
+  return {
+    body: picked.length
+      ? say(`Selected: ${picked.join(', ')}. Tap more cities, or Done.`, `Selected: ${picked.join(', ')}. Aur cities tap karo, ya Done.`)
+      : say('Tap cities one by one to add them, then Done. A city not in the list? Tap Add other city.', 'Cities ek-ek tap karke add karo, phir Done. List mein city nahi hai? Add other city dabao.'),
+    button: say('Choose cities', 'Cities chuno'),
+    rows: rows.slice(0, 10)
+  };
+}
+
+export function officeCityNote(suggestion, english) {
+  const office = String(suggestion?.officeCity || '').trim();
+  if (!office) return '';
+  const inList = (suggestion?.cities || []).some((city) => String(city).toLowerCase().includes(office.toLowerCase()));
+  if (inList) return '';
+  return english
+    ? `Your office is in ${office}, but buyers for this ad are more likely in the cities above. You can still add ${office} if you want.`
+    : `Aapka office ${office} mein hai, par is ad ke buyers upar wali cities mein zyada milenge. Chaho to ${office} bhi add kar sakte ho.`;
 }
 
 export function hasProfileDetails(profile) {
@@ -138,8 +237,8 @@ export async function suggestTargeting({ organizationId, payload, profile, platf
       schema: suggestionSchema,
       system: SUGGEST_BRIEF,
       facts: [`Platform: ${platform === 'google' ? 'Google Search' : 'Meta (Facebook and Instagram)'}`, ...intakeFacts(payload, profile)].join('\n'),
-      task: 'Suggest the targeting as JSON: {"cities":[],"ageMin":25,"ageMax":55,"gender":"all","interestSeeds":[],"keywordSeeds":[],"negatives":[],"sellingPoints":[],"why":""}',
-      maxTokens: 1500
+      task: 'Suggest the targeting as JSON: {"cities":[],"cityNotes":[{"city":"","why":""}],"bestCities":[],"bestPick":"","ageMin":25,"ageMax":55,"gender":"all","interestSeeds":[],"keywordSeeds":[],"negatives":[],"sellingPoints":[],"why":""}',
+      maxTokens: 2000
     });
     return data;
   } catch {
@@ -151,9 +250,13 @@ function sameName(a, b) {
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 }
 
+export function meansAll(textValue) {
+  return /^(ok|okay|yes|haan|han|theek|thik|sab|all suggested|suggested)\b/i.test(String(textValue || '').trim());
+}
+
 export function chosenNames(textValue, suggested = []) {
   const value = String(textValue || '').trim();
-  if (/^(ok|okay|yes|haan|han|theek|thik|sab|all suggested|suggested)\b/i.test(value) && suggested.length) return suggested.slice();
+  if (meansAll(value) && suggested.length) return suggested.slice();
   const numbers = value.match(/^\s*\d+(\s*[, ]\s*\d+)*\s*$/) ? value.split(/[\s,]+/).map(Number) : [];
   if (numbers.length) return [...new Set(numbers)].map((n) => suggested[n - 1]).filter(Boolean);
   return [...new Set(value.split(/,|\n| and | aur /i).map((item) => item.trim()).filter((item) => item.length >= 2))].slice(0, 8);

@@ -41,7 +41,7 @@ export async function getProfile(auth) {
       ready: true,
       profile: row ? parseJson(row.profile) : null,
       updatedAt: row?.updatedAt || null,
-      sector: sector ? { key: sector.key, label: sector.label, goal: sector.goal } : null
+      sector: sector ? { key: sector.key, label: sector.label, goals: sector.goals } : null
     };
   } catch (error) {
     if (schemaMissing(error)) return { ready: false, note: 'Run npm run migrate to set up the ads agent.' };

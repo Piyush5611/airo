@@ -2,6 +2,31 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Audience size and radius in the ad chat)
+
+- **Change (Meta):** After the cities are set, the chat has a new `radius` step.
+  - `metaLocationSize` (`delivery_estimate` with REACH, locations plus the suggested age and gender, before interests) runs for City only, +17, +25, +40 and +80 km.
+  - The step shows Meta's audience size for each option and sends a WhatsApp list ("Radius chuno") with the size in each row.
+  - A tap or a typed "30 km" / "city only" sets `radius` and `radiusMode` on every city, and the area text gets "(+N km)".
+  - Meta's 17-80 km limit is applied, and the owner is told when a number was adjusted.
+  - The chosen area and its audience size are shown before the budget step.
+- **Change (Google):** After locations are set, the chat shows the top 3 keyword ideas with Google Keyword Planner's monthly searches for those locations (the pool is reused for the copy). It says plainly that a km radius is not set from chat for Google.
+- **Migration/API impact:** None. Up to 5 extra Meta estimate reads per ad at the radius step, and 1 Keyword Planner read moved earlier for Google. Not tested against live Meta or Google locally.
+
+### 2026-10-06 (Tap-to-choose cities in the ad chat)
+
+- **Change:** At the city step, the Meta and Google WhatsApp ad chats send a WhatsApp list ("Cities chuno") after the suggestion text. The list has Done (once something is picked), Best pick, All suggested, each suggested city with its reason, and All India.
+  - Tapping a city adds it, and tapping it again ("✓ City") removes it.
+  - Done uses the picked cities, and Best pick uses the model's `bestCities`.
+  - Typed replies still work (ok, numbers, city names, all India). Typed cities are added to any already tapped.
+- **Change:** New pure helpers `cityPick`, `cityMenu` and `bestCities` in chatPlanner, and `menuMessage` in whatsappService. Chat replies may carry `menu`, which `deliverAdChat` sends as an interactive list. The Google chat now also goes through `deliverAdChat`. A list tap with id `city_*` goes straight to the ad chat, without the intent model.
+- **Change:** The list also has "Add other city" for cities that are not suggested.
+  - The owner types one or more names. They are checked on Meta or Google, added to the selection, and the list comes back. Names not found are reported.
+  - "remove <city>" or "<city> hatao" takes a city out.
+  - Once anything is tapped, typed names are added to the selection instead of finishing the step. Done finishes it.
+  - With nothing tapped, a typed list still finishes the step at once, as before.
+- **Migration/API impact:** None. City names longer than 24 characters are cut in the list title by WhatsApp's limit; typing them still works.
+
 ### 2026-10-06 (Business sector at account setup)
 
 - **Change:** New `domain/sectors.js` has 16 sectors (real estate, ecommerce, IT/SaaS, edtech, college, restaurant, hotel, healthcare, beauty/fitness, travel, automobile, finance, local services, retail store, B2B/manufacturing, other). Each has a playbook: usual goal, lead path, optional special category, interest ideas, angles, creative ideas, Google keyword patterns, negatives, KPIs and tips. `sectorFacts` turns it into prompt lines marked "general guidance, not facts".
@@ -13,6 +38,16 @@ Significant structural changes only. Newest first.
   - The WhatsApp assistant facts include it.
   - The Meta chat shows the sector, uses its goal in the budget example and hint, and adds its interests as audience seeds.
   - A special category is only suggested, never forced.
+- **Change:** A sector has several possible goals instead of one fixed goal (`goals: [{key, label, when}]`, most common first; keys leads, appointments, sales, awareness, traffic). The model is told the goal is chosen per campaign and never to assume leads. The Meta chat budget and goal steps list the sector's goals with when each fits, and still accept any goal.
+- **Fix:** In the Meta chat, traffic and awareness without a website now ask for any https link (website, Instagram, Zomato, Maps), like sales already did. Before, the ad had an empty link.
+- **Change:** The organization city is labelled "Office city". The planner gets it as "where the business sits, not automatically where buyers are". The targeting brief picks cities by where buyers are for the sector:
+  - Local walk-in businesses: the outlet city.
+  - Real estate: the project city plus the cities buyers move from.
+  - Ecommerce, online and SaaS: metros or all India.
+  - Hotel and travel: the cities travellers come from.
+  - College: the places students come from.
+  - B2B: trade hubs.
+- **Change:** The suggestion returns `cityNotes` (a reason per city) and `bestPick`. The Meta and Google chat city steps show each city with its reason and a "Best to start" line. When the office city was left out, they add a note saying so, and the owner can still add it.
 - **Migration/API impact:** Run `npm run migrate` (020_org_sector.sql) before restarting. The login query reads `o.sector`.
 
 ### 2026-10-06 (Meta detailed targeting and plan research)

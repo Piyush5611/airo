@@ -25,9 +25,12 @@ const HINGLISH = /\b(kya|hai|hain|karo|chahiye|bhejo|nahi|nahin|haan|mujhe|mera|
 const CTA = new Set(['LEARN_MORE', 'SIGN_UP', 'SHOP_NOW', 'BOOK_NOW']);
 
 export function budgetAmount(text) {
-  const match = String(text || '').replace(/(\d),(\d)/g, '$1$2').match(/(\d+(?:\.\d+)?)\s*(k|thousand|hazar|hazaar|hajar)?\b/i);
+  const value = String(text || '');
+  const match = value.replace(/(\d),(\d)/g, '$1$2').match(/(\d+(?:\.\d+)?)\s*(k|thousand|hazar|hazaar|hajar|lakh|lakhs|lac|lacs)?\b/i);
   if (!match) return 0;
-  return Math.round(Number(match[1]) * (match[2] ? 1000 : 1));
+  const unit = /^la/i.test(match[2] || '') ? 100000 : match[2] ? 1000 : 1;
+  const amount = Number(match[1]) * unit;
+  return Math.round(/\b(month|monthly|mahina|mahine|mahiney|per month|pm)\b/i.test(value) ? amount / 30 : amount);
 }
 
 function budgetHint(reason, english) {
@@ -606,6 +609,9 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
     if (amount < 1) {
       return { text: say(english, 'Send the budget and objective, for example 500 leads.', 'Budget aur objective bhejo, jaise 500 leads.') };
     }
+    if (amount < 100 && !/\$|usd|dollar/i.test(text)) {
+      return { text: say(english, `₹${amount} a day is too low. Meta needs about ₹100 a day or more per ad set. Send a higher daily budget, for example 500 leads.`, `₹${amount} roz bahut kam hai. Meta ko har ad set ke liye lagbhag ₹100 roz ya zyada chahiye. Zyada daily budget bhejo, jaise 500 leads.`) };
+    }
     payload.dailyBudget = amount;
     const objective = objectiveFrom(text);
     if (objective) applyObjective(payload, objective);
@@ -957,6 +963,9 @@ async function readyImage(imageBase64, imageError, text) {
 
 async function acceptCreative(organizationId, conversationId, payload, text, english, imageBase64 = '', imageError = '') {
   if (!imageBase64 && !imageError && /\bbudget\b/i.test(text) && budgetAmount(text) >= 1) {
+    if (budgetAmount(text) < 100 && !/\$|usd|dollar/i.test(text)) {
+      return { text: say(english, 'Meta needs about ₹100 a day or more per ad set. Send for example: budget 500', 'Meta ko har ad set ke liye lagbhag ₹100 roz ya zyada chahiye. Aise bhejo: budget 500') };
+    }
     payload.dailyBudget = budgetAmount(text);
     await saveDraft(organizationId, conversationId, 'image', payload);
     return {

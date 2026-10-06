@@ -352,6 +352,8 @@ test('meta chat budget reads the first amount only', () => {
   assert.equal(budgetAmount('1,200 leads for 2 bhk'), 1200);
   assert.equal(budgetAmount('500 leads 2 bhk'), 500);
   assert.equal(budgetAmount('leads'), 0);
+  assert.equal(budgetAmount('1 lakh monthly leads'), 3333);
+  assert.equal(budgetAmount('30k per month'), 1000);
 });
 
 test('ad design text keeps units together and fits the line limit', () => {

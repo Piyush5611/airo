@@ -7,6 +7,7 @@ Significant structural changes only. Newest first.
 - **Fix:** At the Meta image step, a message like "budget 590" now updates the draft's daily budget. Before, it was ignored and the next photo still used the old, too-small budget.
 - **Fix:** New `budgetAmount` reads the first amount only and understands `5k`, `1.5k`, `Rs.500` and `1,200`. The old parser joined every digit in the message, and could also turn "Rs.500" into 0.5.
 - **Change:** When Meta rejects a campaign or ad for its budget, the reply adds "reply budget 600 to change it".
+- **Change:** `budgetAmount` also reads `lakh`/`lac`. A monthly budget ("30k per month", "mahina") is divided by 30. A daily budget under ₹100 is refused at intake and at the image step, unless it is written in dollars.
 - **Migration/API impact:** None.
 
 ### 2026-10-06 (Meta ad template creatives)

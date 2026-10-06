@@ -28,6 +28,7 @@ import {
 } from '../services/offeringService.js';
 import { itemsReady, itemsSection } from '../services/metaAdChat.js';
 import { isMetaRateLimit, leadFormName } from '../integrations/metaAds.js';
+import { creativeScore, scoreAds } from '../services/adsAgent/adScore.js';
 import { campaignMetric, rankAds } from '../services/adsAgent/adRanking.js';
 import { analysisDays, analysisText, wantsAdsAnalysis } from '../services/adsAgent/qualityService.js';
 
@@ -728,4 +729,27 @@ test('meta rate limit errors are recognised by code or message', () => {
   assert.equal(isMetaRateLimit({ code: 17, message: 'User request limit reached' }), true);
   assert.equal(isMetaRateLimit({ code: 80004, message: 'There have been too many calls from this ad account. Please wait a bit and try again.' }), true);
   assert.equal(isMetaRateLimit({ code: 100, message: 'Invalid parameter' }), false);
+});
+
+test('airo ad score rates the creative out of 100 and explains gaps', () => {
+  const full = creativeScore({ headline: '2 & 3 BHK flats in Noida', text: 'Ready to move 2 and 3 BHK flats from Rs 45 lakh near the metro. Book a site visit this week.', cta: 'SIGN_UP', visual: 'image', leadForm: true });
+  assert.equal(full.score, 100);
+  assert.deepEqual(full.reasons, []);
+  const thin = creativeScore({ headline: 'Hi', text: 'Hi', cta: 'LEARN_MORE', visual: '' });
+  assert.ok(thin.score < 50);
+  assert.ok(thin.reasons.includes('No image or video.'));
+  assert.equal(creativeScore({}).score, null);
+});
+
+test('airo ad score blends results once an ad has enough data', () => {
+  const base = { campaignId: '1', currency: 'INR', headline: 'Flats in Noida from 45L', text: 'Ready to move flats from Rs 45 lakh near the metro, book a visit.', cta: 'SIGN_UP', visual: 'image', leadForm: true };
+  const scores = scoreAds([
+    { ...base, id: 'a', spend: 1000, impressions: 5000, clicks: 100, leads: 10 },
+    { ...base, id: 'b', spend: 1000, impressions: 5000, clicks: 50, leads: 2 },
+    { ...base, id: 'c', spend: 0, impressions: 0, clicks: 0, leads: 0 }
+  ], { minSpend: 500 });
+  assert.equal(scores.a.basis, 'results_and_creative');
+  assert.ok(scores.a.score > scores.b.score);
+  assert.equal(scores.c.basis, 'creative');
+  assert.equal(scores.c.score, scores.c.creativeScore);
 });

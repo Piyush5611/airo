@@ -600,7 +600,25 @@ tr.is-clickable:hover .campaign-name strong { color: var(--accent-deep); }
 .ads-table td { padding: 14px; background: white; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; transition: background 0.15s, border-color 0.15s; }
 .ads-table td:first-child { border-left: 1px solid var(--line); border-radius: 14px 0 0 14px; }
 .ads-table td:last-child { border-right: 1px solid var(--line); border-radius: 0 14px 14px 0; text-align: right; }
-.ads-table td[data-label="Campaign"], .ads-table td[data-label="Ad"], .ads-table td[data-label="Ad set"] { width: 44%; white-space: normal; }
+.ads-table td[data-label="Campaign"], .ads-table td[data-label="Ad set"] { width: 44%; white-space: normal; }
+.ads-table td[data-label="Ad"] { white-space: normal; min-width: 200px; }
+.ad-cell strong { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ad-cell .score-why { color: var(--ink-soft); font-style: italic; }
+.top-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #8a5a00; background: #fff3d1; border: 1px solid #f6dc95; border-radius: 6px; padding: 2px 6px; }
+.score-cell { display: inline-flex; align-items: center; gap: 10px; }
+.score-ring { width: 44px; height: 44px; flex: none; }
+.score-ring circle { fill: none; stroke-width: 4; }
+.score-ring .track { stroke: #edf0f5; }
+.score-ring .bar { stroke-linecap: round; transition: stroke-dasharray 0.4s; }
+.score-ring text { font-size: 12px; font-weight: 700; fill: var(--ink); font-family: var(--sans); }
+.score-cell.is-great .bar { stroke: #1a9a62; }
+.score-cell.is-good .bar { stroke: #5b4dff; }
+.score-cell.is-fair .bar { stroke: #e0a100; }
+.score-cell.is-weak .bar { stroke: #d64545; }
+.score-cell.is-great strong { color: #12805a; }
+.score-cell.is-good strong { color: var(--accent-deep); }
+.score-cell.is-fair strong { color: #a86f00; }
+.score-cell.is-weak strong { color: #c2312f; }
 .ads-table td[data-label="On / off"] { width: 64px; }
 .ads-table tr.is-clickable:hover td { background: #fbfaff; border-color: #d9d4ff; }
 .ads-table .is-empty, .results-idle { color: var(--faint); font-size: 12px; }

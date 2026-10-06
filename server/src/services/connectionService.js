@@ -8,7 +8,10 @@ import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
 import { leadScope } from '../utils/scope.js';
+import * as adsRepo from '../repositories/adsAgentRepo.js';
 import * as repo from '../repositories/connectionRepo.js';
+import { scoreAds } from './adsAgent/adScore.js';
+import { normalizeSettings } from './adsAgent/guardrails.js';
 import { recordAudit } from './auditService.js';
 import { refreshOrganization } from './intelligenceService.js';
 
@@ -147,6 +150,7 @@ export async function detail(auth, id) {
     logs,
     errors,
     records: connection.providerKey === 'nexcall' ? [] : objects.map(liveRecord).filter(Boolean),
+    adScores: connection.providerKey === 'meta_ads' ? await metaAdScores(auth.organizationId, objects) : {},
     linked: isLinked(connection, storedSecret),
     accountId: MULTI_ACCOUNT.has(connection.providerKey) ? storedSecret?.accountId || null : null,
     accounts,
@@ -154,6 +158,16 @@ export async function detail(auth, id) {
     webhookPath: canManage && token ? `/api/hooks/${token}` : null,
     tool: connection.providerKey === 'nexcall' ? await nexcallTool(id, connection.mode) : null
   };
+}
+
+async function metaAdScores(organizationId, objects) {
+  const ads = objects
+    .filter((row) => row.objectType === 'ad')
+    .map((row) => ({ id: row.externalId, ...parseJson(row.payload, {}) }))
+    .filter((row) => row.origin === 'api');
+  if (!ads.length) return {};
+  const settings = await adsRepo.settings(organizationId).catch(() => null);
+  return scoreAds(ads, { minSpend: normalizeSettings(settings).minSpendForDecision });
 }
 
 const STATS_TTL_MS = 10 * 60 * 1000;

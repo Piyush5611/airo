@@ -602,6 +602,29 @@ export async function metaCampaignList({ apiKey, accountId }) {
   })).filter((row) => row.status !== 'DELETED' && row.status !== 'ARCHIVED');
 }
 
+function adPayload(row, insight, currency) {
+  const creative = creativeOf(row.creative || {});
+  const spec = row.creative?.object_story_spec || {};
+  const video = Boolean(row.creative?.video_id || spec.video_data);
+  return {
+    origin: 'api',
+    status: row.status || '',
+    delivery: row.effective_status || '',
+    campaignId: row.campaign_id ? String(row.campaign_id) : '',
+    currency,
+    headline: creative.headline.slice(0, 120),
+    text: creative.text.slice(0, 600),
+    cta: creative.cta,
+    visual: video ? 'video' : creative.image ? 'image' : '',
+    link: creative.link.slice(0, 300),
+    leadForm: creative.leadForm,
+    spend: insight?.spend ?? null,
+    impressions: insight?.impressions ?? null,
+    clicks: insight?.clicks ?? null,
+    leads: insight ? leads(insight.actions) : null
+  };
+}
+
 export async function pullMetaAds({ apiKey, accountId }) {
   const act = actId(accountId);
   const account = await graph(`act_${act}`, apiKey, { fields: 'id,name,currency' });
@@ -614,9 +637,20 @@ export async function pullMetaAds({ apiKey, accountId }) {
       fields: 'id,name,status,effective_status,campaign_id,daily_budget,destination_type'
     }),
     list(`act_${act}/ads`, apiKey, {
-      fields: 'id,name,status,effective_status,campaign_id,adset_id'
+      fields: 'id,name,status,effective_status,campaign_id,adset_id,creative{title,body,image_url,thumbnail_url,video_id,call_to_action_type,object_story_spec}'
     })
   ]);
+  let adInsights = [];
+  try {
+    adInsights = await list(`act_${act}/insights`, apiKey, {
+      level: 'ad',
+      date_preset: 'last_30d',
+      fields: 'ad_id,spend,impressions,clicks,actions'
+    });
+  } catch {
+    adInsights = [];
+  }
+  const byAd = new Map(adInsights.map((row) => [String(row.ad_id), row]));
   let insights = [];
   let insightNote = '';
   try {
@@ -689,12 +723,7 @@ export async function pullMetaAds({ apiKey, accountId }) {
       externalId: String(row.id),
       name: String(row.name || 'Ad').slice(0, 180),
       parent: row.adset_id ? String(row.adset_id) : null,
-      payload: {
-        origin: 'api',
-        status: row.status || '',
-        delivery: row.effective_status || '',
-        campaignId: row.campaign_id ? String(row.campaign_id) : ''
-      }
+      payload: adPayload(row, byAd.get(String(row.id)), currency)
     }))
   ];
   const draftNote = draftResult.note ? ` Drafts were not returned: ${draftResult.note}` : '';

@@ -832,6 +832,32 @@ function ResultsCell({ spend, clicks, results, resultLabel, currency }) {
   );
 }
 
+const SCORE_GRADE = { great: 'Great', good: 'Good', fair: 'Fair', weak: 'Weak' };
+const SCORE_BASIS = {
+  creative: 'Ad quality · not enough results yet',
+  results: 'From results',
+  results_and_creative: 'Results + ad quality'
+};
+
+function ScoreRing({ item }) {
+  if (!item || item.score == null) return <span className="is-empty">No score yet</span>;
+  const radius = 16;
+  const length = 2 * Math.PI * radius;
+  return (
+    <span className={`score-cell is-${item.grade}`} title={(item.reasons || []).join('\n')}>
+      <svg viewBox="0 0 40 40" className="score-ring" aria-label={`AIRO score ${item.score} out of 100`}>
+        <circle cx="20" cy="20" r={radius} className="track" />
+        <circle cx="20" cy="20" r={radius} className="bar" strokeDasharray={`${(length * item.score) / 100} ${length}`} transform="rotate(-90 20 20)" />
+        <text x="20" y="24.5" textAnchor="middle">{item.score}</text>
+      </svg>
+      <span className="stack-cell">
+        <strong>{SCORE_GRADE[item.grade] || '—'}</strong>
+        <small>{SCORE_BASIS[item.basis] || ''}</small>
+      </span>
+    </span>
+  );
+}
+
 function EditButton({ disabled, onClick }) {
   return (
     <button
@@ -2010,8 +2036,14 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
     ['Website', /^https:\/\//i.test(link.trim())]
   ];
   const rangeRows = (report?.campaigns || []).map((row) => ({ id: row.id, name: row.name, fields: row }));
+  const campaignTitle = new Map(campaigns.map((row) => [row.externalId, row.name]));
+  const adsetCampaign = new Map(adsets.map((row) => [row.externalId, row.parent]));
+  const adScores = data.adScores || {};
+  const adCampaignName = (row) => campaignTitle.get(row.fields?.campaignId || adsetCampaign.get(row.parent)) || '';
   const allRows = view === 'Ad sets' ? adsets : view === 'Ads' ? ads : view === 'Report' ? rangeRows : campaigns;
-  const rows = allRows.filter((row) => matches(query, row.name, row.fields?.status, row.fields?.objective));
+  const rows = allRows
+    .filter((row) => matches(query, row.name, row.fields?.status, row.fields?.objective, row.fields?.headline, view === 'Ads' ? adCampaignName(row) : ''))
+    .sort((a, b) => (view === 'Ads' ? (adScores[b.externalId]?.score ?? -1) - (adScores[a.externalId]?.score ?? -1) : 0));
   const spend = total(campaigns, 'spend');
   const impressions = total(campaigns, 'impressions');
   const clicks = total(campaigns, 'clicks');
@@ -2025,8 +2057,6 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
     .map((row) => ({ label: platformNames[row.name] || label(row.name), value: Number(row.spend || 0), clicks: Number(row.clicks || 0) }))
     .sort((a, b) => b.value - a.value);
   const rangeCampaigns = rangeRows;
-  const campaignTitle = new Map(campaigns.map((row) => [row.externalId, row.name]));
-  const adsetCampaign = new Map(adsets.map((row) => [row.externalId, row.parent]));
   function openCampaign(row) {
     const campaignId = view === 'Report' ? row.id
       : view === 'Ad sets' ? row.parent
@@ -2543,8 +2573,24 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
           { key: 'action', label: '', render: (row) => canManage ? (
             <EditButton disabled={busy} onClick={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })} />
           ) : null }
+        ] : view === 'Ads' ? [
+          { key: 'campaign', label: 'Campaign', render: (row) => <CampaignName avatar name={adCampaignName(row) || 'Campaign not synced'} /> },
+          { key: 'ad', label: 'Ad', render: (row) => {
+            const scored = adScores[row.externalId];
+            const top = scored?.score != null && rows.length > 1 && rows[0].externalId === row.externalId;
+            return (
+              <span className="stack-cell ad-cell">
+                <strong>{row.name}{top ? <span className="top-tag">Top ad</span> : null}</strong>
+                {row.fields?.headline ? <small>{row.fields.headline}</small> : null}
+                {scored?.reasons?.[0] ? <small className="score-why">{scored.reasons[0]}</small> : null}
+              </span>
+            );
+          } },
+          { key: 'score', label: 'AIRO score', render: (row) => <ScoreRing item={adScores[row.externalId]} /> },
+          { key: 'status', label: 'Delivery', render: (row) => <DeliveryPill status={row.fields?.status} delivery={row.fields?.delivery} /> },
+          { key: 'results', label: 'Results · 30 days', render: (row) => <ResultsCell spend={row.fields?.spend} clicks={row.fields?.clicks} results={row.fields?.leads} resultLabel="leads" currency={row.fields?.currency || currency} /> }
         ] : [
-          { key: 'name', label: view === 'Ads' ? 'Ad' : 'Ad set', render: (row) => <CampaignName avatar name={row.name} sub={campaignTitle.get(view === 'Ad sets' ? row.parent : row.fields?.campaignId || adsetCampaign.get(row.parent))?.split(' | ')[0]} /> },
+          { key: 'name', label: 'Ad set', render: (row) => <CampaignName avatar name={row.name} sub={campaignTitle.get(row.parent)?.split(' | ')[0]} /> },
           { key: 'status', label: 'Delivery', render: (row) => <DeliveryPill status={row.fields?.status} delivery={row.fields?.delivery} /> },
           ...(view === 'Ad sets' ? [{ key: 'budget', label: 'Budget', render: (row) => <BudgetCell amount={row.fields?.budget} kind={row.fields?.budgetKind} currency={row.fields?.currency} /> }] : [])
         ]} rows={rows} />

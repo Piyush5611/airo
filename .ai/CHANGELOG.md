@@ -2,6 +2,17 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (AIRO score out of 100 for every Meta ad)
+
+- **Change:** New pure module `services/adsAgent/adScore.js`.
+  - `creativeScore` rates the ad itself out of 100: image or video 20, headline 20 (best at 15 to 40 characters), main text 25 (best at 60 to 300 characters; 7 of it for a price, number or offer), button 15 (5 of it for a clear action instead of "Learn more"), destination 10 (lead form, https link or chat button), and headline not repeated in the text 10. Every missing point comes with a reason.
+  - `scoreAds` blends in results with `rankAds` once an ad has 1,000 impressions and half the minimum decision spend: 60% results and 40% creative. Otherwise the score is the creative score, and `basis` says so.
+  - The grades are great (75 or more), good (55 or more), fair (35 or more) and weak.
+- **Change:** `pullMetaAds` now reads each ad's creative in the same ads request, plus one ad-level 30-day insights call. The ad payload stores headline, text, CTA, visual, link, lead form flag, currency, spend, impressions, clicks and leads.
+- **Change:** The Meta connection detail returns `adScores` keyed by ad id.
+- **Change (client):** The Ads tab shows the campaign name first, then the ad (name, headline, the main reason), a score ring with its grade and basis, delivery and 30-day results. It is sorted by score, and the best one is tagged "Top ad".
+- **Migration/API impact:** None. Creatives appear after the next Meta sync.
+
 ### 2026-10-06 (Campaign on/off without a full re-sync)
 
 - **Fix:** Turning a Meta or Google campaign on or off ran a full account sync each time, and a few clicks hit Meta's "too many calls from this ad account" limit. The status endpoints now only patch the stored campaign (and, for Meta turn-on, its ad sets and ads) with `connectionRepo.setCampaignStatus`. The scheduled sync still corrects delivery later.

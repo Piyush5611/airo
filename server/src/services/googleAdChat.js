@@ -6,6 +6,9 @@ import { organizationSector } from '../repositories/workspaceRepo.js';
 import { productAsk, sectorOf } from '../domain/sectors.js';
 import { recordAudit } from './auditService.js';
 import { writeGoogleAdPlan } from './llmService.js';
+import {
+  MAX_AD_ITEMS, addOfferingDetails, applyOfferings, markOfferingsUsed, offeringMenu, offeringPick, saveAnswer, saveMenu, savePending, savePrompt, savedOfferings, slimOffering
+} from './offeringService.js';
 import { LINE, bullets, card, field, header, hint, money, numbered, options, section, step as fmtStep } from './adsAgent/waFormat.js';
 import {
   businessProfile, chosenNames, cityChoices, cityMenu, cityPick, droppedCity, hasProfileDetails, keywordCandidates, meansAll, officeCityNote, wantsOtherCity, resolveGoogleLocations, suggestTargeting, writeGoogleCopy
@@ -399,27 +402,94 @@ async function begin(organizationId, conversationId, text, english) {
   if (!account) return { text: `I am the AIRO assistant. ${connectLine(english)}` };
   const closedMeta = await clearMetaDraft(conversationId);
   const payload = { lang: english ? 'en' : 'hi', currency: account.input.currency, sector: await organizationSector(organizationId) };
-  await saveDraft(organizationId, conversationId, 'product', payload);
   const note = closedMeta ? say(english, 'The open Meta ad setup in this chat is closed. ', 'Is chat ka khula Meta ad setup band kar diya. ') : '';
+  const saved = (await savedOfferings(organizationId, 9)).map(slimOffering);
+  if (saved.length) {
+    payload.offeringChoices = saved;
+    await saveDraft(organizationId, conversationId, 'offering', payload);
+    return { text: `${note}${offeringPrompt(payload, english)}`, menu: offeringMenu(payload, english, 'google') };
+  }
+  await saveDraft(organizationId, conversationId, 'product', payload);
   return { text: `${note}${intakePrompt('product', english, payload.sector)}` };
+}
+
+function offeringPrompt(payload, english) {
+  const sector = sectorOf(payload.sector);
+  return card([
+    header(say(english, 'Google Search Ad Setup', 'Google Search Ad Setup'), say(english, 'AIRO assistant · 5 quick steps', 'AIRO assistant · 5 chhote steps')),
+    sector ? hint(say(english, `Business sector: ${sector.label}. AIRO will plan the ad for this sector.`, `Business sector: ${sector.label}. AIRO isi sector ke hisaab se ad plan karega.`)) : '',
+    `*Step 1/5 · ${say(english, 'What to advertise', 'Kya advertise karna hai')}*`,
+    section(say(english, 'Saved in Products & Projects', 'Products & Projects mein saved'), numbered((payload.offeringChoices || []).map((item) => `${item.name}${item.priceText ? ` · ${item.priceText}` : ''}`))),
+    hint(say(english, `Pick one or more (up to ${MAX_AD_ITEMS}). On Google, the chosen items share one campaign and one ad group, with keywords and ad text for all of them.`, `Ek ya zyada chuno (max ${MAX_AD_ITEMS}). Google pe chune hue items ek campaign aur ek ad group mein jaayenge, sabke keywords aur ad text ke saath.`)),
+    section(say(english, 'Choose', 'Chuno'), options([
+      [say(english, 'Choose', 'Chuno'), say(english, 'tap the button below, then Done', 'neeche button dabao, phir Done')],
+      ['1,3', say(english, 'pick by number', 'number se chuno')],
+      ['add new', say(english, 'something not in this list', 'jo list mein nahi hai')]
+    ]))
+  ]);
+}
+
+async function afterProduct(organizationId, conversationId, payload, english, note = '') {
+  const withNote = (result) => (note ? { ...result, text: `${hint(note)}\n\n${result.text}` } : result);
+  if (!payload.website) {
+    await saveDraft(organizationId, conversationId, 'website', payload);
+    return withNote({ text: intakePrompt('website', english) });
+  }
+  if (payload.details) return withNote(await prepareRegion(organizationId, conversationId, payload, english));
+  return withNote(await afterWebsite(organizationId, conversationId, payload, english));
 }
 
 async function continueDraft(organizationId, conversationId, draft, text, english) {
   const payload = { ...draft.payload, lang: english ? 'en' : 'hi' };
-  const ask = (step, message) => saveDraft(organizationId, conversationId, step, payload, draft.campaignId).then(() => ({ text: message }));
+  const ask = (step, message) => saveDraft(organizationId, conversationId, step, payload, draft.campaignId).then(() => ({
+    text: message,
+    menu: step === 'offering' ? offeringMenu(payload, english, 'google') : step === 'offer_save' ? saveMenu(english) : null
+  }));
 
+  if (draft.step === 'offering') {
+    const pick = offeringPick(text, payload);
+    if (pick.kind === 'new') {
+      delete payload.offeringChoices;
+      delete payload.pickedOfferings;
+      delete payload.offeringExtra;
+      const prompt = productAsk(payload.sector, english);
+      return ask('product', fmtStep(1, 5, say(english, 'New item', 'Naya item'), prompt.question, prompt.example));
+    }
+    if (pick.kind === 'toggle' || pick.kind === 'empty') {
+      const note = pick.kind === 'empty'
+        ? say(english, 'Nothing selected yet. Tap an item, or Add new.', 'Abhi kuch select nahi hua. Item tap karo, ya Add new.')
+        : pick.added ? say(english, `${pick.name} added.`, `${pick.name} add ho gaya.`) : say(english, `${pick.name} removed.`, `${pick.name} hata diya.`);
+      return ask('offering', note);
+    }
+    if ((payload.pickedOfferings || []).length + (payload.offeringExtra || []).length > MAX_AD_ITEMS) {
+      return ask('offering', say(english, `Pick up to ${MAX_AD_ITEMS} items for one campaign. Tap one to remove it.`, `Ek campaign mein max ${MAX_AD_ITEMS} items. Hatane ke liye kisi item pe dobara tap karo.`));
+    }
+    const chosen = applyOfferings(payload);
+    await markOfferingsUsed(organizationId, chosen.ids);
+    if (chosen.extra.length) {
+      payload.pendingSave = chosen.extra;
+      return ask('offer_save', savePrompt(chosen.extra, english));
+    }
+    return afterProduct(organizationId, conversationId, payload, english);
+  }
+  if (draft.step === 'offer_save') {
+    const answer = saveAnswer(text);
+    if (!answer) return ask('offer_save', savePrompt(payload.pendingSave || [payload.product], english));
+    const note = await savePending(organizationId, payload, answer === 'yes', english);
+    return afterProduct(organizationId, conversationId, payload, english, note);
+  }
   if (draft.step === 'product') {
     if (text.length < 2) return { text: intakePrompt('product', english, payload.sector) };
     payload.product = text.slice(0, 120);
+    payload.typedProduct = text.slice(0, 1500);
     const site = httpsWebsite(text);
-    if (site) {
-      payload.website = site;
-      return afterWebsite(organizationId, conversationId, payload, english);
-    }
-    return ask('website', intakePrompt('website', english));
+    if (site) payload.website = site;
+    payload.pendingSave = [payload.product];
+    return ask('offer_save', savePrompt([payload.product], english));
   }
   if (draft.step === 'details') {
     payload.details = /^(skip|no|nahi|nahin|none)\b/i.test(text) ? '' : text.slice(0, 500);
+    if (payload.details && payload.savedOfferingIds?.length === 1) await addOfferingDetails(organizationId, payload.savedOfferingIds[0], payload.details);
     return prepareRegion(organizationId, conversationId, payload, english);
   }
   if (draft.step === 'website') {

@@ -364,7 +364,7 @@ async function answerWithModel(saved) {
     }
   }
   const lastText = String([...messages].reverse().find((row) => row.role === 'user')?.content || '');
-  if (/^(city|radius)_/.test(String(saved.tapId || '')) && saved.recognized && saved.organizationId) {
+  if (/^(city|radius|offer)_/.test(String(saved.tapId || '')) && saved.recognized && saved.organizationId) {
     if (await sendAdChat(saved, messages, { force: true })) return;
   }
   const route = saved.recognized && saved.organizationId && lastText && !imageBase64 && !imageError

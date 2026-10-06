@@ -22,7 +22,85 @@ import { menuMessage, messageParts } from '../services/whatsappService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 import { GOAL_LABELS, SECTORS, SECTOR_KEYS, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
-import { organizationSchema } from '../validators/schemas.js';
+import { imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
+import {
+  MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
+} from '../services/offeringService.js';
+import { itemsReady, itemsSection } from '../services/metaAdChat.js';
+
+const SAVED = [
+  { id: 11, kind: 'project', name: 'Green Heights', priceText: '45 lakh onwards', offer: 'Free site visit', usps: 'Near metro, 2 min to school', details: '2 and 3 BHK', locations: 'Noida Sector 150', website: 'https://green.example.com', photoCount: 2 },
+  { id: 12, kind: 'project', name: 'Lake View Villas', priceText: '', offer: '', usps: '', details: '', locations: '', website: '', photoCount: 0 }
+];
+
+test('offering list menu toggles items, adds typed ones and stays inside WhatsApp limits', () => {
+  const payload = { offeringChoices: SAVED.map(slimOffering) };
+  assert.deepEqual(offeringPick('Done', payload), { kind: 'empty' });
+  assert.equal(offeringPick('Add new', payload).kind, 'new');
+  assert.equal(offeringPick('Green Heights', payload).added, true);
+  assert.deepEqual(payload.pickedOfferings, [11]);
+  assert.equal(offeringPick('✓ Green Heights', payload).added, false);
+  assert.deepEqual(payload.pickedOfferings, []);
+  assert.equal(offeringPick('Sunrise Plots', payload).added, true);
+  assert.deepEqual(payload.offeringExtra, ['Sunrise Plots']);
+  const menu = offeringMenu(payload, true);
+  assert.ok(menu.rows.length <= 10);
+  assert.ok(menu.rows.every((row) => row.title.length <= 24 && row.description.length <= 72));
+  assert.equal(menu.rows[0].id, 'offer_done');
+  assert.equal(menu.rows.at(-1).id, 'offer_new');
+  assert.match(menu.body, /Selected: Sunrise Plots/);
+  assert.match(offeringMenu({ offeringChoices: SAVED }, true).body, /own ad set/);
+  assert.doesNotMatch(offeringMenu({ offeringChoices: SAVED }, true, 'google').body, /ad set/);
+  assert.equal(offeringPick('1,2', payload).kind, 'final');
+  assert.deepEqual(payload.pickedOfferings, [11, 12]);
+});
+
+test('chosen offerings fill the ad intake with each item kept separate', () => {
+  const payload = { sector: 'real_estate', offeringChoices: SAVED.map(slimOffering), pickedOfferings: [11, 12], offeringExtra: ['Sunrise Plots'] };
+  const chosen = applyOfferings(payload);
+  assert.deepEqual(chosen.ids, [11, 12]);
+  assert.equal(payload.product, 'Green Heights + Lake View Villas + Sunrise Plots');
+  assert.equal(payload.category, sectorOf('real_estate').label);
+  assert.equal(payload.website, 'https://green.example.com');
+  assert.equal(payload.detailsDone, true);
+  assert.match(payload.details, /Green Heights: price 45 lakh onwards; offer Free site visit; selling points Near metro/);
+  assert.equal(payload.adItems.length, 3);
+  assert.deepEqual(payload.adItems[0].points, ['Near metro', '2 min to school']);
+  assert.equal(payload.adItems[2].id, null);
+  assert.equal(payload.offeringChoices, undefined);
+  assert.ok(itemsReady(payload));
+  assert.ok(MAX_AD_ITEMS >= 3);
+  assert.equal(offeringFacts({ name: 'x' }), '');
+});
+
+test('multi item plan shows one ad set per item with the budget split', () => {
+  const text = itemsSection({
+    dailyBudget: 900,
+    itemCopies: [
+      { name: 'Green Heights', headline: 'Homes near metro', message: 'Book a visit' },
+      { name: 'Lake View Villas', headline: 'Villas by the lake', message: 'Enquire now' },
+      { name: 'Sunrise Plots', headline: 'Plots from 20 lakh', message: 'Call today' }
+    ]
+  }, true);
+  assert.match(text, /Ad sets \(3, one per item\)/);
+  assert.match(text, /300/);
+  assert.match(text, /3\. Sunrise Plots/);
+});
+
+test('save question and catalog input are checked', () => {
+  assert.equal(saveAnswer('Haan, save karo'), 'yes');
+  assert.equal(saveAnswer('Nahi, sirf is ad ke liye'), 'no');
+  assert.equal(saveAnswer('kya?'), '');
+  assert.equal(cleanText('Call 98765 43210 or a@b.co for Green Heights', 200), 'Call or for Green Heights');
+  const good = offeringSchema.safeParse({ body: { kind: 'project', name: 'Green Heights', website: 'https://green.example.com' }, query: {}, params: {} });
+  assert.ok(good.success);
+  assert.equal(good.data.body.status, 'active');
+  assert.equal(offeringSchema.safeParse({ body: { kind: 'project', name: 'Green Heights', website: 'http://green.example.com' }, query: {}, params: {} }).success, false);
+  assert.equal(imageUploadSchema.safeParse({ body: { imageBase64: 'x' }, query: {}, params: {} }).success, false);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(200)]);
+  assert.equal(imageBytes(png.toString('base64')).mime, 'image/png');
+  assert.throws(() => imageBytes(Buffer.alloc(200).toString('base64')), /JPG or PNG/);
+});
 
 test('sectors are complete and give guidance, not claims', () => {
   assert.equal(new Set(SECTOR_KEYS).size, SECTORS.length);
@@ -563,4 +641,10 @@ test('ad design svg escapes text and renders one png per variant', () => {
   const pngs = variantCreatives({ cta: 'LEARN_MORE', variants: [{ headline: 'One' }, { headline: 'Two' }, { headline: 'Three' }] });
   assert.equal(pngs.length, 2);
   for (const png of pngs) assert.equal(png[0], 0x89);
+});
+
+test('ad design puts the uploaded logo on the image', () => {
+  const logo = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(40)]).toString('base64');
+  assert.match(creativeSvg({ headline: 'Homes', cta: 'LEARN_MORE', logoBase64: logo }), /data:image\/png;base64,/);
+  assert.doesNotMatch(creativeSvg({ headline: 'Homes', cta: 'LEARN_MORE' }), /<image/);
 });

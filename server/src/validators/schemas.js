@@ -336,6 +336,24 @@ export const organizationSchema = body({
   sector: z.enum(SECTOR_KEYS)
 });
 
+const httpsLink = z.union([z.string().trim().url().max(500).regex(/^https:\/\//i, 'Website must start with https://'), z.literal('')]).optional().default('');
+
+export const offeringSchema = body({
+  kind: z.enum(['product', 'project', 'service', 'course', 'package', 'other']),
+  name: z.string().trim().min(2).max(160),
+  details: z.string().trim().max(2000).optional().default(''),
+  usps: z.string().trim().max(1000).optional().default(''),
+  offer: z.string().trim().max(300).optional().default(''),
+  priceText: z.string().trim().max(160).optional().default(''),
+  locations: z.string().trim().max(400).optional().default(''),
+  website: httpsLink,
+  status: z.enum(['active', 'archived']).optional().default('active')
+});
+
+export const imageUploadSchema = body({
+  imageBase64: z.string().min(100).max(3500000)
+});
+
 export const platformInviteSchema = body({
   fullName: z.string().min(2).max(160),
   email: z.string().email(),

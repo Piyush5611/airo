@@ -27,6 +27,8 @@ const intentSchema = z.object({
 const STEP_QUESTIONS = {
   product: 'what the ad is for',
   category: 'what the ad is for',
+  offering: 'which saved products/projects/services to advertise (a tapped item name, numbers like 1,3, Done, Add new, or a typed new item name)',
+  offer_save: 'whether to save the new item in the AIRO panel: haan or nahi',
   website: 'the website link (or "no website")',
   details: 'selling points such as price, offer, amenities (or "skip")',
   region: 'which cities to target (a tapped city name, Done, Best pick, All suggested, Add other city, a typed city name to add, "remove <city>", ok, numbers, or all India)',

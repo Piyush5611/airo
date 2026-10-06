@@ -2,6 +2,23 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Products & Projects catalog and pick-from-list in the ad chat)
+
+- **Change (panel):** New Growth page "Products & Projects" (`/app/growth/offerings`, `Offerings.jsx`). It lists everything the business sells and supports add, edit, archive and delete.
+  - Each item has type, name, details, selling points (USPs), offer, price, location, website and up to 5 JPG/PNG photos (each under 2 MB).
+  - A business logo can be uploaded once for the whole organization.
+  - Viewing needs `campaigns.view`; changes need `campaigns.update`. Every change is audited.
+- **Change (API):** New routes `GET/POST /api/offerings`, `PATCH/DELETE /api/offerings/:id`, `POST /api/offerings/:id/photos`, `GET/DELETE /api/offerings/media/:id` and `PUT /api/offerings/logo`. They are zod-validated by `offeringSchema` and `imageUploadSchema`. Images are checked by magic bytes and served only to signed-in users of the same organization.
+- **Change (Meta chat):** When saved items exist, "run meta ads" starts with a WhatsApp list of them.
+  - The owner taps one or more items, or types numbers, then taps Done. "Add new" asks for a new item.
+  - A typed item is used for the ad, then AIRO asks "Products & Projects mein save karun?" (haan/nahi). If yes, it is saved using the LLM capture, with a fallback to the plain name.
+  - The chosen items fill the product, details, website and selling points.
+  - With 2-4 items, one paused campaign is created with one ad set and one ad per item. Each item has its own copy, link and design, and the daily budget is split equally (at least ₹100 per ad set is enforced).
+  - Designs use the item's first saved photo as the background and put the business logo in the corner.
+- **Change (Google chat):** The same list, "Add new" and save question. The chosen items go into one campaign and one ad group, with the details of every item in the facts. Per-item ad groups for Google are not built yet. Google Search ads do not use photos.
+- **Change:** `createMetaAd` / `fillMetaCampaign` accept `items` (name, headline, message, link, image). `creativeSvg` accepts `logoBase64`, and there is a new `itemCreative`. Taps with ids `offer_*` go straight to the ad chat.
+- **Migration/API impact:** Run `npm run migrate`. This runs `021_offerings.sql` (the table) and `022_offering_media.sql` (the `usps`/`offer` columns and the `offering_media` MEDIUMBLOB table for photos and logo). Not tested against live Meta or Google locally.
+
 ### 2026-10-06 (Audience size and radius in the ad chat)
 
 - **Change (Meta):** After the cities are set, the chat has a new `radius` step.

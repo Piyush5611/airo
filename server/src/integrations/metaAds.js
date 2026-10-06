@@ -1546,6 +1546,24 @@ export async function createMetaAd(input) {
   const pageToken = await pageAccessToken(apiKey, pageId);
   const imageHash = await uploadImage(act, apiKey, bytes);
   const imageHashB = bytesB ? await uploadImage(act, apiKey, bytesB) : imageHash;
+  const items = [];
+  for (const item of Array.isArray(input.items) && input.items.length > 1 ? input.items.slice(0, 6) : []) {
+    let itemSite = website;
+    try {
+      const parsed = new URL(item.link || '');
+      if (parsed.protocol === 'https:') itemSite = parsed;
+    } catch {
+      // Items without their own https link use the campaign link.
+    }
+    items.push({
+      name: String(item.name || '').slice(0, 60),
+      headline: item.headline,
+      message: item.message,
+      website: itemSite,
+      imageHash: item.imageBase64 ? await uploadImage(act, apiKey, imageBytes(item.imageBase64)) : imageHash
+    });
+  }
+  input.itemSlots = items;
   const formId = plan.lead ? await createLeadForm(pageId, pageToken, name, website.toString()) : '';
   const campaignLevel = input.budgetLevel === 'campaign';
   const budgetKey = input.budgetMode === 'lifetime' ? 'lifetime_budget' : 'daily_budget';
@@ -1576,7 +1594,8 @@ export async function createMetaAd(input) {
 }
 
 async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, website, pageId, name, message, publish, fullBudget, campaignLevel, budgetKey, imageHash, imageHashB = imageHash, formId }) {
-  const versions = input.abTest ? [true, false] : [input.advantageAudience !== false];
+  const slots = input.itemSlots?.length > 1 ? input.itemSlots : null;
+  const versions = slots ? slots.map(() => input.advantageAudience !== false) : input.abTest ? [true, false] : [input.advantageAudience !== false];
   const share = Math.max(1, Math.floor(fullBudget / versions.length));
   const start = scheduleTime(input.startDate);
   const end = scheduleTime(input.endDate);
@@ -1589,8 +1608,9 @@ async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, w
   const adIds = [];
   const adsetIds = [];
   for (const [index, advantage] of versions.entries()) {
+    const slot = slots?.[index];
     const adsetParams = {
-      name: `${name} ${versions.length > 1 ? `test ${index + 1}` : 'ad set'}`.slice(0, 180),
+      name: (slot ? `${name} | ${slot.name}` : `${name} ${versions.length > 1 ? `test ${index + 1}` : 'ad set'}`).slice(0, 180),
       campaign_id: campaign.id,
       billing_event: 'IMPRESSIONS',
       optimization_goal: plan.goal,
@@ -1612,6 +1632,17 @@ async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, w
     if (!adset.id) throw new ApiError(422, 'Meta Ads did not return an ad set.', 'validation_error');
     if (!firstAdset) firstAdset = String(adset.id);
     adsetIds.push({ id: String(adset.id), name: adsetParams.name });
+    if (slot) {
+      const creative = await makeCreative(act, apiKey, { ...creativeInput, website: slot.website }, slot.imageHash, formId, plan, {
+        headline: slot.headline || input.headline,
+        message: slot.message || message,
+        label: slot.name
+      });
+      const ad = await makeAd(act, apiKey, `${name} | ${slot.name} ad`.slice(0, 180), adset.id, creative);
+      if (!firstAd) firstAd = ad;
+      adIds.push({ id: String(ad), adsetId: String(adset.id), name: `${name} | ${slot.name} ad`.slice(0, 180) });
+      continue;
+    }
     const primary = await makeCreative(act, apiKey, creativeInput, imageHash, formId, plan);
     const ad = await makeAd(act, apiKey, `${name} ad`, adset.id, primary);
     if (!firstAd) firstAd = ad;

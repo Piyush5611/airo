@@ -12,7 +12,10 @@ import { LINE, bullets, card, field, header, hint, money, numbered, options, sec
 import {
   businessProfile, chosenNames, cityChoices, cityMenu, cityPick, droppedCity, hasProfileDetails, meansAll, officeCityNote, pickMetaAudience, wantsOtherCity, resolveMetaCities, suggestTargeting, usableInterest, writeMetaCopy
 } from './adsAgent/chatPlanner.js';
-import { variantCreatives } from './adsAgent/adCreative.js';
+import { itemCreative, variantCreatives } from './adsAgent/adCreative.js';
+import {
+  MAX_AD_ITEMS, addOfferingDetails, applyOfferings, markOfferingsUsed, offeringAssets, offeringMenu, offeringPick, saveAnswer, saveMenu, savePending, savePrompt, savedOfferings, slimOffering
+} from './offeringService.js';
 
 const START = /\b(run|start|launch|chalao|chala|banao)\b.{0,40}\bmeta\b|\bmeta\s+ads?\b.{0,24}\b(run|start|launch|chalao|chala|banao)\b/i;
 const OTHER_ADS = /\b(linkedin|youtube)\b.{0,24}\bads?\b|\b(run|start|launch|chalao|chala|banao)\b.{0,40}\b(linkedin|youtube)\b/i;
@@ -331,7 +334,7 @@ async function rememberCampaign(organizationId, account, created, intake) {
       externalId: set.id,
       name: set.name,
       parentExternalId: String(created.campaignId),
-      payload: { origin: 'api', status: 'PAUSED', budget: String(intake.dailyBudget), campaignId: String(created.campaignId) }
+      payload: { origin: 'api', status: 'PAUSED', budget: String(Math.floor(Number(intake.dailyBudget) / Math.max(1, created.adsets.length))), campaignId: String(created.campaignId) }
     });
   }
   for (const ad of created.ads || []) {
@@ -453,9 +456,20 @@ async function begin(organizationId, conversationId, text) {
   if (!account) return { text: `I am the AIRO assistant. ${connectLine(english)}` };
   const payload = { lang: english ? 'en' : 'hi', sample: text.slice(0, 80), sector: await organizationSector(organizationId) };
   await clearGoogleDraft(conversationId);
+  const saved = (await savedOfferings(organizationId, 9)).map(slimOffering);
+  if (saved.length) {
+    payload.offeringChoices = saved;
+    await saveDraft(organizationId, conversationId, 'offering', payload);
+    return { text: intakePrompt('offering', english, payload), menu: offeringMenu(payload, english) };
+  }
   await saveDraft(organizationId, conversationId, 'category', payload);
   return { text: intakePrompt('category', english, payload) };
 }
+
+export function itemsReady(payload) {
+  return (payload.adItems || []).length > 1;
+}
+
 
 function publishOptions(english) {
   return section(say(english, 'Publish now?', 'Ab publish karein?'), options([
@@ -516,6 +530,21 @@ function nextIntake(payload) {
 function intakePrompt(step, english, payload) {
   const sector = sectorOf(payload?.sector);
   const ask = productAsk(payload?.sector, english);
+  if (step === 'offering') {
+    const items = payload.offeringChoices || [];
+    return card([
+      header('Meta Ad Setup', say(english, 'Facebook + Instagram · 5 quick steps', 'Facebook + Instagram · 5 chhote steps')),
+      sector ? hint(say(english, `Business sector: ${sector.label}. AIRO will plan the ad for this sector.`, `Business sector: ${sector.label}. AIRO isi sector ke hisaab se ad plan karega.`)) : '',
+      `*Step 1/5 · ${say(english, 'What to advertise', 'Kya advertise karna hai')}*`,
+      section(say(english, 'Saved in Products & Projects', 'Products & Projects mein saved'), numbered(items.map((item) => `${item.name}${item.priceText ? ` · ${item.priceText}` : ''}${item.photoCount ? ` · ${item.photoCount} ${say(english, 'photo', 'photo')}` : ''}`))),
+      hint(say(english, `Pick one or more (up to ${MAX_AD_ITEMS}). With more than one, AIRO makes one campaign with a separate ad set and ad for each item, and splits the budget equally.`, `Ek ya zyada chuno (max ${MAX_AD_ITEMS}). Ek se zyada chunoge to AIRO ek campaign mein har item ka alag ad set aur ad banayega, budget barabar baant ke.`)),
+      section(say(english, 'Choose', 'Chuno'), options([
+        [say(english, 'Choose', 'Chuno'), say(english, 'tap the button below, then Done', 'neeche button dabao, phir Done')],
+        ['1,3', say(english, 'pick by number', 'number se chuno')],
+        ['add new', say(english, 'something not in this list', 'jo list mein nahi hai')]
+      ]))
+    ]);
+  }
   if (step === 'category') {
     return card([
       header('Meta Ad Setup', say(english, 'Facebook + Instagram · 5 quick steps', 'Facebook + Instagram · 5 chhote steps')),
@@ -623,7 +652,9 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
   const payload = { ...draft.payload, lang: english ? 'en' : 'hi' };
   const ask = (step, message) => saveDraft(organizationId, conversationId, step, payload, draft.campaignId).then(() => ({
     text: message,
-    menu: step === 'region' ? cityMenu(payload.suggestion, payload.pickedCities || [], english) : null
+    menu: step === 'region' ? cityMenu(payload.suggestion, payload.pickedCities || [], english)
+      : step === 'offering' ? offeringMenu(payload, english)
+        : step === 'offer_save' ? saveMenu(english) : null
   }));
   const goNext = async () => {
     let step = nextIntake(payload);
@@ -649,7 +680,45 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
   if (draft.step === 'details') {
     payload.details = /^(skip|no|nahi|nahin|none)\b/i.test(text) ? '' : text.slice(0, 500);
     payload.detailsDone = true;
+    if (payload.details && payload.savedOfferingIds?.length === 1) await addOfferingDetails(organizationId, payload.savedOfferingIds[0], payload.details);
     return goNext();
+  }
+
+  if (draft.step === 'offering') {
+    const pick = offeringPick(text, payload);
+    if (pick.kind === 'new') {
+      delete payload.offeringChoices;
+      delete payload.pickedOfferings;
+      delete payload.offeringExtra;
+      return ask('category', fmtStep(1, 5, say(english, 'New item', 'Naya item'), productAsk(payload.sector, english).question, productAsk(payload.sector, english).example));
+    }
+    if (pick.kind === 'toggle' || pick.kind === 'empty') {
+      const note = pick.kind === 'empty'
+        ? say(english, 'Nothing selected yet. Tap an item, or Add new.', 'Abhi kuch select nahi hua. Item tap karo, ya Add new.')
+        : pick.added ? say(english, `${pick.name} added.`, `${pick.name} add ho gaya.`) : say(english, `${pick.name} removed.`, `${pick.name} hata diya.`);
+      return ask('offering', note);
+    }
+    const total = (payload.pickedOfferings || []).length + (payload.offeringExtra || []).length;
+    if (total > MAX_AD_ITEMS) {
+      return ask('offering', say(english, `Pick up to ${MAX_AD_ITEMS} items for one campaign. Tap one to remove it.`, `Ek campaign mein max ${MAX_AD_ITEMS} items. Hatane ke liye kisi item pe dobara tap karo.`));
+    }
+    const chosen = applyOfferings(payload);
+    await markOfferingsUsed(organizationId, chosen.ids);
+    if (chosen.extra.length) {
+      payload.pendingSave = chosen.extra;
+      return ask('offer_save', savePrompt(chosen.extra, english));
+    }
+    return goNext();
+  }
+
+  if (draft.step === 'offer_save') {
+    const answer = saveAnswer(text);
+    if (!answer) return ask('offer_save', savePrompt(payload.pendingSave || [payload.product], english));
+    const note = await savePending(organizationId, payload, answer === 'yes', english);
+    const step = nextIntake(payload);
+    if (step === 'website') return ask('website', card([note ? hint(note) : '', intakePrompt('website', english, payload)]));
+    const result = await goNext();
+    return note ? { ...result, text: `${hint(note)}\n\n${result.text}` } : result;
   }
 
   if (draft.step === 'category') {
@@ -658,13 +727,14 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
     }
     payload.category = sectorOf(payload.sector)?.label || text.slice(0, 80);
     payload.product = text.slice(0, 120);
+    payload.typedProduct = text.slice(0, 1500);
     const site = httpsWebsite(text);
     if (site) {
       payload.website = site;
       payload.noWebsite = false;
-      return goNext();
     }
-    return ask('website', intakePrompt('website', english, payload));
+    payload.pendingSave = [payload.product];
+    return ask('offer_save', savePrompt([payload.product], english));
   }
   if (draft.step === 'product') {
     if (text.length < 2 || FILLER.test(text)) return { text: say(english, 'Tell me the product or service.', 'Product ya service likho.') };
@@ -705,6 +775,10 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
     }
     if (amount < 100 && !/\$|usd|dollar/i.test(text)) {
       return { text: say(english, `₹${amount} a day is too low. Meta needs about ₹100 a day or more per ad set. Send a higher daily budget, for example 500 leads.`, `₹${amount} roz bahut kam hai. Meta ko har ad set ke liye lagbhag ₹100 roz ya zyada chahiye. Zyada daily budget bhejo, jaise 500 leads.`) };
+    }
+    const sets = itemsReady(payload) ? payload.adItems.length : 1;
+    if (sets > 1 && amount < 100 * sets && !/\$|usd|dollar/i.test(text)) {
+      return { text: say(english, `${sets} items means ${sets} ad sets, and Meta needs about ₹100 a day per ad set. Send at least ₹${100 * sets} a day, for example ${100 * sets} leads.`, `${sets} items matlab ${sets} ad sets, aur Meta ko har ad set ke liye lagbhag ₹100 roz chahiye. Kam se kam ₹${100 * sets} roz bhejo, jaise ${100 * sets} leads.`) };
     }
     payload.dailyBudget = amount;
     const objective = objectiveFrom(text);
@@ -1084,8 +1158,9 @@ async function buildPlan(organizationId, conversationId, payload, english) {
     payload.headlineB = copy.variants[1]?.headline || '';
     payload.messageB = copy.variants[1]?.primaryText || '';
     payload.strategy = copy.strategy;
+    await writeItemCopies(organizationId, payload, profile, english);
     await saveDraft(organizationId, conversationId, 'image', payload);
-    return { text: metaPlanText(payload, english), images: designImages(payload, english) };
+    return { text: metaPlanText(payload, english), images: designImages(payload, english, renderDesigns(payload, '', await designAssets(organizationId, payload))) };
   } catch {
     payload.variants = [];
     payload.headlineB = '';
@@ -1119,13 +1194,59 @@ async function buildPlan(organizationId, conversationId, payload, english) {
   payload.strategy = plan.strategy;
   payload.cta = plan.cta || payload.cta;
   payload.variants = [{ angle: '', headline: payload.headline, primaryText: payload.message }];
+  await writeItemCopies(organizationId, payload, profile, english);
   await saveDraft(organizationId, conversationId, 'image', payload);
-  return { text: metaPlanText(payload, english), images: designImages(payload, english) };
+  return { text: metaPlanText(payload, english), images: designImages(payload, english, renderDesigns(payload, '', await designAssets(organizationId, payload))) };
 }
 
-function renderDesigns(payload, photoBase64 = '') {
+async function writeItemCopies(organizationId, payload, profile, english) {
+  if (!itemsReady(payload)) {
+    delete payload.itemCopies;
+    return;
+  }
+  payload.itemCopies = await Promise.all(payload.adItems.map(async (item) => {
+    const base = { id: item.id, name: item.name, link: item.link || '', points: item.points || [] };
+    try {
+      const copy = await writeMetaCopy({
+        organizationId,
+        payload: {
+          ...payload,
+          product: item.name,
+          details: item.facts || '',
+          website: item.link || payload.website,
+          sellingPoints: item.points?.length ? item.points : payload.sellingPoints
+        },
+        profile,
+        publicAds: payload.publicAds,
+        english
+      });
+      return { ...base, headline: copy.variants[0].headline, message: copy.variants[0].primaryText };
+    } catch {
+      return { ...base, headline: item.name.slice(0, 40), message: [item.name, item.facts].filter(Boolean).join(' · ').slice(0, 200) };
+    }
+  }));
+}
+
+async function designAssets(organizationId, payload) {
+  const ids = (payload.adItems || []).map((item) => item.id).filter(Boolean);
+  const assets = await offeringAssets(organizationId, ids);
+  return { ...assets, photo: (payload.adItems || []).length === 1 && ids.length === 1 ? assets.photos[String(ids[0])] || '' : '' };
+}
+
+function multiDesigns(payload) {
+  return itemsReady(payload) && (payload.itemCopies || []).length > 1;
+}
+
+function renderDesigns(payload, photoBase64 = '', assets = {}) {
   try {
-    return variantCreatives(payload, { photoBase64 });
+    if (multiDesigns(payload)) {
+      return payload.itemCopies.map((item, index) => itemCreative(payload, item, {
+        photoBase64: assets.photos?.[String(item.id)] || photoBase64,
+        logoBase64: assets.logo || '',
+        theme: index
+      }));
+    }
+    return variantCreatives(payload, { photoBase64: photoBase64 || assets.photo || '', logoBase64: assets.logo || '' });
   } catch (error) {
     console.error('Meta ad design skipped:', String(error?.message || 'failed').slice(0, 180));
     return [];
@@ -1133,6 +1254,12 @@ function renderDesigns(payload, photoBase64 = '') {
 }
 
 function designImages(payload, english, pngs = renderDesigns(payload)) {
+  if (multiDesigns(payload)) {
+    return pngs.map((png, index) => ({
+      png,
+      caption: `*${say(english, 'Design', 'Design')} ${index + 1} · ${payload.itemCopies[index]?.name || ''}*\n${payload.itemCopies[index]?.headline || ''}`
+    }));
+  }
   const variants = payload.variants?.length ? payload.variants : [{ headline: payload.headline }];
   return pngs.map((png, index) => ({
     png,
@@ -1196,6 +1323,19 @@ function variantBlock(item, index, total, english) {
   ].join('\n');
 }
 
+export function itemsSection(payload, english) {
+  const items = payload.itemCopies || [];
+  const share = Math.floor((Number(payload.dailyBudget) || 0) / Math.max(1, items.length));
+  return section(say(english, `Ad sets (${items.length}, one per item)`, `Ad sets (${items.length}, har item ka ek)`), [
+    hint(say(english, `One campaign. Each item gets its own ad set and ad, about ${money(share, payload.currency)} a day each.`, `Ek campaign. Har item ka apna ad set aur ad, har ek ko lagbhag ${money(share, payload.currency)} roz.`)),
+    items.map((item, index) => [
+      `*${index + 1}. ${item.name}*`,
+      `> *${item.headline}*`,
+      ...String(item.message).split(/\n+/).map((line) => `> ${line}`)
+    ].join('\n')).join('\n\n')
+  ]);
+}
+
 function metaPlanText(payload, english) {
   const interests = payload.interests || [];
   const variants = payload.variants?.length ? payload.variants : [{ angle: '', headline: payload.headline, primaryText: payload.message }];
@@ -1223,8 +1363,8 @@ function metaPlanText(payload, english) {
     ),
     estimateSection(payload, english),
     researchLines(payload.publicNote, payload.publicAds, english),
-    section(say(english, 'Ad copy', 'Ad copy'), variants.map((item, index) => variantBlock(item, index, variants.length, english)).join('\n\n')),
-    variants.length > 1 ? hint(say(english, 'Variants 1 and 2 run as an A/B test in the same ad set. Once there is enough data, AIRO suggests pausing the weaker one.', 'Variant 1 aur 2 same ad set mein A/B test ki tarah chalenge. Data aane pe AIRO kamzor wala pause suggest karega.')) : '',
+    multiDesigns(payload) ? itemsSection(payload, english) : section(say(english, 'Ad copy', 'Ad copy'), variants.map((item, index) => variantBlock(item, index, variants.length, english)).join('\n\n')),
+    !multiDesigns(payload) && variants.length > 1 ? hint(say(english, 'Variants 1 and 2 run as an A/B test in the same ad set. Once there is enough data, AIRO suggests pausing the weaker one.', 'Variant 1 aur 2 same ad set mein A/B test ki tarah chalenge. Data aane pe AIRO kamzor wala pause suggest karega.')) : '',
     (payload.tips || []).length ? section(say(english, 'AIRO suggests', 'AIRO ka suggestion'), bullets(payload.tips)) : '',
     LINE,
     section(say(english, 'Want changes?', 'Kuch badalna hai?'), [
@@ -1278,8 +1418,9 @@ async function readyImage(imageBase64, imageError, text) {
 
 async function acceptCreative(organizationId, conversationId, payload, text, english, imageBase64 = '', imageError = '') {
   if (!imageBase64 && !imageError && /\bbudget\b/i.test(text) && budgetAmount(text) >= 1) {
-    if (budgetAmount(text) < 100 && !/\$|usd|dollar/i.test(text)) {
-      return { text: say(english, 'Meta needs about ₹100 a day or more per ad set. Send for example: budget 500', 'Meta ko har ad set ke liye lagbhag ₹100 roz ya zyada chahiye. Aise bhejo: budget 500') };
+    const floor = 100 * (itemsReady(payload) ? payload.adItems.length : 1);
+    if (budgetAmount(text) < floor && !/\$|usd|dollar/i.test(text)) {
+      return { text: say(english, `Meta needs about ₹100 a day or more per ad set. Send for example: budget ${Math.max(500, floor)}`, `Meta ko har ad set ke liye lagbhag ₹100 roz ya zyada chahiye. Aise bhejo: budget ${Math.max(500, floor)}`) };
     }
     payload.dailyBudget = budgetAmount(text);
     await saveDraft(organizationId, conversationId, 'image', payload);
@@ -1293,6 +1434,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
   }
   const copied = applyCopyLine(payload, text);
   const photo = await readyImage(imageBase64, imageError, copied ? '' : text);
+  const assets = await designAssets(organizationId, payload);
   if (copied && !photo.imageBase64) {
     await saveDraft(organizationId, conversationId, 'image', payload);
     return {
@@ -1303,7 +1445,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
         photo.error ? hint(photo.error) : '',
         imageAsk(english, true)
       ]),
-      images: designImages(payload, english)
+      images: designImages(payload, english, renderDesigns(payload, '', assets))
     };
   }
   if (!photo.imageBase64 && !photo.error && RAW_PHOTO.test(text)) {
@@ -1314,9 +1456,9 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
   if (!photo.imageBase64 && SKIP_IMAGE.test(text)) return saveWithoutImage(organizationId, conversationId, payload, english);
   let designs = [];
   if (photo.imageBase64) {
-    designs = payload.rawPhoto ? [] : renderDesigns(payload, photo.imageBase64);
+    designs = payload.rawPhoto ? [] : renderDesigns(payload, photo.imageBase64, assets);
   } else if (!photo.error && USE_DESIGN.test(text) && !NOT_DESIGN.test(text)) {
-    designs = renderDesigns(payload);
+    designs = renderDesigns(payload, '', assets);
     if (!designs.length) {
       return { text: say(english, `The design could not be made right now. Send a photo instead.${imageAsk(true)}`, `Design abhi nahi ban paya. Iski jagah photo bhejo.${imageAsk(false)}`) };
     }
@@ -1329,12 +1471,23 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
     return { text: `${reason}${imageAsk(english, true)}` };
   }
   imageBase64 = designs.length ? designs[0].toString('base64') : photo.imageBase64;
-  const imageBase64B = designs[1] ? designs[1].toString('base64') : '';
+  const multi = multiDesigns(payload);
+  const imageBase64B = !multi && designs[1] ? designs[1].toString('base64') : '';
+  const items = multi
+    ? payload.itemCopies.map((item, index) => ({
+      name: item.name,
+      headline: item.headline,
+      message: item.message,
+      link: item.link || adLink(payload),
+      imageBase64: designs[index] ? designs[index].toString('base64') : photo.imageBase64
+    }))
+    : undefined;
   const account = await metaAccount(organizationId);
   if (!account) return { text: connectLine(english) };
   if (copied) await saveDraft(organizationId, conversationId, 'image', payload);
   try {
     const created = await createMetaAd({
+      items,
       apiKey: account.apiKey,
       accountId: account.accountId,
       name: campaignName(payload),
@@ -1381,8 +1534,12 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
           field('Campaign id', created.campaignId),
           field(say(english, 'Daily budget', 'Daily budget'), money(payload.dailyBudget, payload.currency)),
           field(say(english, 'Locations', 'Locations'), payload.region),
-          field('Ads', payload.headlineB ? say(english, '2 (A/B test)', '2 (A/B test)') : '1'),
-          field('Creative', designs.length
+          field('Ads', multi
+            ? say(english, `${items.length} ad sets, one ad each (${payload.itemCopies.map((item) => item.name).join(', ')})`, `${items.length} ad sets, har ek mein ek ad (${payload.itemCopies.map((item) => item.name).join(', ')})`)
+            : payload.headlineB ? say(english, '2 (A/B test)', '2 (A/B test)') : '1'),
+          field('Creative', multi && designs.length
+            ? say(english, 'AIRO design for each item (saved photo and logo where uploaded)', 'Har item ka alag AIRO design (jahan upload hai wahan saved photo aur logo)')
+            : designs.length
             ? say(english, `AIRO design${photo.imageBase64 ? ' on your photo' : ''}${imageBase64B ? ', one per variant' : ''}`, `AIRO design${photo.imageBase64 ? ' aapki photo pe' : ''}${imageBase64B ? ', har variant ka alag' : ''}`)
             : say(english, 'your photo as-is', 'aapki photo as-is'))
         ]),

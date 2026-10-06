@@ -82,7 +82,7 @@ function photoType(base64) {
   return String(base64 || '').startsWith('/9j/') ? 'image/jpeg' : 'image/png';
 }
 
-export function creativeSvg({ headline, points = [], cta, business = '', link = '', theme = 0, photoBase64 = '' }) {
+export function creativeSvg({ headline, points = [], cta, business = '', link = '', theme = 0, photoBase64 = '', logoBase64 = '' }) {
   const colors = THEMES[theme % THEMES.length];
   const inner = SIZE - PAD * 2;
   const parts = [];
@@ -102,9 +102,16 @@ export function creativeSvg({ headline, points = [], cta, business = '', link = 
     parts.push(`<circle cx="60" cy="${SIZE - 60}" r="220" fill="#000000" fill-opacity="0.10"/>`);
   }
 
+  if (logoBase64) {
+    const box = 150;
+    const x = SIZE - PAD - box;
+    parts.push(`<rect x="${x}" y="${PAD - 20}" width="${box}" height="${box}" rx="24" fill="#FFFFFF" fill-opacity="0.92"/>`);
+    parts.push(`<image href="data:${photoType(logoBase64)};base64,${logoBase64}" x="${x + 14}" y="${PAD - 6}" width="${box - 28}" height="${box - 28}" preserveAspectRatio="xMidYMid meet"/>`);
+  }
+
   let y = PAD;
   if (business) {
-    const label = business.slice(0, 40);
+    const label = business.slice(0, logoBase64 ? 28 : 40);
     const size = 30;
     const width = textWidth(label, size, true) + 48;
     parts.push(`<rect x="${PAD}" y="${y}" width="${width}" height="58" rx="29" fill="#FFFFFF" fill-opacity="0.16"/>`);
@@ -172,7 +179,7 @@ export function creativePoints(payload) {
   return [payload.region && payload.region !== 'India' ? payload.region.split(';')[0] : ''].filter(Boolean);
 }
 
-export function variantCreatives(payload, { photoBase64 = '', business = '' } = {}) {
+export function variantCreatives(payload, { photoBase64 = '', business = '', logoBase64 = '' } = {}) {
   const variants = payload.variants?.length ? payload.variants : [{ headline: payload.headline }];
   return variants.slice(0, 2).map((variant, index) => renderCreative({
     headline: variant.headline,
@@ -181,6 +188,20 @@ export function variantCreatives(payload, { photoBase64 = '', business = '' } = 
     business: business || payload.pageName || '',
     link: payload.website || '',
     theme: index,
-    photoBase64
+    photoBase64,
+    logoBase64
   }));
+}
+
+export function itemCreative(payload, item, { photoBase64 = '', logoBase64 = '', theme = 0 } = {}) {
+  return renderCreative({
+    headline: item.headline,
+    points: (item.points || []).length ? item.points : creativePoints(payload),
+    cta: payload.cta,
+    business: payload.pageName || '',
+    link: item.link || payload.website || '',
+    theme,
+    photoBase64,
+    logoBase64
+  });
 }

@@ -21,6 +21,7 @@ import * as adsLaunch from '../services/adsAgent/launchService.js';
 import * as adsMonitor from '../services/adsAgent/monitorService.js';
 import * as adsApply from '../services/adsAgent/applyService.js';
 import * as adsQuality from '../services/adsAgent/qualityService.js';
+import * as offerings from '../services/offeringService.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -124,6 +125,31 @@ client.get('/sources', requirePermission('sources.view'), asyncHandler(async (re
 client.get('/campaigns', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await growth.campaigns(req.auth))));
 client.get('/campaigns/:id', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await growth.campaign(req.auth, req.params.id));
+}));
+client.get('/offerings', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await offerings.listOfferings(req.auth))));
+client.post('/offerings', requirePermission('campaigns.update'), validate(schemas.offeringSchema), asyncHandler(async (req, res) => {
+  ok(res, await offerings.createOffering(req.auth, req), 201);
+}));
+client.put('/offerings/logo', requirePermission('campaigns.update'), validate(schemas.imageUploadSchema), asyncHandler(async (req, res) => {
+  ok(res, await offerings.saveLogo(req.auth, req));
+}));
+client.get('/offerings/media/:id', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  const image = await offerings.media(req.auth, req.params.id);
+  res.setHeader('Content-Type', image.mime);
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.send(image.bytes);
+}));
+client.delete('/offerings/media/:id', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await offerings.deleteMedia(req.auth, req, req.params.id));
+}));
+client.patch('/offerings/:id', requirePermission('campaigns.update'), validate(schemas.idParams.merge(schemas.offeringSchema)), asyncHandler(async (req, res) => {
+  ok(res, await offerings.updateOffering(req.auth, req, req.params.id));
+}));
+client.delete('/offerings/:id', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await offerings.deleteOffering(req.auth, req, req.params.id));
+}));
+client.post('/offerings/:id/photos', requirePermission('campaigns.update'), validate(schemas.idParams.merge(schemas.imageUploadSchema)), asyncHandler(async (req, res) => {
+  ok(res, await offerings.addPhoto(req.auth, req, req.params.id), 201);
 }));
 client.get('/ads-agent', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await adsAgent.overview(req.auth, req.query.days))));
 client.put('/ads-agent/settings', requirePermission('campaigns.update'), validate(schemas.adsAgentSettingsSchema), asyncHandler(async (req, res) => {

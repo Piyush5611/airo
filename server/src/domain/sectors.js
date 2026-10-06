@@ -1,0 +1,252 @@
+export const SECTORS = [
+  {
+    key: 'real_estate',
+    label: 'Real estate',
+    goal: 'leads',
+    leadPath: 'Meta instant form or WhatsApp/Messenger chat for site visits; Google search for project + city',
+    special: 'HOUSING',
+    ages: [25, 55],
+    interests: ['Real estate', 'Home loans', 'Property finder', '99acres', 'MagicBricks', 'Housing.com', 'Interior design', 'Mortgage loans'],
+    angles: ['Location and connectivity', 'Price per sqft or total price', 'Possession date or ready to move', 'Amenities and lifestyle', 'Builder trust and RERA'],
+    creatives: ['Real project or sample flat photo with price and location', 'Site visit offer', 'Floor plan with size', 'Walkthrough video'],
+    keywords: ['2bhk flats in <city>', '3bhk apartment <locality>', 'ready to move flats <city>', 'new projects in <city>', 'plots in <city>'],
+    negatives: ['rent', 'pg', 'jobs', 'salary', 'resale', 'second hand', 'free', 'course'],
+    kpis: ['Cost per lead', 'Site visits booked', 'Lead to site-visit rate'],
+    tips: ['Always show price or price range and possession date; leads are much better quality.', 'Call new leads within 5 minutes.', 'Housing ads in India may need the Housing special category; Meta then decides age and gender.']
+  },
+  {
+    key: 'ecommerce',
+    label: 'Ecommerce / D2C',
+    goal: 'sales',
+    leadPath: 'Website purchase with the Meta pixel; Google Shopping and search',
+    ages: [18, 45],
+    interests: ['Online shopping', 'Engaged shoppers', 'Amazon', 'Flipkart', 'Myntra', 'Fashion', 'Discounts and offers'],
+    angles: ['Offer or discount', 'Problem and product fix', 'Social proof and reviews', 'New launch', 'Free delivery or COD'],
+    creatives: ['Product in use, not just packshot', 'Before / after', 'Customer review card', 'Carousel of best sellers'],
+    keywords: ['buy <product> online', '<product> price', 'best <product> for <use>', '<product> near me'],
+    negatives: ['free', 'jobs', 'wholesale', 'second hand', 'repair', 'how to make'],
+    kpis: ['ROAS', 'Cost per purchase', 'Add to cart rate'],
+    tips: ['Install the Meta pixel and conversions API before scaling.', 'Retarget website visitors and add-to-cart users.', 'Show the price and offer in the first line.']
+  },
+  {
+    key: 'it_saas',
+    label: 'IT / Software / SaaS',
+    goal: 'leads',
+    leadPath: 'Demo request form on website or Meta instant form; Google search for the problem the software solves',
+    ages: [24, 55],
+    interests: ['Software', 'Small business', 'Entrepreneurship', 'Business software', 'Startup company', 'Technology'],
+    angles: ['Pain the software removes', 'Time or cost saved', 'Free trial or demo', 'Customer logos or case study'],
+    creatives: ['Product screen with one clear benefit', 'Short demo video', 'Customer result card'],
+    keywords: ['<software type> software', 'best <software type> for small business', '<software type> india', '<competitor> alternative'],
+    negatives: ['free download', 'crack', 'jobs', 'course', 'tutorial', 'internship'],
+    kpis: ['Cost per demo', 'Demo to paid rate', 'Cost per SQL'],
+    tips: ['Ask one qualifying question in the form (team size or industry).', 'Google search usually brings higher intent than Meta for B2B.']
+  },
+  {
+    key: 'edtech',
+    label: 'Edtech / Coaching',
+    goal: 'leads',
+    leadPath: 'Meta instant form or WhatsApp for counselling; Google search for course + city',
+    ages: [17, 35],
+    interests: ['Education', 'Online learning', 'Competitive exams', 'Career', 'Students', 'Higher education'],
+    angles: ['Results and toppers', 'Free demo class', 'Faculty and method', 'Batch start date', 'Placement or career outcome'],
+    creatives: ['Topper or result card (real only)', 'Faculty video', 'Batch timing poster', 'Free demo class offer'],
+    keywords: ['<course> coaching in <city>', 'best <exam> coaching', '<course> online classes', '<course> fees'],
+    negatives: ['free pdf', 'notes', 'jobs', 'salary', 'syllabus pdf', 'answer key'],
+    kpis: ['Cost per lead', 'Demo attended', 'Admissions'],
+    tips: ['Target parents too for school-age courses.', 'Use a batch start date for real urgency.']
+  },
+  {
+    key: 'college',
+    label: 'College / University / School',
+    goal: 'leads',
+    leadPath: 'Admission enquiry form; Google search for course + college + city',
+    ages: [17, 45],
+    interests: ['Higher education', 'University', 'Engineering', 'MBA', 'Students', 'Parenting'],
+    angles: ['Placements and recruiters', 'Accreditation and ranking', 'Campus and facilities', 'Admission deadline', 'Scholarships'],
+    creatives: ['Campus photo or video', 'Placement highlights (real only)', 'Admission open poster with deadline'],
+    keywords: ['<course> colleges in <city>', 'best <course> college', '<course> admission 2026', '<college> fees'],
+    negatives: ['jobs', 'result', 'admit card', 'syllabus', 'question paper', 'free'],
+    kpis: ['Cost per application', 'Counselling calls', 'Admissions'],
+    tips: ['Run separate ads for students and parents.', 'Peak months are around board results and admission windows.']
+  },
+  {
+    key: 'restaurant',
+    label: 'Restaurant / Cafe / Cloud kitchen',
+    goal: 'leads',
+    leadPath: 'Calls, WhatsApp orders, directions or Zomato/Swiggy link; local radius targeting',
+    ages: [18, 45],
+    interests: ['Restaurants', 'Food', 'Zomato', 'Swiggy', 'Dining out', 'Cafe'],
+    angles: ['Signature dish', 'Offer or combo', 'Ambience and occasions', 'Fast delivery', 'Reviews'],
+    creatives: ['Close-up food photo or reel', 'Combo price card', 'Weekend or festival special'],
+    keywords: ['restaurant near me', '<cuisine> restaurant in <area>', 'best cafe in <area>', 'food delivery <area>'],
+    negatives: ['jobs', 'recipe', 'franchise', 'how to make', 'salary'],
+    kpis: ['Cost per call or order', 'Orders', 'Footfall'],
+    tips: ['Target 3-8 km around the outlet.', 'Run ads at lunch and dinner times.']
+  },
+  {
+    key: 'hotel',
+    label: 'Hotel / Resort / Homestay',
+    goal: 'sales',
+    leadPath: 'Direct booking website or WhatsApp booking; target source cities of travellers',
+    ages: [25, 55],
+    interests: ['Travel', 'Hotels', 'Weekend getaways', 'Frequent travellers', 'MakeMyTrip', 'Booking.com', 'Vacations'],
+    angles: ['Location and view', 'Weekend package price', 'Experiences and food', 'Family or couple stays', 'Direct booking benefit'],
+    creatives: ['Room and view photos or reel', 'Package price card', 'Guest review'],
+    keywords: ['resort near <city>', 'hotels in <destination>', 'weekend getaway from <city>', '<destination> homestay'],
+    negatives: ['jobs', 'hotel management course', 'salary', 'free'],
+    kpis: ['Cost per booking', 'ROAS', 'Enquiries'],
+    tips: ['Target the cities guests travel from, not only the hotel city.', 'Push weekends and long holidays early.']
+  },
+  {
+    key: 'healthcare',
+    label: 'Clinic / Hospital / Diagnostics',
+    goal: 'leads',
+    leadPath: 'Appointment booking by call, WhatsApp or form; local radius',
+    ages: [25, 65],
+    interests: ['Health', 'Practo', 'Health and wellness', 'Family', 'Parenting'],
+    angles: ['Doctor experience', 'Specific treatment or test', 'Easy appointment', 'Packages and price', 'Nearby and timings'],
+    creatives: ['Doctor photo with qualification', 'Health package price card', 'Clinic photo'],
+    keywords: ['<specialist> near me', '<treatment> in <city>', 'best <specialist> in <area>', '<test> price'],
+    negatives: ['jobs', 'course', 'salary', 'free', 'home remedy', 'symptoms meaning'],
+    kpis: ['Cost per appointment', 'Calls', 'Show-up rate'],
+    tips: ['Health ads cannot imply a personal condition ("Do you have diabetes?").', 'Avoid before/after medical images.']
+  },
+  {
+    key: 'beauty_fitness',
+    label: 'Salon / Spa / Gym',
+    goal: 'leads',
+    leadPath: 'Booking by WhatsApp or call; local radius',
+    ages: [18, 45],
+    interests: ['Beauty salons', 'Fitness', 'Gym', 'Spa', 'Skin care', 'Bridal makeup'],
+    angles: ['Trial or first-visit offer', 'Results and transformations (real)', 'Trainer or stylist skill', 'Packages'],
+    creatives: ['Reel of service or workout', 'Offer card', 'Client review'],
+    keywords: ['salon near me', 'gym in <area>', 'bridal makeup <city>', 'spa near me'],
+    negatives: ['jobs', 'course', 'salary', 'franchise', 'free'],
+    kpis: ['Cost per booking', 'Trial to member rate'],
+    tips: ['Target 3-5 km around the outlet.', 'Women-only targeting only if the service is for women.']
+  },
+  {
+    key: 'travel',
+    label: 'Travel agency / Tours',
+    goal: 'leads',
+    leadPath: 'WhatsApp or form enquiry for packages',
+    ages: [24, 55],
+    interests: ['Travel', 'Frequent travellers', 'International travel', 'Honeymoon', 'Adventure travel'],
+    angles: ['Package price per person', 'Destination dream', 'All inclusive and hassle free', 'Limited dates'],
+    creatives: ['Destination reel', 'Package itinerary card', 'Happy traveller photo'],
+    keywords: ['<destination> tour package', '<destination> honeymoon package', 'tour packages from <city>'],
+    negatives: ['jobs', 'visa rejection', 'free', 'course', 'salary'],
+    kpis: ['Cost per lead', 'Bookings'],
+    tips: ['Show price per person and number of nights.', 'Plan 6-8 weeks before the season.']
+  },
+  {
+    key: 'automobile',
+    label: 'Automobile dealer / Service',
+    goal: 'leads',
+    leadPath: 'Test drive or service booking form, call or WhatsApp',
+    ages: [22, 55],
+    interests: ['Cars', 'Automobiles', 'Car dealership', 'Two-wheelers', 'Auto loans'],
+    angles: ['On-road price and EMI', 'Test drive', 'Exchange offer', 'Service package'],
+    creatives: ['Car or bike photo with EMI', 'Showroom photo', 'Offer card'],
+    keywords: ['<model> on road price <city>', '<brand> showroom near me', 'car service near me'],
+    negatives: ['jobs', 'second hand', 'used', 'toy', 'games', 'salary'],
+    kpis: ['Cost per test drive', 'Bookings'],
+    tips: ['Lead with EMI and offer; it brings ready buyers.']
+  },
+  {
+    key: 'finance',
+    label: 'Loans / Insurance / Finance',
+    goal: 'leads',
+    leadPath: 'Instant form or website form with eligibility questions',
+    special: 'CREDIT',
+    ages: [23, 60],
+    interests: ['Personal finance', 'Insurance', 'Loans', 'Investment', 'Mutual funds'],
+    angles: ['Low rate or premium', 'Fast approval', 'Trust and licence', 'Tax saving'],
+    creatives: ['Simple benefit card', 'Advisor photo', 'Calculator style visual'],
+    keywords: ['<loan type> interest rate', 'best term insurance', '<loan type> apply online'],
+    negatives: ['jobs', 'free', 'course', 'salary', 'loan app fraud'],
+    kpis: ['Cost per qualified lead', 'Approval rate'],
+    tips: ['Credit ads may need the Credit special category.', 'Add one eligibility question to filter leads.']
+  },
+  {
+    key: 'local_services',
+    label: 'Local services (repair, cleaning, interiors, legal, CA)',
+    goal: 'leads',
+    leadPath: 'Calls and WhatsApp; Google search "near me"',
+    ages: [25, 60],
+    interests: ['Home improvement', 'Interior design', 'Homeowners', 'Small business'],
+    angles: ['Fast response', 'Price or free inspection (only if true)', 'Experience and reviews', 'Area served'],
+    creatives: ['Work photos (real)', 'Before / after of the job', 'Price card'],
+    keywords: ['<service> near me', '<service> in <city>', 'best <service> <area>'],
+    negatives: ['jobs', 'course', 'salary', 'diy', 'how to'],
+    kpis: ['Cost per call', 'Jobs booked'],
+    tips: ['Google search "near me" usually works best for urgent services.']
+  },
+  {
+    key: 'retail_store',
+    label: 'Retail store / Showroom',
+    goal: 'leads',
+    leadPath: 'Store visits, calls, WhatsApp catalogue; local radius',
+    ages: [18, 55],
+    interests: ['Shopping', 'Fashion', 'Jewellery', 'Electronics', 'Home furnishings'],
+    angles: ['Offer or festive sale', 'New collection', 'Store experience', 'Location'],
+    creatives: ['Product collection reel', 'Festive offer poster', 'Store front photo'],
+    keywords: ['<product> shop near me', '<product> store in <area>'],
+    negatives: ['jobs', 'online free', 'salary', 'wholesale'],
+    kpis: ['Cost per store visit or call', 'Sales'],
+    tips: ['Push festival and wedding seasons; start 2-3 weeks early.']
+  },
+  {
+    key: 'b2b_manufacturing',
+    label: 'B2B / Manufacturing / Wholesale',
+    goal: 'leads',
+    leadPath: 'Website enquiry or form; Google search for product + supplier',
+    ages: [25, 60],
+    interests: ['Small business', 'Manufacturing', 'Wholesale', 'Business owners', 'IndiaMART'],
+    angles: ['Capacity and quality', 'Price for bulk', 'Certifications', 'Delivery across India'],
+    creatives: ['Factory or product photo', 'Spec sheet card', 'Client logos'],
+    keywords: ['<product> manufacturer', '<product> supplier in <city>', '<product> wholesale price'],
+    negatives: ['jobs', 'retail', 'single piece', 'free', 'diy'],
+    kpis: ['Cost per qualified enquiry', 'Order value'],
+    tips: ['Google search beats Meta for most B2B products.']
+  },
+  {
+    key: 'other',
+    label: 'Other',
+    goal: 'leads',
+    leadPath: 'Instant form, WhatsApp or website, whichever the business uses to close',
+    ages: [18, 55],
+    interests: [],
+    angles: ['Main benefit', 'Offer', 'Trust and reviews'],
+    creatives: ['Real product or service photo', 'Offer card'],
+    keywords: [],
+    negatives: ['jobs', 'salary', 'free', 'course'],
+    kpis: ['Cost per lead', 'Sales'],
+    tips: []
+  }
+];
+
+export const SECTOR_KEYS = SECTORS.map((sector) => sector.key);
+
+export function sectorOf(key) {
+  return SECTORS.find((sector) => sector.key === key) || null;
+}
+
+export function sectorFacts(key) {
+  const sector = sectorOf(key);
+  if (!sector) return [];
+  return [
+    `Business sector: ${sector.label}`,
+    `Sector playbook (general guidance, not facts about this business; never present it as a claim):`,
+    `- Usual goal: ${sector.goal}. Lead path: ${sector.leadPath}`,
+    sector.special ? `- Meta special category that may apply: ${sector.special} (suggest only, never force)` : '',
+    sector.interests.length ? `- Buyer interest ideas: ${sector.interests.join(', ')}` : '',
+    `- Angles that work: ${sector.angles.join('; ')}`,
+    `- Creative ideas: ${sector.creatives.join('; ')}`,
+    sector.keywords.length ? `- Google keyword patterns: ${sector.keywords.join('; ')}` : '',
+    `- Negative keywords: ${sector.negatives.join(', ')}`,
+    `- KPIs to watch: ${sector.kpis.join(', ')}`,
+    sector.tips.length ? `- Tips: ${sector.tips.join(' ')}` : ''
+  ].filter(Boolean);
+}

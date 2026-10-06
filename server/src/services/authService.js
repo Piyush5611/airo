@@ -82,6 +82,7 @@ async function profile(user, organizationId) {
       name: active.organizationName,
       slug: active.slug,
       city: active.city,
+      sector: active.sector || '',
       status: active.status
     },
     workspace: { id: active.workspaceId, name: active.workspaceName },
@@ -226,7 +227,7 @@ export async function me(auth) {
   if (auth.supportAccess) {
     const { one } = await import('../db/sql.js');
     const organization = await one(
-      `SELECT o.id, o.name, o.slug, o.city, o.status, w.id AS workspaceId, w.name AS workspaceName
+      `SELECT o.id, o.name, o.slug, o.city, o.sector, o.status, w.id AS workspaceId, w.name AS workspaceName
        FROM organizations o
        JOIN workspaces w ON w.organization_id = o.id AND w.is_default = 1
        WHERE o.id = ?`,
@@ -244,6 +245,7 @@ export async function me(auth) {
         name: organization.name,
         slug: organization.slug,
         city: organization.city,
+        sector: organization.sector || '',
         status: organization.status
       },
       workspace: organization && { id: organization.workspaceId, name: organization.workspaceName },

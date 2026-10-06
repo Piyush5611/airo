@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { businessProfileSchema, launchEditSchema } from '../domain/adsAgent.js';
+import { SECTOR_KEYS } from '../domain/sectors.js';
 
 const body = (shape) => z.object({ body: z.object(shape), query: z.any(), params: z.any() });
 const params = (shape) => z.object({ body: z.any(), query: z.any(), params: z.object(shape) });
@@ -326,6 +327,13 @@ export const inviteSchema = body({
 export const settingSchema = body({
   key: z.string().min(2).max(40),
   value: z.record(z.string(), z.any())
+});
+
+export const organizationSchema = body({
+  name: z.string().trim().min(2).max(160),
+  legalName: z.string().trim().max(180).optional().default(''),
+  city: z.string().trim().max(80).optional().default(''),
+  sector: z.enum(SECTOR_KEYS)
 });
 
 export const platformInviteSchema = body({

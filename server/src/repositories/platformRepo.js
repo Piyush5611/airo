@@ -38,7 +38,7 @@ export function organizations() {
 
 export function organization(id) {
   return one(
-    `SELECT o.id, o.name, o.legal_name AS legalName, o.slug, o.city, o.status, o.health_score AS healthScore,
+    `SELECT o.id, o.name, o.legal_name AS legalName, o.slug, o.city, o.sector, o.status, o.health_score AS healthScore,
             o.onboarding_step AS onboardingStep, o.created_at AS createdAt, p.name AS planName,
             s.status AS subscriptionStatus, s.current_period_end AS periodEnd, p.monthly_inr AS monthlyInr
      FROM organizations o

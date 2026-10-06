@@ -1,5 +1,7 @@
 import { budgetPlan, businessProfileSchema, strategySchemaFor } from '../../domain/adsAgent.js';
 import * as repo from '../../repositories/adsAgentRepo.js';
+import { organizationSector } from '../../repositories/workspaceRepo.js';
+import { sectorFacts, sectorOf } from '../../domain/sectors.js';
 import { ApiError } from '../../utils/errors.js';
 import { recordAudit } from '../auditService.js';
 import { structuredLlm } from '../llmService.js';
@@ -34,7 +36,13 @@ function schemaMissing(error) {
 export async function getProfile(auth) {
   try {
     const row = await repo.profile(auth.organizationId);
-    return { ready: true, profile: row ? parseJson(row.profile) : null, updatedAt: row?.updatedAt || null };
+    const sector = sectorOf(await organizationSector(auth.organizationId));
+    return {
+      ready: true,
+      profile: row ? parseJson(row.profile) : null,
+      updatedAt: row?.updatedAt || null,
+      sector: sector ? { key: sector.key, label: sector.label, goal: sector.goal } : null
+    };
   } catch (error) {
     if (schemaMissing(error)) return { ready: false, note: 'Run npm run migrate to set up the ads agent.' };
     throw error;
@@ -70,8 +78,8 @@ async function pastResults(organizationId) {
   });
 }
 
-function factsFor(profile, metrics) {
-  const lines = [`Business profile (from the owner): ${JSON.stringify(profile)}`];
+function factsFor(profile, metrics, sector) {
+  const lines = [`Business profile (from the owner): ${JSON.stringify(profile)}`, ...sectorFacts(sector)];
   lines.push(metrics
     ? `Past 30 days by campaign (synced from the ad accounts): ${JSON.stringify(metrics)}`
     : 'Past results: none synced yet.');
@@ -117,7 +125,7 @@ export async function generateStrategy(auth, req) {
     organizationId: auth.organizationId,
     schema: strategySchemaFor(profile),
     system: STRATEGY_BRIEF,
-    facts: factsFor(profile, metrics),
+    facts: factsFor(profile, metrics, await organizationSector(auth.organizationId)),
     task: 'Write the ads strategy for this business as JSON.'
   });
   const created = await repo.addStrategy({

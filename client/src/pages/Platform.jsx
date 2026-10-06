@@ -135,7 +135,7 @@ export function OrganizationDetail() {
   const navigate = useNavigate();
 
   return (
-    <Page eyebrow="Platform / Organizations" title={data?.organization.name || 'Organization'} lede={data ? `${data.organization.city} · ${data.organization.planName || 'No plan'}` : ''}>
+    <Page eyebrow="Platform / Organizations" title={data?.organization.name || 'Organization'} lede={data ? [data.organization.city, data.organization.sector ? label(data.organization.sector) : 'Sector not set', data.organization.planName || 'No plan'].filter(Boolean).join(' · ') : ''}>
       <State loading={loading} error={error} onRetry={reload}>
         {data ? (
           <div className="stack">

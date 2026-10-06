@@ -485,11 +485,13 @@ function targetingOf(targeting = {}) {
   ].filter(Boolean);
   const genders = Array.isArray(targeting.genders) && targeting.genders.length === 1 ? (targeting.genders[0] === 1 ? 'Men' : 'Women') : 'All';
   const interests = (targeting.flexible_spec || []).flatMap((item) => item.interests || []).map((item) => item.name).filter(Boolean);
+  const behaviors = (targeting.flexible_spec || []).flatMap((item) => item.behaviors || []).map((item) => item.name).filter(Boolean);
   return {
     age: targeting.age_min || targeting.age_max ? `${targeting.age_min || 18}–${targeting.age_max || 65}` : '',
     gender: genders,
     places: places.slice(0, 12),
     interests: interests.slice(0, 12),
+    behaviors: behaviors.slice(0, 8),
     advantage: targeting.targeting_automation?.advantage_audience === 1,
     edit: {
       ageMin: targeting.age_min || 18,
@@ -997,7 +999,14 @@ export async function searchMetaAudience({ apiKey, kind, query }) {
   if (kind === 'interest') {
     const data = await graph('search', apiKey, { type: 'adinterest', q, limit: '12' });
     return (data.data || [])
-      .map((row) => ({ id: String(row.id), name: String(row.name || '').slice(0, 120) }))
+      .map((row) => ({
+        id: String(row.id),
+        name: String(row.name || '').slice(0, 120),
+        path: (Array.isArray(row.path) ? row.path.join(' > ') : '').slice(0, 200),
+        topic: String(row.topic || '').slice(0, 80),
+        sizeLow: Number(row.audience_size_lower_bound) || null,
+        sizeHigh: Number(row.audience_size_upper_bound) || null
+      }))
       .filter((row) => /^\d{1,20}$/.test(row.id) && row.name);
   }
   if (kind === 'locale') {
@@ -1035,6 +1044,50 @@ export async function searchMetaAudience({ apiKey, kind, query }) {
       name: String(row.name || '').slice(0, 80),
       region: String(row.region || row.country_name || '').slice(0, 80)
     }));
+}
+
+export async function listMetaBehaviors({ apiKey }) {
+  const data = await graph('search', apiKey, { type: 'adTargetingCategory', class: 'behaviors', limit: '200' });
+  return (data.data || [])
+    .map((row) => ({
+      id: String(row.id),
+      name: String(row.name || '').slice(0, 120),
+      path: (Array.isArray(row.path) ? row.path.join(' > ') : '').slice(0, 200),
+      sizeLow: Number(row.audience_size_lower_bound) || null,
+      sizeHigh: Number(row.audience_size_upper_bound) || null
+    }))
+    .filter((row) => /^\d{1,20}$/.test(row.id) && row.name);
+}
+
+export async function metaAudienceEstimate({ apiKey, accountId, objective, conversion, pageId, ...input }) {
+  const act = actId(accountId);
+  const plan = deliveryPlan(objective, conversion || '', '');
+  const params = {
+    optimization_goal: plan.goal,
+    targeting_spec: JSON.stringify(targetingFor({ ...input, advantageAudience: input.advantageAudience !== false }))
+  };
+  if ((plan.lead || plan.messenger) && pageId) params.promoted_object = JSON.stringify({ page_id: pageId });
+  const [data, account] = await Promise.all([
+    graph(`act_${act}/delivery_estimate`, apiKey, params),
+    graph(`act_${act}`, apiKey, { fields: 'currency' }).catch(() => ({}))
+  ]);
+  const row = data.data?.[0];
+  if (!row) return null;
+  const currency = account.currency || '';
+  const curve = (Array.isArray(row.daily_outcomes_curve) ? row.daily_outcomes_curve : [])
+    .map((point) => ({
+      spend: Number(major(point.spend, currency)) || 0,
+      reach: Number(point.reach) || 0,
+      actions: Number(point.actions) || 0
+    }))
+    .filter((point) => point.spend > 0);
+  return {
+    sizeLow: Number(row.estimate_mau_lower_bound) || null,
+    sizeHigh: Number(row.estimate_mau_upper_bound) || null,
+    ready: row.estimate_ready !== false,
+    curve,
+    currency
+  };
 }
 
 export async function listMetaPixels({ apiKey, accountId }) {
@@ -1114,8 +1167,12 @@ function targetingFor(input) {
   if (input.gender === 'men') targeting.genders = [1];
   if (input.gender === 'women') targeting.genders = [2];
   const interests = Array.isArray(input.interests) ? input.interests : [];
-  if (interests.length) {
-    targeting.flexible_spec = [{ interests: interests.map((item) => ({ id: String(item.id), name: item.name })) }];
+  const behaviors = Array.isArray(input.behaviors) ? input.behaviors : [];
+  if (interests.length || behaviors.length) {
+    const spec = {};
+    if (interests.length) spec.interests = interests.map((item) => ({ id: String(item.id), name: item.name }));
+    if (behaviors.length) spec.behaviors = behaviors.map((item) => ({ id: String(item.id), name: item.name }));
+    targeting.flexible_spec = [spec];
   }
   if (input.placements !== 'manual') return targeting;
   const feeds = Array.isArray(input.placementFeeds) ? input.placementFeeds : [];

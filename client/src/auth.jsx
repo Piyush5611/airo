@@ -78,6 +78,11 @@ export function AuthProvider({ children }) {
       setUser(me);
       return me;
     },
+    async refreshUser() {
+      const me = await api.get('/api/auth/me');
+      setUser(me);
+      return me;
+    },
     can(permission) {
       return Boolean(user?.permissions?.includes(permission));
     }

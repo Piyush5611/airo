@@ -334,6 +334,9 @@ client.get('/settings', requirePermission('settings.view'), asyncHandler(async (
 client.patch('/settings', requirePermission('settings.manage'), validate(schemas.settingSchema), asyncHandler(async (req, res) => {
   ok(res, await workspace.updateSettings(req.auth, req));
 }));
+client.patch('/organization', requirePermission('settings.manage'), validate(schemas.organizationSchema), asyncHandler(async (req, res) => {
+  ok(res, await workspace.updateOrganization(req.auth, req));
+}));
 client.get('/audit', requirePermission('audit.view'), asyncHandler(async (req, res) => ok(res, await intel.clientAudit(req.auth))));
 client.get('/whatsapp/live', requirePermission('leads.view'), (req, res) => {
   whatsapp.streamClientLive(req, res);

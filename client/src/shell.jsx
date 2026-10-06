@@ -4,6 +4,7 @@ import { api } from './api.js';
 import { useAuth } from './auth.jsx';
 import { when } from './format.js';
 import { providerLogo } from './providerLogos.js';
+import { AccountSetup } from './pages/AccountSetup.jsx';
 
 function Mark() {
   return (
@@ -267,6 +268,7 @@ export function Shell({ kicker, nav, home }) {
         <main className="content">
           <Outlet />
         </main>
+        <AccountSetup />
       </div>
       {palette ? (
         <div className="overlay" onClick={() => setPalette(false)}>

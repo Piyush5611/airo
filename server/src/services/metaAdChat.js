@@ -1,14 +1,16 @@
 import { one, run } from '../db/sql.js';
 import { decryptJson } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
-import { addMetaImageAd, campaignObjective, createMetaAd, createMetaAdSet, createMetaCampaign, listMetaPages, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
+import { addMetaImageAd, campaignObjective, createMetaAd, createMetaAdSet, createMetaCampaign, listMetaPages, metaAudienceEstimate, searchMetaAudience, searchPublicAds, setMetaCampaignStatus } from '../integrations/metaAds.js';
 import { upsertObject } from '../repositories/connectionRepo.js';
+import { organizationSector } from '../repositories/workspaceRepo.js';
+import { sectorOf } from '../domain/sectors.js';
 import { recordAudit } from './auditService.js';
 import { writeAdPlan } from './llmService.js';
 import { clearGoogleDraft } from './googleAdChat.js';
 import { LINE, bullets, card, field, header, hint, money, numbered, options, section, step as fmtStep } from './adsAgent/waFormat.js';
 import {
-  businessProfile, chosenNames, hasProfileDetails, resolveMetaCities, resolveMetaInterests, suggestTargeting, writeMetaCopy
+  businessProfile, chosenNames, hasProfileDetails, pickMetaAudience, resolveMetaCities, suggestTargeting, usableInterest, writeMetaCopy
 } from './adsAgent/chatPlanner.js';
 import { variantCreatives } from './adsAgent/adCreative.js';
 
@@ -449,7 +451,7 @@ async function begin(organizationId, conversationId, text) {
   const english = englishOnly(text);
   const account = await metaAccount(organizationId);
   if (!account) return { text: `I am the AIRO assistant. ${connectLine(english)}` };
-  const payload = { lang: english ? 'en' : 'hi', sample: text.slice(0, 80) };
+  const payload = { lang: english ? 'en' : 'hi', sample: text.slice(0, 80), sector: await organizationSector(organizationId) };
   await clearGoogleDraft(conversationId);
   await saveDraft(organizationId, conversationId, 'category', payload);
   return { text: intakePrompt('category', english, payload) };
@@ -491,9 +493,11 @@ function nextIntake(payload) {
 }
 
 function intakePrompt(step, english, payload) {
+  const sector = sectorOf(payload?.sector);
   if (step === 'category') {
     return card([
       header('Meta Ad Setup', say(english, 'Facebook + Instagram · 5 quick steps', 'Facebook + Instagram · 5 chhote steps')),
+      sector ? hint(say(english, `Business sector: ${sector.label}. AIRO will plan the ad for this sector.`, `Business sector: ${sector.label}. AIRO isi sector ke hisaab se ad plan karega.`)) : '',
       fmtStep(1, 5, 'Product', say(english, 'What should the ad sell?', 'Ad kis cheez ka hai?'), 'Example: 2BHK flats in Noida, salon, coaching classes')
     ]);
   }
@@ -543,12 +547,15 @@ function intakePrompt(step, english, payload) {
         say(english, 'Send the daily budget and what you want:', 'Roz ka budget aur goal bhejo:'),
         bullets(say(english, ['*leads* - enquiries with name and phone', '*appointments* - bookings or visits', '*sales* - ecommerce orders'], ['*leads* - naam aur phone wali enquiries', '*appointments* - booking ya visit', '*sales* - ecommerce orders']))
       ]),
-      say(english, 'Example: 500 leads', 'Example: 500 leads')
+      sector
+        ? say(english, `Example: 500 ${sector.goal}  ·  ${sector.label} usually runs on *${sector.goal}*`, `Example: 500 ${sector.goal}  ·  ${sector.label} ke liye aksar *${sector.goal}* chalta hai`)
+        : say(english, 'Example: 500 leads', 'Example: 500 leads')
     );
   }
   if (step === 'objective') {
     return card([
       `*${say(english, 'What is the goal?', 'Goal kya hai?')}*`,
+      sector ? hint(say(english, `Usual for ${sector.label}: ${sector.goal}`, `${sector.label} ke liye aksar: ${sector.goal}`)) : '',
       options([['leads', say(english, 'enquiries', 'enquiries')], ['appointments', say(english, 'bookings or visits', 'booking ya visit')], ['sales', say(english, 'ecommerce orders', 'ecommerce orders')]])
     ]);
   }
@@ -819,6 +826,39 @@ async function choosePage(organizationId, conversationId, payload, english) {
   return { text: say(english, `Which Facebook Page should run the ad?\n${lines.join('\n')}`, `Ad kis Facebook Page se chalegi?\n${lines.join('\n')}`) };
 }
 
+function slimAudience(row) {
+  return { id: row.id, name: row.name, why: row.why || '', sizeLow: row.sizeLow || null, sizeHigh: row.sizeHigh || null };
+}
+
+async function audienceEstimate(account, payload) {
+  try {
+    const estimate = await metaAudienceEstimate({
+      apiKey: account.apiKey,
+      accountId: account.accountId,
+      objective: payload.objectiveKey,
+      conversion: payload.conversion,
+      pageId: payload.pageId,
+      ageMin: payload.specialCategory ? undefined : payload.ageMin,
+      gender: payload.specialCategory ? '' : payload.gender || '',
+      interests: payload.interests || [],
+      behaviors: payload.behaviors || [],
+      locations: payload.locations || []
+    });
+    if (!estimate) return null;
+    const budget = Number(payload.dailyBudget) || 0;
+    const point = estimate.curve.filter((row) => row.spend <= budget).at(-1) || null;
+    return {
+      sizeLow: estimate.sizeLow,
+      sizeHigh: estimate.sizeHigh,
+      reach: point?.reach || null,
+      actions: point?.actions || null,
+      spend: point?.spend || null
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function buildPlan(organizationId, conversationId, payload, english) {
   const account = await metaAccount(organizationId);
   if (!account) return { text: connectLine(english) };
@@ -826,29 +866,36 @@ async function buildPlan(organizationId, conversationId, payload, english) {
   payload.publicNote = library.note || '';
   payload.publicAds = library.ads.slice(0, 5);
   const suggestion = payload.suggestion;
-  let interests = suggestion?.interestSeeds?.length ? await resolveMetaInterests(account.apiKey, suggestion.interestSeeds) : [];
+  const profile = await businessProfile(organizationId);
+  const sectorSeeds = (sectorOf(profile?.sector)?.interests || []).slice(0, 4);
+  const seeds = [...new Set([...(suggestion?.interestSeeds || []), payload.category, payload.product, ...sectorSeeds].filter((item) => item && item.length >= 2))].slice(0, 16);
+  const audience = await pickMetaAudience({ organizationId, apiKey: account.apiKey, payload, profile, seeds, english });
+  let interests = audience.interests;
   if (!interests.length) {
     try {
-      const found = await searchMetaAudience({ apiKey: account.apiKey, kind: 'interest', query: payload.category });
-      interests = found.slice(0, 3);
+      interests = (await searchMetaAudience({ apiKey: account.apiKey, kind: 'interest', query: payload.category })).filter(usableInterest).slice(0, 3);
     } catch {
       interests = [];
     }
   }
-  payload.interests = interests;
+  payload.interests = interests.map(slimAudience);
+  payload.behaviors = audience.behaviors.map(slimAudience);
+  payload.audienceNote = audience.note || '';
   if (suggestion && !payload.specialCategory) {
     if (!payload.ageMin) payload.ageMin = suggestion.ageMin;
     if (!payload.ageMax) payload.ageMax = suggestion.ageMax;
     if (!payload.gender && suggestion.gender !== 'all') payload.gender = suggestion.gender;
   }
+  payload.estimate = await audienceEstimate(account, payload);
   try {
     const copy = await writeMetaCopy({
       organizationId,
       payload,
-      profile: await businessProfile(organizationId),
+      profile,
       publicAds: payload.publicAds,
       english
     });
+    payload.tips = copy.tips || [];
     payload.variants = copy.variants;
     payload.headline = copy.variants[0].headline;
     payload.message = copy.variants[0].primaryText;
@@ -911,6 +958,33 @@ function designImages(payload, english, pngs = renderDesigns(payload)) {
   }));
 }
 
+export function peopleCount(value) {
+  const count = Number(value) || 0;
+  if (count >= 10000000) return `${(count / 10000000).toFixed(1).replace(/\.0$/, '')} crore`;
+  if (count >= 100000) return `${(count / 100000).toFixed(1).replace(/\.0$/, '')} lakh`;
+  if (count >= 1000) return `${Math.round(count / 1000)}k`;
+  return String(count);
+}
+
+function audienceSize(row) {
+  if (!row.sizeLow && !row.sizeHigh) return '';
+  return row.sizeLow && row.sizeHigh ? `${peopleCount(row.sizeLow)}-${peopleCount(row.sizeHigh)}` : peopleCount(row.sizeHigh || row.sizeLow);
+}
+
+function estimateSection(payload, english) {
+  const estimate = payload.estimate;
+  if (!estimate?.sizeHigh) return '';
+  const low = estimate.sizeHigh < 200000;
+  return section(say(english, 'Meta estimate', 'Meta ka andaaza'), [
+    field(say(english, 'Audience size', 'Audience size'), audienceSize(estimate)),
+    estimate.reach ? field(say(english, 'People reached per day', 'Roz kitne logon tak'), `${say(english, 'about', 'lagbhag')} ${peopleCount(estimate.reach)} @ ${money(estimate.spend, payload.currency)}`) : '',
+    estimate.actions ? field(say(english, 'Results per day (Meta)', 'Roz results (Meta)'), `${say(english, 'about', 'lagbhag')} ${Math.round(estimate.actions)}`) : '',
+    hint(low
+      ? say(english, 'The audience is small. Add more cities or fewer interests so Meta can learn faster.', 'Audience chhota hai. Zyada cities ya kam interests rakho taaki Meta jaldi seekhe.')
+      : say(english, 'This is Meta\'s own estimate, not a promise. Real results show after 3-5 days.', 'Yeh Meta ka apna andaaza hai, guarantee nahi. Asli result 3-5 din mein dikhega.'))
+  ]);
+}
+
 function audienceFields(payload, english) {
   if (payload.specialCategory) {
     return [
@@ -955,14 +1029,21 @@ function metaPlanText(payload, english) {
     ]),
     section('Audience', audienceFields(payload, english)),
     section(
-      say(english, 'Interests', 'Interests'),
+      say(english, 'Detailed targeting', 'Detailed targeting'),
       interests.length
-        ? [hint(say(english, 'Checked on Meta', 'Meta pe check kiye')), interests.map((item) => item.name).join(' · ')]
+        ? [
+          hint(say(english, 'Picked from Meta\'s own interest list, checked for meaning and size', 'Meta ki interest list se chune, matlab aur size check karke')),
+          bullets(interests.map((item) => `*${item.name}*${audienceSize(item) ? ` (${audienceSize(item)})` : ''}${item.why ? ` - ${item.why}` : ''}`)),
+          (payload.behaviors || []).length ? bullets(payload.behaviors.map((item) => `*${say(english, 'Behaviour', 'Behaviour')}: ${item.name}*${item.why ? ` - ${item.why}` : ''}`)) : '',
+          payload.audienceNote ? hint(payload.audienceNote) : ''
+        ]
         : hint(say(english, 'Meta returned no matching interest, so targeting stays broad.', 'Meta ne matching interest nahi diya, isliye targeting broad rahegi.'))
     ),
+    estimateSection(payload, english),
     researchLines(payload.publicNote, payload.publicAds, english),
     section(say(english, 'Ad copy', 'Ad copy'), variants.map((item, index) => variantBlock(item, index, variants.length, english)).join('\n\n')),
     variants.length > 1 ? hint(say(english, 'Variants 1 and 2 run as an A/B test in the same ad set. Once there is enough data, AIRO suggests pausing the weaker one.', 'Variant 1 aur 2 same ad set mein A/B test ki tarah chalenge. Data aane pe AIRO kamzor wala pause suggest karega.')) : '',
+    (payload.tips || []).length ? section(say(english, 'AIRO suggests', 'AIRO ka suggestion'), bullets(payload.tips)) : '',
     LINE,
     section(say(english, 'Want changes?', 'Kuch badalna hai?'), [
       variants.length > 2 ? `\`use 3\`  →  ${say(english, 'make variant 3 the main ad', 'variant 3 ko main ad banao')}` : '',
@@ -1092,6 +1173,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
       ageMax: payload.ageMax,
       gender: payload.gender || '',
       interests: payload.interests || [],
+      behaviors: payload.behaviors || [],
       locations: payload.locations || [],
       conversion: payload.conversion,
       cta: payload.cta,
@@ -1158,6 +1240,7 @@ function shellInput(account, payload, campaignId) {
     ageMax: payload.ageMax,
     gender: payload.gender || '',
     interests: payload.interests || [],
+    behaviors: payload.behaviors || [],
     locations: payload.locations || [],
     advantageAudience: true
   };

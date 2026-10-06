@@ -420,7 +420,25 @@ async function deliverAdChat(conversationId, reply, actionTaken) {
       break;
     }
   }
-  await deliverWhatsapp({ conversationId, text: String(reply.text).slice(0, 4000), actionTaken });
+  for (const part of messageParts(String(reply.text))) {
+    await deliverWhatsapp({ conversationId, text: part, actionTaken });
+  }
+}
+
+export function messageParts(text, limit = 3800) {
+  const parts = [];
+  let current = '';
+  for (const block of text.split('\n\n')) {
+    const piece = block.length > limit ? block.slice(0, limit) : block;
+    if (current && current.length + piece.length + 2 > limit) {
+      parts.push(current);
+      current = piece;
+    } else {
+      current = current ? `${current}\n\n${piece}` : piece;
+    }
+  }
+  if (current) parts.push(current);
+  return parts.slice(0, 4);
 }
 
 async function sendAdChat(saved, messages, { force = false, only = '' } = {}) {

@@ -18,7 +18,7 @@ export function findUserById(id) {
 
 export function membershipsFor(userId) {
   return many(
-    `SELECT ou.organization_id AS organizationId, o.name AS organizationName, o.slug, o.city, o.status,
+    `SELECT ou.organization_id AS organizationId, o.name AS organizationName, o.slug, o.city, o.sector, o.status,
             w.id AS workspaceId, w.name AS workspaceName, r.role_key AS roleKey, r.name AS roleName
      FROM organization_users ou
      JOIN organizations o ON o.id = ou.organization_id

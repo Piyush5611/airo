@@ -40,7 +40,15 @@ export function ProfileForm({ canManage }) {
   const [form, setForm] = useState(toForm(null));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  useEffect(() => { if (data?.ready) setForm(toForm(data.profile)); }, [data]);
+  useEffect(() => {
+    if (!data?.ready) return;
+    const next = toForm(data.profile);
+    if (!data.profile && data.sector) {
+      next.category = data.sector.label;
+      if (GOALS.some((goal) => goal.key === data.sector.goal)) next.goal = data.sector.goal;
+    }
+    setForm(next);
+  }, [data]);
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
   const togglePlatform = (key) => setForm((current) => ({
     ...current,
@@ -68,6 +76,9 @@ export function ProfileForm({ canManage }) {
         <form className="panel form-grid" onSubmit={save}>
           <header><h2>Business profile</h2>{data?.updatedAt ? <span className="quiet">Updated {day(data.updatedAt)}</span> : null}</header>
           <p className="quiet">The strategy uses only what you write here and your synced ad results. Leave a field blank if you do not know it.</p>
+          <p className="quiet">{data?.sector
+            ? `Business sector: ${data.sector.label}. AIRO adds this sector's playbook to the plan. Change it in Settings, Organization.`
+            : 'No business sector set yet. Choose it in Settings, Organization so AIRO can plan for your kind of business.'}</p>
           <fieldset disabled={!canManage} className="form-grid">
             <label className="stack-field">BUSINESS NAME<input value={form.businessName} onChange={set('businessName')} required /></label>
             <label className="stack-field">CATEGORY (e.g. Real estate, Clinic, Coaching)<input value={form.category} onChange={set('category')} required /></label>

@@ -11,9 +11,42 @@ import { competitorTopic, libraryStats, wantsCompetitorInfo } from '../services/
 import { platformsAsked, statusGroups, wantsCampaignCount } from '../services/adsAgent/campaignCount.js';
 import { reportRequest } from '../services/whatsappReport.js';
 import { chatFacts, withLatest } from '../services/whatsappIntent.js';
-import { NOT_DESIGN, RAW_PHOTO, USE_DESIGN, budgetAmount, campaignName } from '../services/metaAdChat.js';
+import { NOT_DESIGN, RAW_PHOTO, USE_DESIGN, budgetAmount, campaignName, peopleCount } from '../services/metaAdChat.js';
+import { usableInterest } from '../services/adsAgent/chatPlanner.js';
+import { messageParts } from '../services/whatsappService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
+import { SECTORS, SECTOR_KEYS, sectorFacts, sectorOf } from '../domain/sectors.js';
+import { organizationSchema } from '../validators/schemas.js';
+
+test('sectors are complete and give guidance, not claims', () => {
+  assert.equal(new Set(SECTOR_KEYS).size, SECTORS.length);
+  for (const sector of SECTORS) {
+    assert.ok(sector.label && sector.goal && sector.leadPath, sector.key);
+    assert.ok(sector.angles.length && sector.creatives.length && sector.kpis.length, sector.key);
+  }
+  assert.equal(sectorOf('real_estate').special, 'HOUSING');
+  assert.equal(sectorOf('nope'), null);
+  assert.deepEqual(sectorFacts(''), []);
+  const facts = sectorFacts('edtech').join('\n');
+  assert.match(facts, /Business sector: /);
+  assert.match(facts, /general guidance, not facts/);
+});
+
+test('sector reaches the ad planner facts', () => {
+  const facts = intakeFacts({ product: 'Flats' }, { sector: 'real_estate' }).join('\n');
+  assert.match(facts, /Business sector: Real estate/);
+  assert.match(facts, /suggest only, never force/);
+  assert.doesNotMatch(intakeFacts({ product: 'Flats' }, { category: 'Shop' }).join('\n'), /Business sector/);
+});
+
+test('organization form accepts only known sectors', () => {
+  const ok = organizationSchema.safeParse({ body: { name: 'Acme Homes', sector: 'real_estate' }, query: {}, params: {} });
+  assert.equal(ok.success, true);
+  assert.equal(ok.data.body.city, '');
+  assert.equal(organizationSchema.safeParse({ body: { name: 'Acme Homes', sector: 'space_mining' }, query: {}, params: {} }).success, false);
+  assert.equal(organizationSchema.safeParse({ body: { name: 'Acme Homes' }, query: {}, params: {} }).success, false);
+});
 
 const profile = businessProfileSchema.parse({
   businessName: 'Test Homes',
@@ -354,6 +387,24 @@ test('meta chat budget reads the first amount only', () => {
   assert.equal(budgetAmount('leads'), 0);
   assert.equal(budgetAmount('1 lakh monthly leads'), 3333);
   assert.equal(budgetAmount('30k per month'), 1000);
+});
+
+test('meta interests drop other meanings and tiny topics', () => {
+  assert.equal(usableInterest({ id: '1', name: 'Real Estate (band)', path: 'Interests > Additional interests > Real Estate (band)', sizeHigh: 900000 }), false);
+  assert.equal(usableInterest({ id: '2', name: 'Home loans', path: 'Interests > Business and industry > Banking', sizeHigh: 30000 }), false);
+  assert.equal(usableInterest({ id: '3', name: 'Real estate', path: 'Interests > Business and industry > Real estate', sizeHigh: 90000000 }), true);
+  assert.equal(usableInterest({ id: '4', name: 'Music', path: 'Interests > Entertainment > Music', sizeHigh: null }), true);
+  assert.equal(peopleCount(12500000), '1.3 crore');
+  assert.equal(peopleCount(450000), '4.5 lakh');
+  assert.equal(peopleCount(52000), '52k');
+});
+
+test('long whatsapp replies split on blank lines under the limit', () => {
+  const block = 'x'.repeat(1500);
+  const parts = messageParts([block, block, block].join('\n\n'), 3800);
+  assert.equal(parts.length, 2);
+  assert.ok(parts.every((part) => part.length <= 3800));
+  assert.deepEqual(messageParts('short'), ['short']);
 });
 
 test('meta campaign name says what, where and the goal', () => {

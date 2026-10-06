@@ -4,6 +4,7 @@ import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { inr, label, when } from '../format.js';
 import { Badge, Page, State, Subnav, Table, useSection } from '../ui.jsx';
+import { OrganizationForm } from './AccountSetup.jsx';
 
 const TEAM_SECTIONS = ['Members', 'Teams', 'Invitations', 'Roles', 'Permissions', 'Data Scope', 'User Activity'];
 const SETTING_SECTIONS = ['Organization', 'Workspace', 'Branding', 'Notifications', 'AI Settings', 'Integrations', 'Security', 'Billing', 'Audit Logs'];
@@ -69,7 +70,7 @@ export function Team() {
 export function Settings() {
   const { data, loading, error, reload } = useResource('/api/settings');
   const audit = useResource('/api/audit');
-  const { can } = useAuth();
+  const { can, user, refreshUser } = useAuth();
   const [tab, setTab] = useSection(SETTING_SECTIONS);
   const [displayName, setDisplayName] = useState('');
   const [saved, setSaved] = useState('');
@@ -85,7 +86,10 @@ export function Settings() {
     <Page eyebrow="Workspace" title="Settings" lede="Organization, notifications, AI, security, and billing. Billing figures come from the subscription record.">
       <Subnav items={SETTING_SECTIONS} value={tab} onChange={setTab} />
       <State loading={loading} error={error} onRetry={reload}>
-        {data && (tab === 'Organization' || tab === 'Workspace') ? <section className="panel"><h2>{data.organization.name}</h2><p>{data.organization.city} · {label(data.organization.status)}</p><p className="quiet">{JSON.stringify(data.values.workspace || {})}</p></section> : null}
+        {data && tab === 'Organization' ? (
+          <OrganizationForm data={data} canEdit={can('settings.manage') && !user?.supportAccess} onSaved={() => { reload(); refreshUser(); }} />
+        ) : null}
+        {data && tab === 'Workspace' ? <section className="panel"><h2>{data.organization.name}</h2><p>{data.organization.city} · {label(data.organization.status)}</p><p className="quiet">{JSON.stringify(data.values.workspace || {})}</p></section> : null}
         {data && tab === 'Integrations' ? <p className="quiet">Provider connections live in Connections. Advertising and portals are not settings modules.</p> : null}
         {data && tab === 'Branding' ? (
           <form className="form-grid panel" onSubmit={save}>

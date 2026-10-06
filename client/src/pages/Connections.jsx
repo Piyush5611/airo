@@ -1373,6 +1373,7 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
                     </dl>
                     {selectedSet.targeting.places.length ? <div className="cy-chips">{selectedSet.targeting.places.map((place) => <span key={place} className="chip">{place}</span>)}</div> : null}
                     {selectedSet.targeting.interests.length ? <div className="cy-chips">{selectedSet.targeting.interests.map((item) => <span key={item} className="chip is-soft">{item}</span>)}</div> : null}
+                    {selectedSet.targeting.behaviors?.length ? <div className="cy-chips">{selectedSet.targeting.behaviors.map((item) => <span key={item} className="chip is-soft">Behaviour · {item}</span>)}</div> : null}
                   </section>
                 ) : null}
                 {meta && selectedAd ? (
@@ -1488,6 +1489,7 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
                         </dl>
                         {set.targeting.places.length ? <div className="cy-chips">{set.targeting.places.map((place) => <span key={place} className="chip">{place}</span>)}</div> : null}
                         {set.targeting.interests.length ? <div className="cy-chips">{set.targeting.interests.map((item) => <span key={item} className="chip is-soft">{item}</span>)}</div> : null}
+                        {set.targeting.behaviors?.length ? <div className="cy-chips">{set.targeting.behaviors.map((item) => <span key={item} className="chip is-soft">Behaviour · {item}</span>)}</div> : null}
                         <StatLine row={set} currency={currency} resultKey="leads" resultLabel="leads" />
                         {canManage ? (
                           <div className="page-actions ad-card-actions">

@@ -101,9 +101,25 @@ export function settings(organizationId) {
 
 export function organization(id) {
   return one(
-    `SELECT id, name, legal_name AS legalName, slug, city, status FROM organizations WHERE id = ?`,
+    `SELECT id, name, legal_name AS legalName, slug, city, sector, status FROM organizations WHERE id = ?`,
     [id]
   );
+}
+
+export function updateOrganization(id, { name, legalName, city, sector }) {
+  return run(
+    `UPDATE organizations SET name = ?, legal_name = ?, city = ?, sector = ? WHERE id = ?`,
+    [name, legalName || null, city || null, sector, id]
+  );
+}
+
+export async function organizationSector(id) {
+  try {
+    const row = await one(`SELECT sector FROM organizations WHERE id = ?`, [id]);
+    return row?.sector || '';
+  } catch {
+    return '';
+  }
 }
 
 export function saveSetting(organizationId, key, value) {

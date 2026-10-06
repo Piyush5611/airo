@@ -2,6 +2,34 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Business sector at account setup)
+
+- **Change:** New `domain/sectors.js` has 16 sectors (real estate, ecommerce, IT/SaaS, edtech, college, restaurant, hotel, healthcare, beauty/fitness, travel, automobile, finance, local services, retail store, B2B/manufacturing, other). Each has a playbook: usual goal, lead path, optional special category, interest ideas, angles, creative ideas, Google keyword patterns, negatives, KPIs and tips. `sectorFacts` turns it into prompt lines marked "general guidance, not facts".
+- **Change:** `organizations.sector` column. `PATCH /api/organization` (`settings.manage`, zod enum, audit `organization.updated`) saves name, legal name, city and sector. `GET /api/settings` returns `sector` and `sectors`. `/api/auth/me` returns `organization.sector`.
+- **Change (client):** An owner with `settings.manage` and no sector sees a "Set up your account" popup after login. They can choose "Do it later" for the session. Settings, Organization is now an editable form with the sector playbook. The Ads Agent profile shows the sector and prefills category and goal from it. The platform organization page shows the sector.
+- **Change:** The sector is used wherever the business is described to the model:
+  - `businessProfile`/`intakeFacts` add the playbook, which reaches targeting, audience pick, Meta/Google copy and competitor research.
+  - The Ads Agent strategy facts include it.
+  - The WhatsApp assistant facts include it.
+  - The Meta chat shows the sector, uses its goal in the budget example and hint, and adds its interests as audience seeds.
+  - A special category is only suggested, never forced.
+- **Migration/API impact:** Run `npm run migrate` (020_org_sector.sql) before restarting. The login query reads `o.sector`.
+
+### 2026-10-06 (Meta detailed targeting and plan research)
+
+- **Change:** `searchMetaAudience` (interest) now returns Meta's `path`, `topic` and audience size bounds. New `listMetaBehaviors` (adTargetingCategory behaviors) and `metaAudienceEstimate` (`act_/delivery_estimate`: audience size plus Meta's daily reach/results curve). `targetingFor` accepts `behaviors`, and `targetingOf` returns them for the UI chips.
+- **Change:** New `pickMetaAudience` (chatPlanner):
+  - It searches every seed and drops other meanings ("Real Estate (band)", film, game…) and topics under 50k people.
+  - The model then picks 4–8 interests and 0–3 behaviors from those real candidates (zod; ids must be in the pool) with a reason each.
+  - If that fails, it falls back to the closest clean name match.
+  - Seed brief now asks for buyer topics: need, platforms buyers use, lifestyle. It avoids agent, job and student topics.
+- **Change:** The Meta plan shows:
+  - Detailed targeting with size and reason, plus behaviours.
+  - "Meta ka andaaza": audience size, and reach/results per day at the budget from Meta's curve, with a small-audience warning.
+  - "AIRO ka suggestion" tips from the copy model.
+- **Change:** The copy brief asks for 3 angles (need, proof/value, desire; urgency only with a real reason), and the copy model sees the chosen interests and where leads go. Long WhatsApp ad replies split into several messages (`messageParts`) instead of being cut at 4000 characters.
+- **Migration/API impact:** None. Adds one extra model call and 2–3 Meta reads per plan. Not tested against a live Meta account locally (no Meta connection in the local DB).
+
 ### 2026-10-06 (Meta campaign names, objective label, editor details)
 
 - **Change:** WhatsApp Meta campaigns are named `Product | Cities | Goal | DD Mon` (`campaignName`, saved once in the draft and shown in the plan). Ad sets and ads use the same name with "ad set" / "ad" / "ad B". A greeting or "ok" is no longer taken as the product.

@@ -10,6 +10,8 @@ import { modelJson } from '../utils/modelJson.js';
 import { adsAdviceReply } from './adsAgent/monitorService.js';
 import * as whatsappRepo from '../repositories/whatsappRepo.js';
 import * as repo from '../repositories/llmRepo.js';
+import { organizationSector } from '../repositories/workspaceRepo.js';
+import { sectorOf } from '../domain/sectors.js';
 
 function preview(apiKey) {
   const value = String(apiKey || '');
@@ -202,6 +204,8 @@ async function whatsappFacts({ organizationId, recognized, businessLabel, messag
   lines.push(businessLabel
     ? `This WhatsApp number is registered to ${name} (${businessLabel}).`
     : `This WhatsApp number is registered to ${name}.`);
+  const sector = sectorOf(await organizationSector(organizationId));
+  if (sector) lines.push(`Business sector (set by the owner): ${sector.label}. Usual ad goal for this sector: ${sector.goal}.`);
   try {
     const links = await many(
       `SELECT p.name AS providerName, c.status, c.mode,

@@ -5,6 +5,7 @@ import { hashToken, randomToken } from '../utils/cryptoBox.js';
 import * as authRepo from '../repositories/authRepo.js';
 import * as repo from '../repositories/workspaceRepo.js';
 import { recordAudit } from './auditService.js';
+import { SECTORS, sectorOf } from '../domain/sectors.js';
 
 function parseValue(value) {
   if (value == null) return null;
@@ -75,7 +76,18 @@ export async function settings(auth) {
     repo.invoices(auth.organizationId)
   ]);
   const values = Object.fromEntries(rows.map((row) => [row.settingKey, parseValue(row.settingValue)]));
-  return { organization, values, billing, invoices };
+  return { organization, sector: sectorOf(organization?.sector), sectors: SECTORS, values, billing, invoices };
+}
+
+export async function updateOrganization(auth, req) {
+  await repo.updateOrganization(auth.organizationId, req.body);
+  await recordAudit(req, {
+    action: 'organization.updated',
+    resource: 'organization',
+    resourceId: auth.organizationId,
+    metadata: { sector: req.body.sector }
+  });
+  return settings(auth);
 }
 
 const SETTING_KEYS = ['workspace', 'branding', 'notifications', 'ai', 'security'];

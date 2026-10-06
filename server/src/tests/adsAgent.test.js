@@ -11,7 +11,7 @@ import { competitorTopic, libraryStats, wantsCompetitorInfo } from '../services/
 import { platformsAsked, statusGroups, wantsCampaignCount } from '../services/adsAgent/campaignCount.js';
 import { reportRequest } from '../services/whatsappReport.js';
 import { chatFacts, withLatest } from '../services/whatsappIntent.js';
-import { NOT_DESIGN, RAW_PHOTO, USE_DESIGN, budgetAmount } from '../services/metaAdChat.js';
+import { NOT_DESIGN, RAW_PHOTO, USE_DESIGN, budgetAmount, campaignName } from '../services/metaAdChat.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 
@@ -354,6 +354,13 @@ test('meta chat budget reads the first amount only', () => {
   assert.equal(budgetAmount('leads'), 0);
   assert.equal(budgetAmount('1 lakh monthly leads'), 3333);
   assert.equal(budgetAmount('30k per month'), 1000);
+});
+
+test('meta campaign name says what, where and the goal', () => {
+  const name = campaignName({ product: 'new flats', region: 'Delhi; Noida; Gurgaon', conversion: 'messenger', objectiveLabel: 'leads' });
+  assert.match(name, /^New Flats \| Delhi, Noida \+1 \| Leads \(Messenger\) \| \d{2} \w{3}$/);
+  assert.match(campaignName({ product: 'Hi', category: 'Hi', pageName: 'Kala Akchar', objectiveLabel: 'appointments', conversion: 'instant_form' }), /^Kala Akchar \| India \| Appointments \|/);
+  assert.equal(campaignName({ campaignName: 'Kept' }), 'Kept');
 });
 
 test('meta chat understands design approval in plain words', () => {

@@ -2,6 +2,14 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Meta campaign names, objective label, editor details)
+
+- **Change:** WhatsApp Meta campaigns are named `Product | Cities | Goal | DD Mon` (`campaignName`, saved once in the draft and shown in the plan). Ad sets and ads use the same name with "ad set" / "ad" / "ad B". A greeting or "ok" is no longer taken as the product.
+- **Change:** `fillMetaCampaign` returns every ad set and ad id. The chat saves them in `connection_objects`, so the Ad sets and Ads tabs fill without a Sync.
+- **Change:** Meta sync reads the ad set `destination_type`. Campaigns whose ad sets go to Messenger get `goal: 'messages'`, and the UI shows "Leads · Messenger" instead of "engagement". Meta still files Messenger lead ads under Engagement. When a campaign has no campaign-level budget, sync shows the total of its ad set daily budgets.
+- **Change (client):** The campaign editor shows details next to the form. For the campaign: status, objective, budget, schedule. For an ad set: budget, goal, destination, age, gender, Advantage+, cities, interests. For an ad: the full ad preview with image, text, headline and button.
+- **Migration/API impact:** None. Old campaigns keep their names; rename them from the editor.
+
 ### 2026-10-06 (Meta design approval and age fix)
 
 - **Fix:** In the Meta image step, design approval now matches anywhere in the message ("Save kro", "Inhi design ko rakho", "yahi final hai", "publish kro"), unless it also has a no/change word or a question mark. Before, only a message starting with "design"/"ok" worked, so the same question repeated.

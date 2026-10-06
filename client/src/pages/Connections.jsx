@@ -775,6 +775,11 @@ function StatLine({ row, currency, resultKey, resultLabel }) {
   );
 }
 
+function metaObjective(objective, viaMessenger) {
+  if (objective === 'OUTCOME_ENGAGEMENT' && viaMessenger) return 'Leads · Messenger';
+  return label(String(objective || '').replace('OUTCOME_', '').toLowerCase()) || '—';
+}
+
 function MetaAdCard({ ad, adsetName, currency, actions }) {
   const creative = ad.creative || {};
   let host = '';
@@ -1279,9 +1284,12 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
     };
   }, []);
 
+  const selectedSet = selected.startsWith('group:') ? groups.find((row) => `group:${row.id}` === selected) : null;
+  const selectedAd = selected.startsWith('ad:') ? ads.find((row) => `ad:${row.id}` === selected) : null;
+  const viaMessenger = groups.some((row) => row.destination === 'MESSENGER');
   const facts = info ? [
     ['Status', <Badge key="s" value={meta ? String(info.delivery || info.status).toLowerCase().replace(/_/g, ' ') : googleStatus(info.status)} />],
-    [meta ? 'Objective' : 'Type', label(String((meta ? info.objective : info.channel) || '').replace('OUTCOME_', '').toLowerCase()) || '—'],
+    [meta ? 'Objective' : 'Type', meta ? metaObjective(info.objective, viaMessenger) : label(String(info.channel || '').toLowerCase()) || '—'],
     ['Budget', info.budget ? `${money(info.budget, currency)}${info.budgetKind ? ` · ${info.budgetKind}` : ''}` : '—'],
     [meta ? 'Schedule' : 'Bidding', meta
       ? `${info.startTime ? day(info.startTime) : '—'}${info.stopTime ? ` to ${day(info.stopTime)}` : ' · no end date'}`
@@ -1347,6 +1355,30 @@ function CampaignDrawer({ brand, connectionId, campaign, initialRange, onClose, 
                       </ul>
                     ) : <p className="quiet">No keywords in this ad group yet.</p>}
                   </section>
+                ) : null}
+                {meta && selected === 'campaign' && facts.length ? (
+                  <dl className="drawer-facts is-compact">
+                    {facts.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}
+                  </dl>
+                ) : null}
+                {meta && selectedSet ? (
+                  <section className="drawer-section">
+                    <dl className="drawer-facts is-compact">
+                      <div><dt>Budget</dt><dd>{selectedSet.budget ? `${money(selectedSet.budget, currency)} ${selectedSet.budgetKind}` : 'Uses campaign budget'}</dd></div>
+                      <div><dt>Goal</dt><dd>{label(String(selectedSet.goal || '').toLowerCase()) || '—'}</dd></div>
+                      <div><dt>Destination</dt><dd>{label(String(selectedSet.destination || '').toLowerCase()) || '—'}</dd></div>
+                      <div><dt>Age</dt><dd>{selectedSet.targeting.age || '—'}</dd></div>
+                      <div><dt>Gender</dt><dd>{selectedSet.targeting.gender}</dd></div>
+                      <div><dt>Advantage+ audience</dt><dd>{selectedSet.targeting.advantage ? 'On' : 'Off'}</dd></div>
+                    </dl>
+                    {selectedSet.targeting.places.length ? <div className="cy-chips">{selectedSet.targeting.places.map((place) => <span key={place} className="chip">{place}</span>)}</div> : null}
+                    {selectedSet.targeting.interests.length ? <div className="cy-chips">{selectedSet.targeting.interests.map((item) => <span key={item} className="chip is-soft">{item}</span>)}</div> : null}
+                  </section>
+                ) : null}
+                {meta && selectedAd ? (
+                  <div className="ad-cards">
+                    <MetaAdCard ad={selectedAd} adsetName={groupName.get(selectedAd.adsetId)} currency={currency} />
+                  </div>
                 ) : null}
                 {editing ? (
                   <EditForm
@@ -2344,7 +2376,7 @@ function MetaAdsManager({ id, data, canManage, reload }) {
         <Table onRow={openCampaign} columns={view === 'Campaigns' ? [
           { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} /> },
           { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.status || '').toLowerCase()} /> },
-          { key: 'objective', label: 'Objective', render: (row) => label(String(row.fields?.objective || '').replace('OUTCOME_', '').toLowerCase()) },
+          { key: 'objective', label: 'Objective', render: (row) => metaObjective(row.fields?.objective, row.fields?.goal === 'messages') },
           { key: 'budget', label: 'Budget', render: (row) => money(row.fields?.budget, row.fields?.currency) },
           { key: 'spend', label: 'Spend', render: (row) => money(row.fields?.spend, row.fields?.currency) },
           { key: 'clicks', label: 'Clicks', render: (row) => row.fields?.clicks == null || row.fields?.clicks === '' ? '—' : num(row.fields.clicks) },

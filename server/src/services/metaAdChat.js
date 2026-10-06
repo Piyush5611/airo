@@ -17,6 +17,7 @@ const OTHER_ADS = /\b(linkedin|youtube)\b.{0,24}\bads?\b|\b(run|start|launch|cha
 const STALE_HOURS = 24;
 const GREETING = /^(hi+|hello|hey|hlo|namaste|namaskar|good\s+(morning|afternoon|evening))[\s!.?]*$/i;
 const CANCEL = /^(cancel|stop|ruk|band|nahi chahiye|nahin chahiye)\b/i;
+const FILLER = /^(hi+|hello|hey|hlo|ok|okay|k|yes|haan|han|ha|no|nahi|thik|theek|done|start|go|meta|meta ads?|ads?|run meta ads?)[\s!.?]*$/i;
 const SKIP_IMAGE = /^(skip|baad mein|baad me|later|no image|image nahi|image nahin|without image)\b|\b(bina|without) (photo|image)\b/i;
 export const USE_DESIGN = /\b(design|designs|creative|save|rakho|rakh|final|ok|okay|haan|han|yes|done|banao|bana do|publish|lagao|laga|lga|chalao|theek|thik|sahi|perfect|good|badhiya|accha|achha)\b/i;
 export const NOT_DESIGN = /\b(nahi|nahin|nhi|no|mat|change|badlo|badal|dusra|doosra|dusri|doosri|pasand nahi|achha nahi|accha nahi)\b|\?/i;
@@ -287,22 +288,61 @@ async function downloadImage(url) {
   return checkedImage(bytes.toString('base64'));
 }
 
+function titleCase(text) {
+  return String(text || '').trim().replace(/\s+/g, ' ').replace(/\b([a-z])/g, (char) => char.toUpperCase());
+}
+
+export function campaignName(payload) {
+  if (payload.campaignName) return payload.campaignName;
+  const usable = (value) => (value && !FILLER.test(String(value).trim()) ? value : '');
+  const title = titleCase(usable(payload.product) || usable(payload.category) || payload.pageName || 'Meta ad').slice(0, 60);
+  const places = String(payload.region || '').split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+  const place = places.length > 2 ? `${places.slice(0, 2).join(', ')} +${places.length - 2}` : places.join(', ') || 'India';
+  const goal = payload.conversion === 'messenger' ? 'Leads (Messenger)' : titleCase(payload.objectiveLabel || 'Leads');
+  const date = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' });
+  payload.campaignName = `${title} | ${place} | ${goal} | ${date}`.slice(0, 150);
+  return payload.campaignName;
+}
+
 async function rememberCampaign(organizationId, account, created, intake) {
   await upsertObject({
     organizationId,
     connectionId: account.connectionId,
     objectType: 'campaign',
     externalId: created.campaignId,
-    name: String(intake.product || 'Meta ad').slice(0, 180),
+    name: campaignName(intake),
     parentExternalId: null,
     payload: {
       origin: 'api',
       status: 'PAUSED',
       objective: campaignObjective(intake.objectiveKey, intake.conversion),
+      goal: intake.conversion === 'messenger' ? 'messages' : '',
       budget: String(intake.dailyBudget),
       budgetKind: 'daily'
     }
   });
+  for (const set of created.adsets || []) {
+    await upsertObject({
+      organizationId,
+      connectionId: account.connectionId,
+      objectType: 'adset',
+      externalId: set.id,
+      name: set.name,
+      parentExternalId: String(created.campaignId),
+      payload: { origin: 'api', status: 'PAUSED', budget: String(intake.dailyBudget), campaignId: String(created.campaignId) }
+    });
+  }
+  for (const ad of created.ads || []) {
+    await upsertObject({
+      organizationId,
+      connectionId: account.connectionId,
+      objectType: 'ad',
+      externalId: ad.id,
+      name: ad.name,
+      parentExternalId: ad.adsetId,
+      payload: { origin: 'api', status: 'PAUSED', campaignId: String(created.campaignId) }
+    });
+  }
 }
 
 export async function handleMetaAdChat({ organizationId, conversationId, recognized, messages, imageBase64 = '', imageError = '', force = false, forwarded = false }) {
@@ -576,7 +616,7 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
   }
 
   if (draft.step === 'category') {
-    if (text.length < 2) {
+    if (text.length < 2 || FILLER.test(text)) {
       return { text: say(english, 'Tell me what the ad should sell.', 'Ad kis cheez ka hai, woh likho.') };
     }
     payload.category = text.slice(0, 80);
@@ -590,7 +630,7 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
     return ask('website', intakePrompt('website', english, payload));
   }
   if (draft.step === 'product') {
-    if (text.length < 2) return { text: say(english, 'Tell me the product or service.', 'Product ya service likho.') };
+    if (text.length < 2 || FILLER.test(text)) return { text: say(english, 'Tell me the product or service.', 'Product ya service likho.') };
     payload.product = text.slice(0, 120);
     return goNext();
   }
@@ -907,6 +947,7 @@ function metaPlanText(payload, english) {
     header('Meta Ad Plan', say(english, 'Facebook + Instagram · draft, not published', 'Facebook + Instagram · draft, abhi publish nahi')),
     section('Strategy', payload.strategy),
     section('Setup', [
+      field(say(english, 'Campaign name', 'Campaign name'), campaignName({ ...payload })),
       field('Page', payload.pageName),
       field(say(english, 'Goal', 'Goal'), payload.objectiveLabel),
       field(say(english, 'Daily budget', 'Daily budget'), money(payload.dailyBudget, payload.currency)),
@@ -1033,7 +1074,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
     const created = await createMetaAd({
       apiKey: account.apiKey,
       accountId: account.accountId,
-      name: String(payload.product || 'Meta ad').slice(0, 80),
+      name: campaignName(payload),
       objective: payload.objectiveKey,
       dailyBudget: payload.dailyBudget,
       pageId: payload.pageId,
@@ -1098,7 +1139,7 @@ async function rememberAdSet(organizationId, account, campaignId, adsetId, paylo
     connectionId: account.connectionId,
     objectType: 'adset',
     externalId: String(adsetId),
-    name: `${String(payload.product || 'Meta ad').slice(0, 150)} ad set`.slice(0, 180),
+    name: `${campaignName(payload)} ad set`.slice(0, 180),
     parentExternalId: String(campaignId),
     payload: { origin: 'api', status: 'PAUSED', campaignId: String(campaignId) }
   });
@@ -1109,7 +1150,7 @@ function shellInput(account, payload, campaignId) {
     apiKey: account.apiKey,
     accountId: account.accountId,
     campaignId,
-    name: String(payload.product || 'Meta ad').slice(0, 80),
+    name: campaignName(payload),
     objective: payload.objectiveKey,
     pageId: payload.pageId,
     conversion: payload.conversion,
@@ -1162,7 +1203,7 @@ async function saveWithoutImage(organizationId, conversationId, payload, english
     const created = await createMetaCampaign({
       apiKey: account.apiKey,
       accountId: account.accountId,
-      name: String(payload.product || 'Meta ad').slice(0, 80),
+      name: campaignName(payload),
       objective: payload.objectiveKey,
       conversion: payload.conversion,
       dailyBudget: payload.dailyBudget,
@@ -1219,7 +1260,7 @@ async function finishAd(organizationId, conversationId, payload, text, english, 
       apiKey: account.apiKey,
       accountId: account.accountId,
       adsetId: payload.adsetId,
-      name: String(payload.product || 'Meta ad').slice(0, 80),
+      name: campaignName(payload),
       objective: payload.objectiveKey,
       pageId: payload.pageId,
       headline: payload.headline,
@@ -1236,7 +1277,7 @@ async function finishAd(organizationId, conversationId, payload, text, english, 
       connectionId: account.connectionId,
       objectType: 'ad',
       externalId: String(created.adId),
-      name: `${String(payload.product || 'Meta ad').slice(0, 150)} ad`.slice(0, 180),
+      name: `${campaignName(payload)} ad`.slice(0, 180),
       parentExternalId: String(payload.adsetId),
       payload: { origin: 'api', status: 'PAUSED', campaignId: String(payload.campaignId) }
     });
@@ -1276,7 +1317,7 @@ async function approve(organizationId, conversationId, draft, payload, text, eng
     connectionId: account.connectionId,
     objectType: 'campaign',
     externalId: String(draft.campaignId),
-    name: String(payload.product || 'Meta ad').slice(0, 180),
+    name: campaignName(payload),
     parentExternalId: null,
     payload: {
       origin: 'api',

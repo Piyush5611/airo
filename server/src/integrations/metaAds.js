@@ -600,7 +600,7 @@ export async function pullMetaAds({ apiKey, accountId }) {
       fields: 'id,name,status,effective_status,objective,daily_budget,lifetime_budget'
     }),
     list(`act_${act}/adsets`, apiKey, {
-      fields: 'id,name,status,effective_status,campaign_id,daily_budget'
+      fields: 'id,name,status,effective_status,campaign_id,daily_budget,destination_type'
     }),
     list(`act_${act}/ads`, apiKey, {
       fields: 'id,name,status,effective_status,campaign_id,adset_id'
@@ -618,6 +618,13 @@ export async function pullMetaAds({ apiKey, accountId }) {
     insightNote = error.message;
   }
   const byCampaign = new Map(insights.map((row) => [String(row.campaign_id), row]));
+  const messengerCampaigns = new Set(adsets.filter((row) => row.destination_type === 'MESSENGER').map((row) => String(row.campaign_id)));
+  const adsetBudget = new Map();
+  for (const row of adsets) {
+    if (!row.daily_budget || row.status === 'DELETED' || row.status === 'ARCHIVED') continue;
+    const key = String(row.campaign_id);
+    adsetBudget.set(key, (adsetBudget.get(key) || 0) + Number(row.daily_budget));
+  }
   const draftResult = await draftCampaigns(
     act,
     apiKey,
@@ -629,7 +636,7 @@ export async function pullMetaAds({ apiKey, accountId }) {
   const objects = [
     ...campaigns.map((row) => {
       const insight = byCampaign.get(String(row.id));
-      const budget = major(row.daily_budget || row.lifetime_budget, currency);
+      const budget = major(row.daily_budget || row.lifetime_budget || adsetBudget.get(String(row.id)), currency);
       return {
         type: 'campaign',
         externalId: String(row.id),
@@ -640,8 +647,9 @@ export async function pullMetaAds({ apiKey, accountId }) {
           status: row.status || '',
           delivery: row.effective_status || '',
           objective: row.objective || '',
+          goal: messengerCampaigns.has(String(row.id)) ? 'messages' : '',
           budget,
-          budgetKind: row.daily_budget ? 'daily' : row.lifetime_budget ? 'lifetime' : '',
+          budgetKind: row.daily_budget || (!row.lifetime_budget && budget) ? 'daily' : row.lifetime_budget ? 'lifetime' : '',
           currency,
           spend: insight?.spend ?? null,
           impressions: insight?.impressions ?? null,
@@ -1515,6 +1523,8 @@ async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, w
   const creativeInput = { ...input, website, pageId, name };
   let firstAdset = '';
   let firstAd = '';
+  const adIds = [];
+  const adsetIds = [];
   for (const [index, advantage] of versions.entries()) {
     const adsetParams = {
       name: `${name} ${versions.length > 1 ? `test ${index + 1}` : 'ad set'}`.slice(0, 180),
@@ -1538,18 +1548,21 @@ async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, w
     const adset = await graph(`act_${act}/adsets`, apiKey, adsetParams, 'POST');
     if (!adset.id) throw new ApiError(422, 'Meta Ads did not return an ad set.', 'validation_error');
     if (!firstAdset) firstAdset = String(adset.id);
+    adsetIds.push({ id: String(adset.id), name: adsetParams.name });
     const primary = await makeCreative(act, apiKey, creativeInput, imageHash, formId, plan);
     const ad = await makeAd(act, apiKey, `${name} ad`, adset.id, primary);
     if (!firstAd) firstAd = ad;
+    adIds.push({ id: String(ad), adsetId: String(adset.id), name: `${name} ad` });
     if (input.creativeTest && input.headlineB && !input.dynamicCreative) {
       const second = await makeCreative(act, apiKey, creativeInput, imageHashB, formId, plan, {
         headline: input.headlineB,
         message: input.messageB || message,
         label: 'test'
       });
-      await makeAd(act, apiKey, `${name} ad B`, adset.id, second);
+      const adB = await makeAd(act, apiKey, `${name} ad B`, adset.id, second);
+      adIds.push({ id: String(adB), adsetId: String(adset.id), name: `${name} ad B` });
     }
   }
   if (publish) await setMetaCampaignStatus({ apiKey, campaignId: String(campaign.id), status: 'ACTIVE' });
-  return { campaignId: String(campaign.id), adsetId: firstAdset, adId: firstAd };
+  return { campaignId: String(campaign.id), adsetId: firstAdset, adId: firstAd, adsets: adsetIds, ads: adIds };
 }

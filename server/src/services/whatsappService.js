@@ -403,14 +403,22 @@ async function answerWithModel(saved) {
     imageError
   });
   if (meta?.text) {
-    await deliverWhatsapp({
-      conversationId: saved.conversationId,
-      text: String(meta.text).slice(0, 4000),
-      actionTaken: 'Meta ad'
-    });
+    await deliverAdChat(saved.conversationId, meta, 'Meta ad');
     return;
   }
   await sendAnswer(saved, messages, '');
+}
+
+async function deliverAdChat(conversationId, reply, actionTaken) {
+  for (const image of reply.images || []) {
+    try {
+      await deliverWhatsappImage({ conversationId, png: image.png, caption: image.caption, actionTaken: `${actionTaken} design`, tag: 'Ad design' });
+    } catch (error) {
+      console.error('WhatsApp ad design skipped:', String(error?.message || 'failed').slice(0, 180));
+      break;
+    }
+  }
+  await deliverWhatsapp({ conversationId, text: String(reply.text).slice(0, 4000), actionTaken });
 }
 
 async function sendAdChat(saved, messages, { force = false, only = '' } = {}) {
@@ -433,7 +441,7 @@ async function sendAdChat(saved, messages, { force = false, only = '' } = {}) {
     force
   });
   if (meta?.text) {
-    await deliverWhatsapp({ conversationId: saved.conversationId, text: String(meta.text).slice(0, 4000), actionTaken: 'Meta ad' });
+    await deliverAdChat(saved.conversationId, meta, 'Meta ad');
     return true;
   }
   return false;
@@ -799,7 +807,7 @@ async function deliverWhatsapp({ conversationId, text, actionTaken }) {
   return target.row;
 }
 
-async function deliverWhatsappImage({ conversationId, png, caption, buttons = [], actionTaken }) {
+async function deliverWhatsappImage({ conversationId, png, caption, buttons = [], actionTaken, tag = 'Report image' }) {
   const target = await whatsappTarget(conversationId);
   const mediaId = await uploadWhatsappImage(target, png);
   const body = String(caption || 'Report').slice(0, 1024);
@@ -841,7 +849,7 @@ async function deliverWhatsappImage({ conversationId, png, caption, buttons = []
   } else {
     await postWhatsapp(target, { type: 'image', image: { id: mediaId, caption: body } });
   }
-  await saveOutbound(conversationId, `${body}\n\n[Report image]`, actionTaken);
+  await saveOutbound(conversationId, `${body}\n\n[${tag}]`, actionTaken);
   return target.row;
 }
 

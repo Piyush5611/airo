@@ -11,6 +11,8 @@ import { competitorTopic, libraryStats, wantsCompetitorInfo } from '../services/
 import { platformsAsked, statusGroups, wantsCampaignCount } from '../services/adsAgent/campaignCount.js';
 import { reportRequest } from '../services/whatsappReport.js';
 import { chatFacts, withLatest } from '../services/whatsappIntent.js';
+import { budgetAmount } from '../services/metaAdChat.js';
+import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 
 const profile = businessProfileSchema.parse({
@@ -340,4 +342,36 @@ test('router facts show the open ad step and only the latest user line is rewrit
   assert.equal(rewritten[0].content, 'Call report do');
   assert.equal(rewritten[2].content, 'call report today | Kya hua');
   assert.equal(messages[2].content, 'Kya hua');
+});
+
+test('meta chat budget reads the first amount only', () => {
+  assert.equal(budgetAmount('Budget is 590'), 590);
+  assert.equal(budgetAmount('Rs.500 leads'), 500);
+  assert.equal(budgetAmount('5k leads'), 5000);
+  assert.equal(budgetAmount('1.5k daily'), 1500);
+  assert.equal(budgetAmount('1,200 leads for 2 bhk'), 1200);
+  assert.equal(budgetAmount('500 leads 2 bhk'), 500);
+  assert.equal(budgetAmount('leads'), 0);
+});
+
+test('ad design text keeps units together and fits the line limit', () => {
+  const lines = wrapText('Ready to move 2 BHK in Noida Extension', 92, 400, true);
+  assert.ok(lines.some((line) => line.includes('2\u00A0BHK')));
+  assert.ok(!lines.some((line) => /^BHK/.test(line)));
+  const fitted = fitText('A very long headline that keeps going and going well past four lines of text', { maxWidth: 300, maxLines: 2, start: 60, min: 40, bold: true });
+  assert.equal(fitted.lines.length, 2);
+  assert.ok(fitted.size >= 40 && fitted.size <= 60);
+  assert.equal(ctaLabel('SIGN_UP'), 'Enquire Now');
+  assert.equal(ctaLabel('UNKNOWN'), 'Learn More');
+});
+
+test('ad design svg escapes text and renders one png per variant', () => {
+  const svg = creativeSvg({ headline: 'Flats <2 BHK> & more', points: ['Near metro'], cta: 'SIGN_UP', business: 'Test & Co', link: 'https://www.test.in/page' });
+  assert.match(svg, /Flats &lt;2 BHK&gt; &amp;/);
+  assert.ok(!svg.includes('<2 BHK>'));
+  assert.match(svg, /test\.in/);
+  assert.deepEqual(creativePoints({ sellingPoints: ['Pool', 'pool'], suggestion: { sellingPoints: ['Gym'] } }), ['pool', 'Gym']);
+  const pngs = variantCreatives({ cta: 'LEARN_MORE', variants: [{ headline: 'One' }, { headline: 'Two' }, { headline: 'Three' }] });
+  assert.equal(pngs.length, 2);
+  for (const png of pngs) assert.equal(png[0], 0x89);
 });

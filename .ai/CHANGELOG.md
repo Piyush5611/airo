@@ -2,6 +2,24 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (Meta chat budget fix)
+
+- **Fix:** At the Meta image step, a message like "budget 590" now updates the draft's daily budget. Before, it was ignored and the next photo still used the old, too-small budget.
+- **Fix:** New `budgetAmount` reads the first amount only and understands `5k`, `1.5k`, `Rs.500` and `1,200`. The old parser joined every digit in the message, and could also turn "Rs.500" into 0.5.
+- **Change:** When Meta rejects a campaign or ad for its budget, the reply adds "reply budget 600 to change it".
+- **Migration/API impact:** None.
+
+### 2026-10-06 (Meta ad template creatives)
+
+- **Change:** New `services/adsAgent/adCreative.js` draws a 1080×1080 ad image from SVG with Resvg and the bundled Inter fonts. It includes the business name, headline, up to 3 selling points, a CTA button and the website host. There are 3 colour themes; with an owner photo, the photo becomes the background under a dark overlay. Output stays under 2.4 MB (it falls back to a smaller width). No AI-generated photos.
+- **Change:** The WhatsApp Meta plan now sends one design image per variant before the plan text. In the image step:
+  - `design`/`ok` creates the paused ad with these designs (variant 1 image on ad A, variant 2 image on test ad B).
+  - A photo is rendered into both designs as the background.
+  - `original` makes the next photo go in as-is.
+  - `skip` is unchanged.
+- **Change:** `createMetaAd` accepts `imageBase64B`, which is uploaded as a second image hash and used for creative B. Without it, B reuses the main image as before. `deliverWhatsappImage` takes a `tag` for the saved outbound label.
+- **Migration/API impact:** None. No new dependency (`@resvg/resvg-js` was already used for report cards).
+
 ### 2026-10-06 (WhatsApp AI router)
 
 - **Change:** New `services/whatsappIntent.js`. For registered numbers (text messages, not photos), `classifyMessage` sends the last 8 chat lines plus the open ad draft step to `structuredLlm` (zod schema, purposes `assistant → whatsapp → ads`, 9 s timeout). It returns `{intent, request, platform, topic}`. Intents: `ad_setup_answer`, `start_google_ad`, `start_meta_ad`, `cancel_ad_setup`, `competitors`, `campaign_list`, `ads_report`, `ads_advice`, `call_report`, `crm_report`, `greeting`, `other`.

@@ -38,7 +38,7 @@ const STEP_QUESTIONS = {
   audience: 'age and gender',
   page: 'which Facebook Page number',
   review: 'reviewing the Google plan: ok to save, or edits such as headlines:, keywords:, budget:, or an idea in words',
-  image: 'the ad photo, "skip", or a copy edit "headline | text" / "use 3"',
+  image: '"design"/"ok" to use the AIRO designs, the ad photo, "original", "skip", a budget change like "budget 600", or a copy edit "headline | text" / "use 3"',
   ad: 'the ad photo or "skip"',
   approval: 'whether to publish the saved paused campaign: haan or nahi'
 };

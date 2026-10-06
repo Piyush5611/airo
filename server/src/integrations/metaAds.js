@@ -1466,12 +1466,14 @@ export async function createMetaAd(input) {
     throw new ApiError(422, 'A lifetime budget needs an end date.', 'validation_error');
   }
   const bytes = imageBytes(imageBase64);
+  const bytesB = input.imageBase64B ? imageBytes(input.imageBase64B) : '';
   const act = actId(accountId);
   const account = await graph(`act_${act}`, apiKey, { fields: 'currency' });
   const fullBudget = Math.round(Number(dailyBudget) * (OFFSET[account.currency] || 100));
   if (!Number.isFinite(fullBudget) || fullBudget < 1) throw new ApiError(422, 'Enter a daily budget.', 'validation_error');
   const pageToken = await pageAccessToken(apiKey, pageId);
   const imageHash = await uploadImage(act, apiKey, bytes);
+  const imageHashB = bytesB ? await uploadImage(act, apiKey, bytesB) : imageHash;
   const formId = plan.lead ? await createLeadForm(pageId, pageToken, name, website.toString()) : '';
   const campaignLevel = input.budgetLevel === 'campaign';
   const budgetKey = input.budgetMode === 'lifetime' ? 'lifetime_budget' : 'daily_budget';
@@ -1490,7 +1492,7 @@ export async function createMetaAd(input) {
   const campaign = await graph(`act_${act}/campaigns`, apiKey, campaignParams, 'POST');
   if (!campaign.id) throw new ApiError(422, 'Meta Ads did not return a campaign.', 'validation_error');
   try {
-    return await fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, website, pageId, name, message, publish, fullBudget, campaignLevel, budgetKey, imageHash, formId });
+    return await fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, website, pageId, name, message, publish, fullBudget, campaignLevel, budgetKey, imageHash, imageHashB, formId });
   } catch (error) {
     try {
       await graph(String(campaign.id), apiKey, {}, 'DELETE');
@@ -1501,7 +1503,7 @@ export async function createMetaAd(input) {
   }
 }
 
-async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, website, pageId, name, message, publish, fullBudget, campaignLevel, budgetKey, imageHash, formId }) {
+async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, website, pageId, name, message, publish, fullBudget, campaignLevel, budgetKey, imageHash, imageHashB = imageHash, formId }) {
   const versions = input.abTest ? [true, false] : [input.advantageAudience !== false];
   const share = Math.max(1, Math.floor(fullBudget / versions.length));
   const start = scheduleTime(input.startDate);
@@ -1539,7 +1541,7 @@ async function fillMetaCampaign({ input, apiKey, act, campaign, plan, pixelId, w
     const ad = await makeAd(act, apiKey, `${name} ad`, adset.id, primary);
     if (!firstAd) firstAd = ad;
     if (input.creativeTest && input.headlineB && !input.dynamicCreative) {
-      const second = await makeCreative(act, apiKey, creativeInput, imageHash, formId, plan, {
+      const second = await makeCreative(act, apiKey, creativeInput, imageHashB, formId, plan, {
         headline: input.headlineB,
         message: input.messageB || message,
         label: 'test'

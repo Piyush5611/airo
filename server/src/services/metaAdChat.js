@@ -10,6 +10,7 @@ import { LINE, bullets, card, field, header, hint, money, numbered, options, sec
 import {
   businessProfile, chosenNames, hasProfileDetails, resolveMetaCities, resolveMetaInterests, suggestTargeting, writeMetaCopy
 } from './adsAgent/chatPlanner.js';
+import { variantCreatives } from './adsAgent/adCreative.js';
 
 const START = /\b(run|start|launch|chalao|chala|banao)\b.{0,40}\bmeta\b|\bmeta\s+ads?\b.{0,24}\b(run|start|launch|chalao|chala|banao)\b/i;
 const OTHER_ADS = /\b(linkedin|youtube)\b.{0,24}\bads?\b|\b(run|start|launch|chalao|chala|banao)\b.{0,40}\b(linkedin|youtube)\b/i;
@@ -17,9 +18,22 @@ const STALE_HOURS = 24;
 const GREETING = /^(hi+|hello|hey|hlo|namaste|namaskar|good\s+(morning|afternoon|evening))[\s!.?]*$/i;
 const CANCEL = /^(cancel|stop|ruk|band|nahi chahiye|nahin chahiye)\b/i;
 const SKIP_IMAGE = /^(skip|baad mein|baad me|later|no image|image nahi|image nahin|without image)\b/i;
+const USE_DESIGN = /^(design|designs|use design|ok|okay|haan|han|yes|done|banao|bana do|theek|thik)\b/i;
+const RAW_PHOTO = /^(original|as is|as-is|raw|bina design|without design)\b/i;
 const REPORT = /\b(report|nexcall|hisab|yesterday|aaj ka|calling report|kitne call)\b/i;
 const HINGLISH = /\b(kya|hai|hain|karo|chahiye|bhejo|nahi|nahin|haan|mujhe|mera|meri|chalao|banao|ruk|theek|thik|yaar|kro)\b/i;
 const CTA = new Set(['LEARN_MORE', 'SIGN_UP', 'SHOP_NOW', 'BOOK_NOW']);
+
+export function budgetAmount(text) {
+  const match = String(text || '').replace(/(\d),(\d)/g, '$1$2').match(/(\d+(?:\.\d+)?)\s*(k|thousand|hazar|hazaar|hajar)?\b/i);
+  if (!match) return 0;
+  return Math.round(Number(match[1]) * (match[2] ? 1000 : 1));
+}
+
+function budgetHint(reason, english) {
+  if (!/budget/i.test(reason)) return '';
+  return say(english, ' To change it, reply for example: budget 600', ' Badalne ke liye aise likho: budget 600');
+}
 
 function lastUser(messages) {
   const users = (messages || []).filter((row) => row.role === 'user');
@@ -225,7 +239,21 @@ function sharedPhoto(text, imageBase64, imageError) {
   return Boolean(imageBase64 || imageError) || /^Photo \d{6,40}$/.test(String(text || ''));
 }
 
-function imageAsk(english) {
+function imageAsk(english, designs = false) {
+  if (designs) {
+    return card([
+      section(say(english, 'Next: pick the creative', 'Ab creative chuno'), [
+        hint(say(english, 'AIRO designed one image per variant (shown above).', 'AIRO ne har variant ki alag image design ki hai (upar dekho).'))
+      ]),
+      options([
+        ['design', say(english, 'create the paused ad with these designs', 'inhi designs se paused ad bana do')],
+        [say(english, 'send a photo', 'photo bhejo'), say(english, 'your photo becomes the design background', 'aapki photo design ka background banegi')],
+        ['original', say(english, 'next photo is used as-is, no design', 'agli photo bina design ke as-is lagegi')],
+        ['skip', say(english, 'save without image for now', 'abhi bina image save karo')],
+        ['cancel', say(english, 'stop this setup', 'setup band karo')]
+      ])
+    ]);
+  }
   return card([
     section(say(english, 'Next: send the ad photo', 'Ab ad ki photo bhejo'), [
       hint(say(english, 'JPG or PNG under 2 MB, in this chat. An https image link also works.', 'JPG ya PNG, 2 MB se kam, isi chat mein. https image link bhi chalega.'))
@@ -574,11 +602,11 @@ async function continueDraft(organizationId, conversationId, draft, text, messag
     return pickRegion(organizationId, conversationId, payload, text, english, draft.step);
   }
   if (draft.step === 'budget') {
-    const amount = Number(String(text).replace(/[^\d.]/g, ''));
-    if (!Number.isFinite(amount) || amount < 1) {
+    const amount = budgetAmount(text);
+    if (amount < 1) {
       return { text: say(english, 'Send the budget and objective, for example 500 leads.', 'Budget aur objective bhejo, jaise 500 leads.') };
     }
-    payload.dailyBudget = Math.round(amount);
+    payload.dailyBudget = amount;
     const objective = objectiveFrom(text);
     if (objective) applyObjective(payload, objective);
     return goNext();
@@ -775,7 +803,7 @@ async function buildPlan(organizationId, conversationId, payload, english) {
     payload.messageB = copy.variants[1]?.primaryText || '';
     payload.strategy = copy.strategy;
     await saveDraft(organizationId, conversationId, 'image', payload);
-    return { text: metaPlanText(payload, english) };
+    return { text: metaPlanText(payload, english), images: designImages(payload, english) };
   } catch {
     payload.variants = [];
     payload.headlineB = '';
@@ -810,7 +838,24 @@ async function buildPlan(organizationId, conversationId, payload, english) {
   payload.cta = plan.cta || payload.cta;
   payload.variants = [{ angle: '', headline: payload.headline, primaryText: payload.message }];
   await saveDraft(organizationId, conversationId, 'image', payload);
-  return { text: metaPlanText(payload, english) };
+  return { text: metaPlanText(payload, english), images: designImages(payload, english) };
+}
+
+function renderDesigns(payload, photoBase64 = '') {
+  try {
+    return variantCreatives(payload, { photoBase64 });
+  } catch (error) {
+    console.error('Meta ad design skipped:', String(error?.message || 'failed').slice(0, 180));
+    return [];
+  }
+}
+
+function designImages(payload, english, pngs = renderDesigns(payload)) {
+  const variants = payload.variants?.length ? payload.variants : [{ headline: payload.headline }];
+  return pngs.map((png, index) => ({
+    png,
+    caption: `*${say(english, 'Design', 'Design')} ${index + 1}*${variants.length > 1 ? ` · ${say(english, 'Variant', 'Variant')} ${index + 1}` : ''}\n${variants[index]?.headline || ''}`
+  }));
 }
 
 function audienceFields(payload, english) {
@@ -865,7 +910,7 @@ function metaPlanText(payload, english) {
       variants.length > 2 ? `\`use 3\`  →  ${say(english, 'make variant 3 the main ad', 'variant 3 ko main ad banao')}` : '',
       `\`headline | ad text\`  →  ${say(english, 'write your own copy', 'apni copy likho')}`
     ]),
-    imageAsk(english)
+    imageAsk(english, true)
   ]);
 }
 
@@ -911,6 +956,17 @@ async function readyImage(imageBase64, imageError, text) {
 }
 
 async function acceptCreative(organizationId, conversationId, payload, text, english, imageBase64 = '', imageError = '') {
+  if (!imageBase64 && !imageError && /\bbudget\b/i.test(text) && budgetAmount(text) >= 1) {
+    payload.dailyBudget = budgetAmount(text);
+    await saveDraft(organizationId, conversationId, 'image', payload);
+    return {
+      text: card([
+        header(say(english, 'Budget updated', 'Budget update ho gaya')),
+        field(say(english, 'Daily budget', 'Daily budget'), money(payload.dailyBudget, payload.currency)),
+        imageAsk(english, true)
+      ])
+    };
+  }
   const copied = applyCopyLine(payload, text);
   const photo = await readyImage(imageBase64, imageError, copied ? '' : text);
   if (copied && !photo.imageBase64) {
@@ -921,16 +977,31 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
         `> *${payload.headline}*\n${String(payload.message).split(/\n+/).map((line) => `> ${line}`).join('\n')}`,
         payload.headlineB ? hint(say(english, `A/B test ad: ${payload.headlineB}`, `A/B test ad: ${payload.headlineB}`)) : '',
         photo.error ? hint(photo.error) : '',
-        imageAsk(english)
-      ])
+        imageAsk(english, true)
+      ]),
+      images: designImages(payload, english)
     };
   }
-  if (!photo.imageBase64 && SKIP_IMAGE.test(text)) return saveWithoutImage(organizationId, conversationId, payload, english);
-  if (!photo.imageBase64) {
-    const reason = photo.error ? `${photo.error} ` : '';
-    return { text: say(english, `${reason}${imageAsk(true)}`, `${reason}${imageAsk(false)}`) };
+  if (!photo.imageBase64 && !photo.error && RAW_PHOTO.test(text)) {
+    payload.rawPhoto = true;
+    await saveDraft(organizationId, conversationId, 'image', payload);
+    return { text: say(english, 'OK. Send the photo now, it will be used as-is with no design.', 'Theek hai. Ab photo bhejo, woh bina design ke as-is lagegi.') };
   }
-  imageBase64 = photo.imageBase64;
+  if (!photo.imageBase64 && SKIP_IMAGE.test(text)) return saveWithoutImage(organizationId, conversationId, payload, english);
+  let designs = [];
+  if (photo.imageBase64) {
+    designs = payload.rawPhoto ? [] : renderDesigns(payload, photo.imageBase64);
+  } else if (!photo.error && USE_DESIGN.test(text)) {
+    designs = renderDesigns(payload);
+    if (!designs.length) {
+      return { text: say(english, `The design could not be made right now. Send a photo instead.${imageAsk(true)}`, `Design abhi nahi ban paya. Iski jagah photo bhejo.${imageAsk(false)}`) };
+    }
+  } else {
+    const reason = photo.error ? `${photo.error} ` : '';
+    return { text: `${reason}${imageAsk(english, true)}` };
+  }
+  imageBase64 = designs.length ? designs[0].toString('base64') : photo.imageBase64;
+  const imageBase64B = designs[1] ? designs[1].toString('base64') : '';
   const account = await metaAccount(organizationId);
   if (!account) return { text: connectLine(english) };
   if (copied) await saveDraft(organizationId, conversationId, 'image', payload);
@@ -946,6 +1017,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
       message: payload.message,
       link: adLink(payload),
       imageBase64,
+      imageBase64B: payload.headlineB && imageBase64B ? imageBase64B : undefined,
       publish: false,
       budgetLevel: 'adset',
       budgetMode: 'daily',
@@ -963,6 +1035,7 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
       messageB: payload.messageB || undefined
     });
     payload.campaignId = created.campaignId;
+    delete payload.rawPhoto;
     await saveDraft(organizationId, conversationId, 'approval', payload, created.campaignId);
     await rememberCampaign(organizationId, account, created, payload);
     await recordAudit({ auth: null, ip: null }, {
@@ -979,14 +1052,18 @@ async function acceptCreative(organizationId, conversationId, payload, text, eng
           field('Campaign id', created.campaignId),
           field(say(english, 'Daily budget', 'Daily budget'), money(payload.dailyBudget, payload.currency)),
           field(say(english, 'Locations', 'Locations'), payload.region),
-          field('Ads', payload.headlineB ? say(english, '2 (A/B test)', '2 (A/B test)') : '1')
+          field('Ads', payload.headlineB ? say(english, '2 (A/B test)', '2 (A/B test)') : '1'),
+          field('Creative', designs.length
+            ? say(english, `AIRO design${photo.imageBase64 ? ' on your photo' : ''}${imageBase64B ? ', one per variant' : ''}`, `AIRO design${photo.imageBase64 ? ' aapki photo pe' : ''}${imageBase64B ? ', har variant ka alag' : ''}`)
+            : say(english, 'your photo as-is', 'aapki photo as-is'))
         ]),
         publishOptions(english)
-      ])
+      ]),
+      images: photo.imageBase64 && designs.length ? designImages(payload, english, designs) : []
     };
   } catch (error) {
     const reason = String(error.message || 'Meta did not save the ad.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
-    return { text: say(english, `Meta did not save the ad. ${reason} Send the photo again in this chat, or say cancel.`, `Meta ne ad save nahi kiya. ${reason} Photo dubara is chat mein bhejo, ya cancel likho.`) };
+    return { text: say(english, `Meta did not save the ad. ${reason}${budgetHint(reason, true)} Reply design or send the photo again, or say cancel.`, `Meta ne ad save nahi kiya. ${reason}${budgetHint(reason, false)} design likho ya photo dubara bhejo, ya cancel likho.`) };
   }
 }
 
@@ -1090,7 +1167,7 @@ async function saveWithoutImage(organizationId, conversationId, payload, english
     };
   } catch (error) {
     const reason = String(error.message || 'Meta did not save the campaign.').replace(/access_token=[^&\s]+/gi, '').slice(0, 200);
-    return { text: say(english, `Meta did not save the campaign. ${reason}`, `Meta ne campaign save nahi kiya. ${reason}`) };
+    return { text: `${say(english, `Meta did not save the campaign. ${reason}`, `Meta ne campaign save nahi kiya. ${reason}`)}${budgetHint(reason, english)}` };
   }
 }
 

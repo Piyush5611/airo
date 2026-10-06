@@ -779,10 +779,19 @@ const DELIVERY = {
   REMOVED: ['Removed', 'is-off']
 };
 
-function DeliveryPill({ status, delivery }) {
+function deliveryOf(status, delivery) {
   const key = String(status === 'PAUSED' ? 'PAUSED' : delivery || status || '').toUpperCase();
-  const [text, tone] = DELIVERY[key] || [label(key.toLowerCase()) || 'Unknown', 'is-off'];
+  return DELIVERY[key] || [label(key.toLowerCase()) || 'Unknown', 'is-off'];
+}
+
+function DeliveryPill({ status, delivery }) {
+  const [text, tone] = deliveryOf(status, delivery);
   return <span className={`delivery-pill ${tone}`}><i />{text}</span>;
+}
+
+function deliveryFlag(status, delivery) {
+  const [text, tone] = deliveryOf(status, delivery);
+  return tone === 'is-review' || tone === 'is-issue' || tone === 'is-off' ? { text, tone: tone === 'is-issue' ? 'bad' : 'warn' } : null;
 }
 
 function StatusSwitch({ on, pending, disabled, name, onToggle }) {
@@ -2518,18 +2527,17 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
         <Table onRow={openCampaign} columns={view === 'Campaigns' ? [
           { key: 'toggle', label: 'On / off', render: (row) => {
             const status = toggler.statusOf(row);
-            return canManage && (status === 'ACTIVE' || status === 'PAUSED') ? (
+            return status === 'ACTIVE' || status === 'PAUSED' ? (
               <StatusSwitch
                 on={status === 'ACTIVE'}
                 pending={toggler.pending === String(row.externalId)}
-                disabled={Boolean(toggler.pending) || busy}
+                disabled={!canManage || Boolean(toggler.pending) || busy}
                 name={row.name}
                 onToggle={() => toggler.toggle(row, status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE', 'ACTIVE')}
               />
             ) : null;
           } },
-          { key: 'name', label: 'Campaign', render: (row) => <CampaignName avatar name={row.name} sub={metaObjective(row.fields?.objective, row.fields?.goal === 'messages')} note={toggler.noteFor(row)} /> },
-          { key: 'status', label: 'Delivery', render: (row) => <DeliveryPill status={toggler.statusOf(row)} delivery={toggler.deliveryOf(row)} /> },
+          { key: 'name', label: 'Campaign', render: (row) => <CampaignName avatar name={row.name} sub={metaObjective(row.fields?.objective, row.fields?.goal === 'messages')} note={toggler.noteFor(row) || deliveryFlag(toggler.statusOf(row), toggler.deliveryOf(row))} /> },
           { key: 'budget', label: 'Budget', render: (row) => <BudgetCell amount={row.fields?.budget} kind={row.fields?.budgetKind} currency={row.fields?.currency} /> },
           { key: 'results', label: 'Results · 30 days', render: (row) => <ResultsCell spend={row.fields?.spend} clicks={row.fields?.clicks} results={row.fields?.leads} resultLabel="leads" currency={row.fields?.currency} /> },
           { key: 'action', label: '', render: (row) => canManage ? (
@@ -3114,18 +3122,17 @@ function GoogleAdsManager({ id, data, canManage, reload, section, onSection }) {
           <Table onRow={(row) => openCampaign(row.externalId, row.name)} columns={[
             { key: 'toggle', label: 'On / off', render: (row) => {
               const status = toggler.statusOf(row);
-              return canManage && (status === 'ENABLED' || status === 'PAUSED') ? (
+              return status === 'ENABLED' || status === 'PAUSED' ? (
                 <StatusSwitch
                   on={status === 'ENABLED'}
                   pending={toggler.pending === String(row.externalId)}
-                  disabled={Boolean(toggler.pending) || busy}
+                  disabled={!canManage || Boolean(toggler.pending) || busy}
                   name={row.name}
                   onToggle={() => toggler.toggle(row, status === 'ENABLED' ? 'PAUSED' : 'ENABLED', 'ENABLED')}
                 />
               ) : null;
             } },
-            { key: 'name', label: 'Campaign', render: (row) => <CampaignName avatar name={row.name} sub={label(String(row.fields?.channel || '').toLowerCase())} note={toggler.noteFor(row)} /> },
-            { key: 'status', label: 'Delivery', render: (row) => <DeliveryPill status={toggler.statusOf(row)} delivery={toggler.statusOf(row)} /> },
+            { key: 'name', label: 'Campaign', render: (row) => <CampaignName avatar name={row.name} sub={label(String(row.fields?.channel || '').toLowerCase())} note={toggler.noteFor(row) || deliveryFlag(toggler.statusOf(row), toggler.statusOf(row))} /> },
             { key: 'budget', label: 'Budget', render: (row) => <BudgetCell amount={row.fields?.budget} kind="daily" currency={row.fields?.currency} /> },
             { key: 'results', label: 'Results · 30 days', render: (row) => <ResultsCell spend={row.fields?.spend} clicks={row.fields?.clicks} results={row.fields?.conversions} resultLabel="conversions" currency={row.fields?.currency} /> },
             { key: 'action', label: '', render: (row) => canManage ? (

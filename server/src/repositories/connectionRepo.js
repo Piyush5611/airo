@@ -159,6 +159,31 @@ export function logs(connectionId) {
   );
 }
 
+export function adLeads({ organizationId, connectionId, scopeSql, scopeParams, limit }) {
+  return many(
+    `SELECT l.id, l.full_name AS fullName, l.phone, l.email, l.city, l.status, l.score,
+            l.created_at AS createdAt, u.full_name AS assignedTo,
+            i.outcome, i.submitted_at AS submittedAt, i.campaign_external_id AS campaignId,
+            camp.name AS campaignName, ad.name AS adName
+     FROM ad_lead_imports i
+     JOIN leads l ON l.id = i.lead_id AND l.organization_id = i.organization_id
+     LEFT JOIN users u ON u.id = l.assigned_user_id
+     LEFT JOIN integration_objects camp ON camp.connection_id = i.connection_id AND camp.object_type = 'campaign' AND camp.external_id = i.campaign_external_id
+     LEFT JOIN integration_objects ad ON ad.connection_id = i.connection_id AND ad.object_type = 'ad' AND ad.external_id = i.ad_external_id
+     WHERE i.organization_id = ? AND i.connection_id = ?${scopeSql}
+     ORDER BY COALESCE(i.submitted_at, i.created_at) DESC
+     LIMIT ?`,
+    [organizationId, connectionId, ...scopeParams, limit]
+  );
+}
+
+export function adLeadCounts(organizationId, connectionId) {
+  return many(
+    `SELECT outcome, COUNT(*) AS total FROM ad_lead_imports WHERE organization_id = ? AND connection_id = ? GROUP BY outcome`,
+    [organizationId, connectionId]
+  );
+}
+
 export function errors(connectionId) {
   return many(
     `SELECT id, code, message, resolved_at AS resolvedAt, created_at AS createdAt

@@ -3846,11 +3846,12 @@ function connectionTabs(data, can) {
   if (!data) return ['Overview'];
   const manage = can('connections.manage');
   const ads = can('campaigns.view');
+  const leads = can('leads.view') ? ['Leads'] : [];
   if (data.providerKey === 'meta_ads') {
-    return ['Overview', 'Campaigns', ...(manage ? ['Create ad'] : []), 'Report', ...(ads ? ['Ad analysis', 'Lead quality', 'A/B tests'] : []), 'Account & sync'];
+    return ['Overview', 'Campaigns', ...leads, ...(manage ? ['Create ad'] : []), 'Report', ...(ads ? ['Ad analysis', 'Lead quality', 'A/B tests'] : []), 'Account & sync'];
   }
   if (data.providerKey === 'google_ads') {
-    return ['Overview', 'Campaigns', ...(manage ? ['Create campaign'] : []), 'Report', ...(ads ? ['Ad analysis'] : []), 'Account & sync'];
+    return ['Overview', 'Campaigns', ...leads, ...(manage ? ['Create campaign'] : []), 'Report', ...(ads ? ['Ad analysis'] : []), 'Account & sync'];
   }
   if (data.providerKey === 'nexcall') return ['Report', ...CALL_YATRI_TABS, 'Account & sync'];
   return ['Records', ...(data.webhookPath ? ['Webhook'] : []), 'Account & sync'];
@@ -3860,6 +3861,90 @@ function syncLength(job) {
   if (!job.startedAt || !job.finishedAt) return '—';
   const seconds = Math.max(0, Math.round((new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime()) / 1000));
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+const LEAD_STAGES = ['all', 'new', 'contacted', 'qualified', 'site_visit', 'negotiation', 'booked', 'lost', 'unqualified'];
+
+function ConnectionLeads({ id, google, canImport }) {
+  const { data, loading, error, reload } = useResource(`/api/connections/${id}/leads`);
+  const navigate = useNavigate();
+  const [query, setQuery] = useState('');
+  const [stage, setStage] = useState('all');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const items = data?.items || [];
+  const shown = items
+    .filter((row) => stage === 'all' || row.status === stage)
+    .filter((row) => matches(query, row.fullName, row.phone, row.email, row.city, row.campaignName, row.adName, row.assignedTo));
+  const counts = data?.counts;
+
+  async function importNow() {
+    setBusy(true);
+    setNote('');
+    try {
+      const result = await api.post('/api/ads-agent/leads/import', {});
+      setNote(`${num(result.created)} new leads, ${num(result.matched)} matched to existing leads${result.skipped ? `, ${num(result.skipped)} without a phone number` : ''}.`);
+      reload();
+    } catch (err) {
+      setNote(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (google) {
+    return (
+      <div className="empty">
+        <strong>Google Ads leads are not linked yet.</strong>
+        <p className="quiet">Only Meta lead form leads are brought into AIRO today. Leads you add by hand are on the <Link to="/app/growth/leads">Leads</Link> page.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="stack">
+      <section className="panel">
+        <header>
+          <h2>Leads from this account</h2>
+          {canImport ? <button className="btn" type="button" disabled={busy} onClick={importNow}>{busy ? 'Importing…' : 'Import leads now'}</button> : null}
+        </header>
+        <p className="quiet">
+          Meta lead form leads are imported every 30 minutes and saved in Leads. A lead whose phone number is already in Leads is matched to that lead, not added again.
+          {counts ? ` So far: ${num(counts.created)} added, ${num(counts.matched)} matched${counts.skipped ? `, ${num(counts.skipped)} skipped for having no phone number` : ''}.` : ''}
+        </p>
+        {note ? <p className="quiet">{note}</p> : null}
+      </section>
+      <State loading={loading} error={error} onRetry={reload} empty={data && !items.length ? { title: 'No leads from this account yet', body: 'Leads show up here after a Meta lead form ad gets a submission and the import runs.' } : null}>
+        {items.length ? (
+          <section className="panel">
+            <div className="cy-tab-head">
+              <div className="chip-tabs">
+                {LEAD_STAGES.map((key) => (
+                  <button key={key} type="button" className={stage === key ? 'is-on' : ''} onClick={() => setStage(key)}>
+                    {key === 'all' ? `All · ${num(items.length)}` : `${label(key)} · ${num(items.filter((row) => row.status === key).length)}`}
+                  </button>
+                ))}
+              </div>
+              <SearchBox value={query} onChange={setQuery} placeholder="Search name, phone, campaign, ad" count={shown.length} />
+            </div>
+            {items.length >= 200 ? <p className="quiet cy-note">Showing the latest 200. Open Leads for the full list.</p> : null}
+            <Table
+              onRow={(row) => navigate(`/app/growth/leads/${row.id}`)}
+              columns={[
+                { key: 'name', label: 'Lead', render: (row) => <><strong>{row.fullName}</strong><small>{[row.phone, row.city].filter(Boolean).join(' · ')}</small></> },
+                { key: 'status', label: 'Stage', render: (row) => <Badge value={row.status} /> },
+                { key: 'campaign', label: 'Campaign', render: (row) => <>{row.campaignName || (row.campaignId ? `Campaign ${row.campaignId}` : '—')}{row.adName ? <small>{row.adName}</small> : null}</> },
+                { key: 'submitted', label: 'Submitted', render: (row) => when(row.submittedAt || row.createdAt) },
+                { key: 'outcome', label: 'In Leads', render: (row) => (row.outcome === 'matched' ? 'Already there' : 'Added') },
+                { key: 'assigned', label: 'Owner', render: (row) => row.assignedTo || 'Unassigned' }
+              ]}
+              rows={shown}
+            />
+          </section>
+        ) : null}
+      </State>
+    </div>
+  );
 }
 
 function ConnectionAccount({ data }) {
@@ -4012,6 +4097,7 @@ export function ConnectionDetail() {
                 <GoogleAdsManager key={id} id={id} data={data} canManage={can('connections.manage')} reload={reload} section={inManager ? section : 'Overview'} onSection={setSection} />
               </div>
             ) : null}
+            {meta && section === 'Leads' ? <ConnectionLeads id={id} google={google} canImport={metaOnly && can('campaigns.update')} /> : null}
             {meta && section === 'Ad analysis' ? <AnalysisPanel connectionId={id} /> : null}
             {metaOnly && section === 'Lead quality' ? <QualityPanel connectionId={id} canManage={can('campaigns.update')} /> : null}
             {metaOnly && section === 'A/B tests' ? <ExperimentsPanel connectionId={id} /> : null}

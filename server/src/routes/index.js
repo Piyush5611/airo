@@ -230,6 +230,9 @@ client.post('/connections/api', requirePermission('connections.manage'), validat
 client.get('/connections/:id', requirePermission('connections.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.detail(req.auth, req.params.id));
 }));
+client.get('/connections/:id/leads', requirePermission('connections.view'), requirePermission('leads.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.connectionLeads(req.auth, req.params.id));
+}));
 client.patch('/connections/:id', requirePermission('connections.manage'), validate(schemas.idParams.merge(schemas.configSchema)), asyncHandler(async (req, res) => {
   ok(res, await connections.updateConfig(req.auth, req, req.params.id));
 }));

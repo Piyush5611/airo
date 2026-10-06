@@ -13,7 +13,12 @@ Significant structural changes only. Newest first.
 - **Change (client):** `MetaAdsManager`, `GoogleAdsManager` and `CallYatriView` take an optional `section` prop and render only that part. They stay mounted behind a `hidden` wrapper, so a half-filled create wizard is kept when switching tabs. After a create, the page moves to Campaigns.
 - **Change (client):** New `ConnectionAccount` tab: account facts, sync history (`jobs`), open and resolved errors, sync log lines, and links to the pages that use the connection. It uses fields the detail API already returned.
 - **Change:** `AnalysisPanel`, `QualityPanel` and `ExperimentsPanel` accept `connectionId` and show only that account's rows; counts and totals are recalculated from those rows. Analysis items now carry `connectionId`. Scores stay ranked against all accounts of the same platform and currency.
-- **Migration/API impact:** None.
+- **Change:** Leads tab on Meta Ads and Google Ads connections. New `GET /api/connections/:id/leads` (`connections.view` and `leads.view`) in `connectionService.connectionLeads`.
+  - It lists the latest 200 leads from `ad_lead_imports` for that connection, joined to `leads`, with campaign and ad names from `integration_objects`. The Leads page scope (assigned or team) is applied the same way.
+  - Outcome counts (added, matched, skipped) are only returned to users with full lead scope.
+  - The client has stage chips, search and an "Import leads now" button (`campaigns.update`); a row opens the lead.
+  - Google Ads leads are not imported yet, so that tab says so instead of showing anything.
+- **Migration/API impact:** One new read-only endpoint. No migration.
 
 ### 2026-10-06 (Ad analysis: score and rank every ad)
 

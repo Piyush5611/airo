@@ -7,6 +7,7 @@ import { attachMetaPages, createMetaAd, createMetaCampaign as createOnMeta, edit
 import { verifyProviderKey } from '../integrations/verify.js';
 import { decryptJson, encryptJson, randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
+import { leadScope } from '../utils/scope.js';
 import * as repo from '../repositories/connectionRepo.js';
 import { recordAudit } from './auditService.js';
 import { refreshOrganization } from './intelligenceService.js';
@@ -225,6 +226,25 @@ export async function callYatriStats(auth, id, requestedDay) {
 }
 
 const RECORD_PULLS = { calls: nexcallCalls, followups: nexcallFollowups, leads: nexcallLeads };
+
+export async function connectionLeads(auth, id) {
+  const connection = await repo.getConnection(auth.organizationId, id);
+  if (!connection) throw new ApiError(404, 'Connection not found.', 'not_found');
+  if (connection.providerKey !== 'meta_ads' && connection.providerKey !== 'google_ads') {
+    throw new ApiError(422, 'Leads are only linked for ad accounts.', 'validation_error');
+  }
+  if (connection.providerKey === 'google_ads') {
+    return { linked: false, items: [], counts: { created: 0, matched: 0, skipped: 0 } };
+  }
+  const scope = leadScope(auth);
+  const [items, outcomes] = await Promise.all([
+    repo.adLeads({ organizationId: auth.organizationId, connectionId: connection.id, scopeSql: scope.sql, scopeParams: scope.params, limit: 200 }),
+    scope.sql ? Promise.resolve([]) : repo.adLeadCounts(auth.organizationId, connection.id)
+  ]);
+  const counts = { created: 0, matched: 0, skipped: 0 };
+  for (const row of outcomes) counts[row.outcome] = Number(row.total);
+  return { linked: true, items, counts: scope.sql ? null : counts };
+}
 
 export async function callYatriRecords(auth, id, kind, requestedDay) {
   const connection = await repo.getConnection(auth.organizationId, id);

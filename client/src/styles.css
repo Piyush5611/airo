@@ -595,18 +595,70 @@ fieldset.form-grid { border: 0; padding: 0; margin: 0; min-width: 0; }
 .campaign-name strong { font-weight: 600; color: var(--ink); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .campaign-name small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 tr.is-clickable:hover .campaign-name strong { color: var(--accent-deep); }
-.ads-table td { padding: 14px 10px; }
-.ads-table th { padding: 10px; }
-.ads-table td:not(:first-child) { white-space: nowrap; }
-.ads-table td:first-child { width: 46%; }
-.ads-table .is-empty { color: var(--faint); }
-.row-buttons { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: nowrap; }
-.btn.is-xs { min-height: 30px; padding: 0 10px; font-size: 12px; border-radius: 8px; }
-.btn.is-go { color: #0f7a4a; border-color: #bfe6d1; background: #f1fbf6; }
-.btn.is-go:hover { border-color: #8fd3b0; }
+.ads-table table { border-collapse: separate; border-spacing: 0 8px; margin-top: -4px; }
+.ads-table th { padding: 4px 14px; border: 0; }
+.ads-table td { padding: 14px; background: white; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; transition: background 0.15s, border-color 0.15s; }
+.ads-table td:first-child { border-left: 1px solid var(--line); border-radius: 14px 0 0 14px; }
+.ads-table td:last-child { border-right: 1px solid var(--line); border-radius: 0 14px 14px 0; text-align: right; }
+.ads-table td[data-label="Campaign"], .ads-table td[data-label="Ad"], .ads-table td[data-label="Ad set"] { width: 44%; white-space: normal; }
+.ads-table td[data-label="On / off"] { width: 64px; }
+.ads-table tr.is-clickable:hover td { background: #fbfaff; border-color: #d9d4ff; }
+.ads-table .is-empty, .results-idle { color: var(--faint); font-size: 12px; }
+.results-idle { display: inline-flex; align-items: center; gap: 6px; }
+.results-idle::before { content: ''; width: 14px; height: 2px; border-radius: 2px; background: var(--line-strong); }
+
+.campaign-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.campaign-avatar { flex: none; width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }
+.campaign-avatar.tone-0 { background: #eeebff; color: #4b3fe0; }
+.campaign-avatar.tone-1 { background: #e6f6ef; color: #12805a; }
+.campaign-avatar.tone-2 { background: #fff1e5; color: #c25a0c; }
+.campaign-avatar.tone-3 { background: #e8f1fd; color: #1f62c4; }
+.campaign-avatar.tone-4 { background: #fdebf3; color: #b8306f; }
+.campaign-avatar.tone-5 { background: #eef3f6; color: #3d5566; }
+.row-note { display: block; margin-top: 4px; font-size: 12px; font-weight: 600; white-space: normal; }
+.row-note.is-good { color: #12805a; }
+.row-note.is-warn { color: #b25e09; }
+.row-note.is-bad { color: #c2312f; }
+
+.delivery-pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
+.delivery-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.delivery-pill.is-live { color: #0f7a4a; background: #e9f8f0; border-color: #c4ead6; }
+.delivery-pill.is-live i { box-shadow: 0 0 0 0 rgba(15, 122, 74, 0.45); animation: live-pulse 1.8s infinite; }
+.delivery-pill.is-paused { color: #8a5a00; background: #fff6e0; border-color: #f6e2ae; }
+.delivery-pill.is-review { color: #1f62c4; background: #ebf3fe; border-color: #cddffa; }
+.delivery-pill.is-issue { color: #c2312f; background: #fdeeee; border-color: #f6cfcf; }
+.delivery-pill.is-off { color: var(--muted); background: var(--surface-2); border-color: var(--line); }
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(15, 122, 74, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(15, 122, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(15, 122, 74, 0); }
+}
+
+.status-switch { position: relative; width: 40px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: #d5dae4; cursor: pointer; transition: background 0.2s; flex: none; }
+.status-switch span { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgba(22, 27, 46, 0.25); transition: transform 0.2s; }
+.status-switch.is-on { background: #1a9a62; }
+.status-switch.is-on span { transform: translateX(18px); }
+.status-switch:hover:not(:disabled) { filter: brightness(0.96); }
+.status-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status-switch:disabled { cursor: not-allowed; opacity: 0.55; }
+.status-switch.is-pending { opacity: 1; cursor: wait; background: #c9c3ff; }
+.status-switch.is-pending span { animation: switch-wait 0.9s ease-in-out infinite alternate; }
+@keyframes switch-wait { from { transform: translateX(0); } to { transform: translateX(18px); } }
+
+.stack-cell { display: grid; gap: 2px; }
+.stack-cell strong { font-weight: 650; color: var(--ink); }
+.stack-cell strong em { font-style: normal; font-weight: 500; color: var(--muted); font-size: 12px; }
+.stack-cell small { color: var(--muted); font-size: 12px; }
+
+.icon-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line); background: white; color: var(--ink-soft); font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.icon-btn svg { width: 14px; height: 14px; }
+.icon-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-deep); background: var(--accent-soft); }
+.icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 @media (max-width: 860px) {
-  .ads-table td:first-child { width: auto; }
-  .ads-table td:not(:first-child) { white-space: normal; }
+  .ads-table table { border-spacing: 0; }
+  .ads-table td, .ads-table td:first-child, .ads-table td:last-child { border: 0; border-radius: 0; background: transparent; white-space: normal; width: auto; text-align: right; }
+  .ads-table tr { border: 1px solid var(--line) !important; border-radius: 14px; margin-bottom: 10px; background: white; }
   .campaign-name { max-width: none; text-align: right; }
 }
 .spend-name.is-link { border: 0; background: none; padding: 0; text-align: left; color: var(--ink); cursor: pointer; font: inherit; font-weight: 600; }

@@ -740,29 +740,142 @@ function AdsPerformance({ brand, report, busy, error, range, onRange, fallbackCu
 
 const GOAL_PART = /^(leads|engagement|traffic|sales|awareness|messages)\b/i;
 
-function CampaignName({ name, sub }) {
+function CampaignAvatar({ name }) {
+  const text = String(name || '').trim();
+  const initials = text.split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase() || '?';
+  let hash = 0;
+  for (const char of text) hash = (hash * 31 + char.charCodeAt(0)) % 997;
+  return <span className={`campaign-avatar tone-${hash % 6}`} aria-hidden="true">{initials}</span>;
+}
+
+function CampaignName({ name, sub, avatar, note }) {
   const parts = String(name || '').split(' | ').map((part) => part.trim()).filter(Boolean);
   const extra = sub ? parts.slice(1).filter((part) => !GOAL_PART.test(part)) : parts.slice(1);
   const details = [sub, ...extra].filter(Boolean);
-  return (
+  const body = (
     <span className="campaign-name" title={name || ''}>
       <strong>{parts[0] || '—'}</strong>
       {details.length ? <small>{details.join(' · ')}</small> : null}
+      {note ? <span className={`row-note is-${note.tone}`}>{note.text}</span> : null}
     </span>
   );
+  if (!avatar) return body;
+  return <span className="campaign-cell"><CampaignAvatar name={parts[0] || name} />{body}</span>;
 }
 
-function Cell({ value }) {
-  return value === '—' || value == null || value === '' ? <span className="is-empty">—</span> : value;
+const DELIVERY = {
+  ACTIVE: ['Live', 'is-live'],
+  ENABLED: ['Live', 'is-live'],
+  PAUSED: ['Paused', 'is-paused'],
+  CAMPAIGN_PAUSED: ['Campaign paused', 'is-paused'],
+  ADSET_PAUSED: ['Ad set paused', 'is-paused'],
+  IN_PROCESS: ['Processing', 'is-review'],
+  PENDING_REVIEW: ['In review', 'is-review'],
+  PENDING_BILLING_INFO: ['Needs payment method', 'is-issue'],
+  WITH_ISSUES: ['Has issues', 'is-issue'],
+  DISAPPROVED: ['Rejected', 'is-issue'],
+  ARCHIVED: ['Archived', 'is-off'],
+  DELETED: ['Deleted', 'is-off'],
+  REMOVED: ['Removed', 'is-off']
+};
+
+function DeliveryPill({ status, delivery }) {
+  const key = String(status === 'PAUSED' ? 'PAUSED' : delivery || status || '').toUpperCase();
+  const [text, tone] = DELIVERY[key] || [label(key.toLowerCase()) || 'Unknown', 'is-off'];
+  return <span className={`delivery-pill ${tone}`}><i />{text}</span>;
 }
 
-function RowActions({ busy, active, onEdit, onToggle }) {
+function StatusSwitch({ on, pending, disabled, name, onToggle }) {
   return (
-    <span className="row-buttons" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-      <button className="btn is-xs" type="button" disabled={busy} onClick={onEdit}>Edit</button>
-      <button className={`btn is-xs ${active ? '' : 'is-go'}`} type="button" disabled={busy} onClick={onToggle}>{active ? 'Pause' : 'Turn on'}</button>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={`${on ? 'Pause' : 'Turn on'} ${name || 'campaign'}`}
+      title={pending ? 'Updating…' : on ? 'On · click to pause' : 'Off · click to turn on'}
+      className={`status-switch${on ? ' is-on' : ''}${pending ? ' is-pending' : ''}`}
+      disabled={disabled || pending}
+      onClick={(event) => { event.stopPropagation(); onToggle(); }}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <span />
+    </button>
+  );
+}
+
+function BudgetCell({ amount, kind, currency }) {
+  if (amount == null || amount === '' || !Number(amount)) return <span className="is-empty">Set on ad sets</span>;
+  return (
+    <span className="stack-cell">
+      <strong>{money(amount, currency)}</strong>
+      <small>{kind === 'lifetime' ? 'lifetime' : 'per day'}</small>
     </span>
   );
+}
+
+function ResultsCell({ spend, clicks, results, resultLabel, currency }) {
+  if (!Number(spend) && !Number(clicks) && !Number(results)) return <span className="results-idle">Not run yet</span>;
+  return (
+    <span className="stack-cell">
+      <strong>{money(spend, currency)} <em>spent</em></strong>
+      <small>{countCell(clicks)} clicks · {countCell(results)} {resultLabel}</small>
+    </span>
+  );
+}
+
+function EditButton({ disabled, onClick }) {
+  return (
+    <button
+      className="icon-btn"
+      type="button"
+      disabled={disabled}
+      onClick={(event) => { event.stopPropagation(); onClick(); }}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.3 2.3a1.5 1.5 0 0 1 2.1 0l.3.3a1.5 1.5 0 0 1 0 2.1L6 12.4 2.8 13.2l.8-3.2z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg>
+      Edit
+    </button>
+  );
+}
+
+function useStatusToggle({ endpoint, data, reload, platform }) {
+  const [override, setOverride] = useState({});
+  const [pending, setPending] = useState('');
+  const [note, setNote] = useState(null);
+  useEffect(() => { setOverride({}); }, [data.lastSyncAt]);
+  async function toggle(row, next, live) {
+    const id = String(row.externalId);
+    if (next === live) {
+      const budget = Number(row.fields?.budget) ? ` up to ${money(row.fields.budget, row.fields.currency)}${row.fields.budgetKind === 'lifetime' ? ' in total' : ' a day'}` : '';
+      if (!window.confirm(`Turn on "${row.name}"?\n\nIt will start delivering on ${platform} and spending${budget}.`)) return;
+    }
+    setPending(id);
+    setNote(null);
+    try {
+      const saved = await api.post(endpoint, { campaignId: id, status: next });
+      setOverride((current) => ({ ...current, [id]: next }));
+      const syncFailed = /sync failed/i.test(saved?.notice || '');
+      setNote({
+        id,
+        tone: syncFailed ? 'warn' : 'good',
+        text: next === live
+          ? `Turned on in ${platform}. Delivery can take a few minutes to start.${syncFailed ? ' The refresh after it failed; press Sync.' : ''}`
+          : `Paused in ${platform}.${syncFailed ? ' The refresh after it failed; press Sync.' : ''}`
+      });
+      reload();
+    } catch (err) {
+      setNote({ id, tone: 'bad', text: err.message });
+    } finally {
+      setPending('');
+    }
+  }
+  return {
+    statusOf: (row) => override[String(row.externalId)] || row.fields?.status,
+    deliveryOf: (row) => override[String(row.externalId)] || row.fields?.delivery,
+    noteFor: (row) => (note?.id === String(row.externalId) ? note : null),
+    pending,
+    toggle
+  };
 }
 
 function resultCards(rows, resultKey, resultLabel, currency) {
@@ -1641,6 +1754,7 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
   const [range, setRange] = useState('LAST_30_DAYS');
   const [audienceMetric, setAudienceMetric] = useState('spend');
   const [opened, setOpened] = useState(null);
+  const toggler = useStatusToggle({ endpoint: `/api/connections/${id}/meta/status`, data, reload, platform: 'Meta' });
   const { report, busy: reportBusy, error: reportError } = useAdsReport(id, 'meta', range);
   const publishMode = useRef(false);
   const steps = ['Campaign', 'Ad set', 'Ad', 'Review'];
@@ -1868,21 +1982,6 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
       setCreating(false);
       onSection?.('Campaigns');
       setNotice(saved?.notice || (publishMode.current ? 'Ad published on Meta.' : 'Ad saved on Meta as paused.'));
-      reload();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function setCampaignStatus(campaignId, next) {
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      const saved = await api.post(`/api/connections/${id}/meta/status`, { campaignId, status: next });
-      setNotice(saved?.notice || 'Campaign updated in Meta Ads.');
       reload();
     } catch (err) {
       setError(err.message);
@@ -2417,25 +2516,29 @@ function MetaAdsManager({ id, data, canManage, reload, section, onSection }) {
       ) : rows.length ? (
         <div className="ads-table">
         <Table onRow={openCampaign} columns={view === 'Campaigns' ? [
-          { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} sub={metaObjective(row.fields?.objective, row.fields?.goal === 'messages')} /> },
-          { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.status || '').toLowerCase()} /> },
-          { key: 'budget', label: 'Budget', render: (row) => <Cell value={money(row.fields?.budget, row.fields?.currency)} /> },
-          { key: 'spend', label: 'Spend', render: (row) => <Cell value={money(row.fields?.spend, row.fields?.currency)} /> },
-          { key: 'clicks', label: 'Clicks', render: (row) => <Cell value={countCell(row.fields?.clicks)} /> },
-          { key: 'leads', label: 'Leads', render: (row) => <Cell value={countCell(row.fields?.leads)} /> },
-          { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ACTIVE' || row.fields?.status === 'PAUSED') ? (
-            <RowActions
-              busy={busy}
-              active={row.fields.status === 'ACTIVE'}
-              onEdit={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })}
-              onToggle={() => setCampaignStatus(row.externalId, row.fields.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE')}
-            />
+          { key: 'toggle', label: 'On / off', render: (row) => {
+            const status = toggler.statusOf(row);
+            return canManage && (status === 'ACTIVE' || status === 'PAUSED') ? (
+              <StatusSwitch
+                on={status === 'ACTIVE'}
+                pending={toggler.pending === String(row.externalId)}
+                disabled={Boolean(toggler.pending) || busy}
+                name={row.name}
+                onToggle={() => toggler.toggle(row, status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE', 'ACTIVE')}
+              />
+            ) : null;
+          } },
+          { key: 'name', label: 'Campaign', render: (row) => <CampaignName avatar name={row.name} sub={metaObjective(row.fields?.objective, row.fields?.goal === 'messages')} note={toggler.noteFor(row)} /> },
+          { key: 'status', label: 'Delivery', render: (row) => <DeliveryPill status={toggler.statusOf(row)} delivery={toggler.deliveryOf(row)} /> },
+          { key: 'budget', label: 'Budget', render: (row) => <BudgetCell amount={row.fields?.budget} kind={row.fields?.budgetKind} currency={row.fields?.currency} /> },
+          { key: 'results', label: 'Results · 30 days', render: (row) => <ResultsCell spend={row.fields?.spend} clicks={row.fields?.clicks} results={row.fields?.leads} resultLabel="leads" currency={row.fields?.currency} /> },
+          { key: 'action', label: '', render: (row) => canManage ? (
+            <EditButton disabled={busy} onClick={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })} />
           ) : null }
         ] : [
-          { key: 'name', label: view === 'Ads' ? 'Ad' : 'Ad set', render: (row) => <CampaignName name={row.name} /> },
-          { key: 'campaign', label: 'Campaign', render: (row) => campaignTitle.get(view === 'Ad sets' ? row.parent : row.fields?.campaignId || adsetCampaign.get(row.parent)) || '—' },
-          { key: 'status', label: 'Status', render: (row) => <Badge value={String(row.fields?.delivery || row.fields?.status || '').toLowerCase().replace(/_/g, ' ')} /> },
-          ...(view === 'Ad sets' ? [{ key: 'budget', label: 'Budget', render: (row) => <Cell value={money(row.fields?.budget, row.fields?.currency)} /> }] : [])
+          { key: 'name', label: view === 'Ads' ? 'Ad' : 'Ad set', render: (row) => <CampaignName avatar name={row.name} sub={campaignTitle.get(view === 'Ad sets' ? row.parent : row.fields?.campaignId || adsetCampaign.get(row.parent))?.split(' | ')[0]} /> },
+          { key: 'status', label: 'Delivery', render: (row) => <DeliveryPill status={row.fields?.status} delivery={row.fields?.delivery} /> },
+          ...(view === 'Ad sets' ? [{ key: 'budget', label: 'Budget', render: (row) => <BudgetCell amount={row.fields?.budget} kind={row.fields?.budgetKind} currency={row.fields?.currency} /> }] : [])
         ]} rows={rows} />
         </div>
       ) : (
@@ -2483,6 +2586,7 @@ function GoogleAdsManager({ id, data, canManage, reload, section, onSection }) {
   const groupCampaign = new Map(adGroups.map((row) => [row.externalId, campaignName.get(row.parent) || '—']));
   const groupName = new Map(adGroups.map((row) => [row.externalId, row.name]));
   const steps = ['Campaign', 'Targeting', 'Keywords', 'Ad', 'Review'];
+  const toggler = useStatusToggle({ endpoint: `/api/connections/${id}/google/status`, data, reload, platform: 'Google Ads' });
   const [view, setView] = useState('Campaigns');
   const [step, setStep] = useState(0);
   const [name, setName] = useState('');
@@ -2652,21 +2756,6 @@ function GoogleAdsManager({ id, data, canManage, reload, section, onSection }) {
       setCreating(false);
       onSection?.('Campaigns');
       setNotice(saved?.notice || 'Campaign saved on Google Ads.');
-      reload();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function setCampaignStatus(campaignId, status) {
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      const saved = await api.post(`/api/connections/${id}/google/status`, { campaignId, status });
-      setNotice(saved?.notice || 'Campaign updated in Google Ads.');
       reload();
     } catch (err) {
       setError(err.message);
@@ -3023,19 +3112,24 @@ function GoogleAdsManager({ id, data, canManage, reload, section, onSection }) {
         listed.Campaigns.length ? (
           <div className="ads-table">
           <Table onRow={(row) => openCampaign(row.externalId, row.name)} columns={[
-            { key: 'name', label: 'Campaign', render: (row) => <CampaignName name={row.name} sub={label(String(row.fields?.channel || '').toLowerCase())} /> },
-            { key: 'status', label: 'Status', render: (row) => <Badge value={googleStatus(row.fields?.status)} /> },
-            { key: 'budget', label: 'Daily budget', render: (row) => <Cell value={money(row.fields?.budget, row.fields?.currency)} /> },
-            { key: 'spend', label: 'Spend', render: (row) => <Cell value={money(row.fields?.spend, row.fields?.currency)} /> },
-            { key: 'clicks', label: 'Clicks', render: (row) => <Cell value={countCell(row.fields?.clicks)} /> },
-            { key: 'conversions', label: 'Conversions', render: (row) => <Cell value={countCell(row.fields?.conversions)} /> },
-            { key: 'action', label: '', render: (row) => canManage && (row.fields?.status === 'ENABLED' || row.fields?.status === 'PAUSED') ? (
-              <RowActions
-                busy={busy}
-                active={row.fields.status === 'ENABLED'}
-                onEdit={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })}
-                onToggle={() => setCampaignStatus(row.externalId, row.fields.status === 'ENABLED' ? 'PAUSED' : 'ENABLED')}
-              />
+            { key: 'toggle', label: 'On / off', render: (row) => {
+              const status = toggler.statusOf(row);
+              return canManage && (status === 'ENABLED' || status === 'PAUSED') ? (
+                <StatusSwitch
+                  on={status === 'ENABLED'}
+                  pending={toggler.pending === String(row.externalId)}
+                  disabled={Boolean(toggler.pending) || busy}
+                  name={row.name}
+                  onToggle={() => toggler.toggle(row, status === 'ENABLED' ? 'PAUSED' : 'ENABLED', 'ENABLED')}
+                />
+              ) : null;
+            } },
+            { key: 'name', label: 'Campaign', render: (row) => <CampaignName avatar name={row.name} sub={label(String(row.fields?.channel || '').toLowerCase())} note={toggler.noteFor(row)} /> },
+            { key: 'status', label: 'Delivery', render: (row) => <DeliveryPill status={toggler.statusOf(row)} delivery={toggler.statusOf(row)} /> },
+            { key: 'budget', label: 'Budget', render: (row) => <BudgetCell amount={row.fields?.budget} kind="daily" currency={row.fields?.currency} /> },
+            { key: 'results', label: 'Results · 30 days', render: (row) => <ResultsCell spend={row.fields?.spend} clicks={row.fields?.clicks} results={row.fields?.conversions} resultLabel="conversions" currency={row.fields?.currency} /> },
+            { key: 'action', label: '', render: (row) => canManage ? (
+              <EditButton disabled={busy} onClick={() => setOpened({ id: String(row.externalId), name: row.name, currency, edit: true })} />
             ) : null }
           ]} rows={listed.Campaigns} />
           </div>

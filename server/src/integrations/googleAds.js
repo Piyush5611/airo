@@ -331,6 +331,17 @@ export async function pullGoogleAds(input) {
   };
 }
 
+export async function googleCampaignList(input) {
+  const rows = await search(context(input), "SELECT campaign.id, campaign.name, campaign.status, campaign.primary_status, campaign.advertising_channel_type FROM campaign WHERE campaign.status != 'REMOVED' ORDER BY campaign.id DESC LIMIT 500");
+  return rows.map((row) => ({
+    id: String(row.campaign?.id || ''),
+    name: String(row.campaign?.name || 'Campaign').slice(0, 120),
+    status: String(row.campaign?.status || ''),
+    delivery: String(row.campaign?.primaryStatus || ''),
+    channel: String(row.campaign?.advertisingChannelType || '')
+  }));
+}
+
 function reportRow(metrics = {}) {
   return {
     spend: major(metrics.costMicros || 0),

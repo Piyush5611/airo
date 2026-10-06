@@ -595,10 +595,14 @@ async function roster(organizationId) {
 
 const REPORT_ASK = /report|nexcall|aaj|today|lead|call|summary|data|hisab|employee|team|hafte|week|mahine|month|kal\b|yesterday|filter|kitne|performance|booking/i;
 
+const OTHER_TOPIC = /\b(campaigns?|ads?|google|meta|facebook|instagram|competitors?|keywords?|headlines?|publish|cancel)\b/i;
+const CALL_TOPIC = /\b(calls?|calling|call yatri|nexcall|caller|dial)\b/i;
+
 export function reportRequest(messages) {
   const users = [...(messages || [])].filter((row) => row.role === 'user');
   for (let index = users.length - 1; index >= 0; index -= 1) {
     const content = String(users[index].content || '').trim();
+    if (OTHER_TOPIC.test(content) && !CALL_TOPIC.test(content) && !/\bleads?\b/i.test(content)) return '';
     if (REPORT_ASK.test(content)) return content;
   }
   return '';

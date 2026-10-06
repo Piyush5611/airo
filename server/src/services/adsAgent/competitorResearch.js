@@ -129,12 +129,20 @@ async function googleSection(organizationId, topic, locations, english) {
   const cities = locations.map((item) => String(item.name || '').split(',')[0].toLowerCase()).filter(Boolean);
   const seeds = [topic.toLowerCase(), ...cities.slice(0, 2).map((city) => `${topic.toLowerCase()} ${city}`)];
   let ideas = [];
+  let failure = '';
   try {
     ideas = await googleKeywordIdeas(account.input, { seeds, locations: locations.map((item) => item.id).filter(Boolean) });
-  } catch {
-    ideas = [];
+  } catch (error) {
+    failure = String(error?.message || 'unknown error').slice(0, 200);
   }
-  if (!ideas.length) return section(title, say(english, `Keyword Planner returned no data for "${topic}".`, `"${topic}" ke liye Keyword Planner ne data nahi diya.`));
+  if (failure) {
+    return section(title, [
+      say(english, 'Google Keyword Planner refused the request:', 'Google Keyword Planner ne request mana kar di:'),
+      `> ${failure}`,
+      hint(say(english, 'Keyword Planner usually needs a Google Ads developer token with Basic or Standard access. Test or Explorer access is often not enough.', 'Keyword Planner ke liye aam taur pe Basic ya Standard access wala developer token chahiye. Test ya Explorer access se aksar kaam nahi chalta.'))
+    ]);
+  }
+  if (!ideas.length) return section(title, say(english, `Keyword Planner returned no data for "${topic}". Try a broader term, e.g. "flats in noida".`, `"${topic}" ke liye Keyword Planner ne data nahi diya. Broad term try karo, jaise "flats in noida".`));
   const rows = ideas.filter((row) => row.searches != null).sort((a, b) => Number(b.searches) - Number(a.searches)).slice(0, 8);
   const high = ideas.filter((row) => row.competition === 'HIGH').length;
   const medium = ideas.filter((row) => row.competition === 'MEDIUM').length;
@@ -172,11 +180,11 @@ function profileLinks(profile, english) {
   );
 }
 
-export async function competitorReply({ organizationId, conversationId, text }) {
+export async function competitorReply({ organizationId, conversationId, text, topic: askedTopic = '' }) {
   const english = !HINGLISH.test(text);
   const draft = await draftProduct(conversationId);
   const profile = await businessProfile(organizationId);
-  const topic = competitorTopic(text) || competitorTopic(draft?.product) || competitorTopic(profile?.offering || profile?.category || '');
+  const topic = competitorTopic(askedTopic) || competitorTopic(text) || competitorTopic(draft?.product) || competitorTopic(profile?.offering || profile?.category || '');
   if (topic.length < 3) {
     return card([
       say(english, 'Which product or project should I check?', 'Kis product ya project ke competitors dekhun?'),

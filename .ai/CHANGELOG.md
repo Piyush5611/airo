@@ -2,6 +2,21 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-06 (WhatsApp AI router)
+
+- **Change:** New `services/whatsappIntent.js`. For registered numbers (text messages, not photos), `classifyMessage` sends the last 8 chat lines plus the open ad draft step to `structuredLlm` (zod schema, purposes `assistant → whatsapp → ads`, 9 s timeout). It returns `{intent, request, platform, topic}`. Intents: `ad_setup_answer`, `start_google_ad`, `start_meta_ad`, `cancel_ad_setup`, `competitors`, `campaign_list`, `ads_report`, `ads_advice`, `call_report`, `crm_report`, `greeting`, `other`.
+- **Change (same day):** `whatsappService.routeByIntent` sends each intent to the existing handlers. Draft handlers get `force` (skip the regex fall-through). Starts go to only that platform. Report intents replace the latest line with `"<standalone request> | <original>"` so the existing card parsers read the right period or person. `replyWhatsapp({ intent })` only runs the matching card: `whatsappReportCard(..., { only: 'ads'|'call' })` and `adsAdviceReply(..., { force })`. The model never writes figures; data still comes from the cards and report facts.
+- **Fallback:** If the router fails or times out, the earlier regex flow runs unchanged.
+- **Migration/API impact:** None. Adds one small model call per inbound WhatsApp text (about 2-4 s with a lite model).
+
+### 2026-10-06 (WhatsApp routing fixes)
+
+- **Fix:** A Google or Meta draft waiting for approval no longer answers every message with "reply haan or nahi". Any other message falls through to the normal assistant and the draft stays. Google intake steps also release report/call/"kitne" questions.
+- **Fix:** `reportRequest` (whatsappReport.js) stops at a newer ads/campaign/competitor message without call or lead words. "Kya hua" after an ads question no longer re-runs an old Call Yatri report with "Google Ads" as a lead source filter.
+- **Change:** New `services/adsAgent/campaignCount.js` answers "how many campaigns" from the live accounts (`googleCampaignList`, `metaCampaignList`): total, active, paused and up to 10 names per platform. It runs in `whatsappService` before the draft handlers.
+- **Change:** WhatsApp model facts now include the current IST date and time. Competitor research shows Google's real Keyword Planner error instead of "no data".
+- **Migration/API impact:** None.
+
 ### 2026-10-06 (WhatsApp message design)
 
 - **Change:** New `services/adsAgent/waFormat.js` with WhatsApp formatting helpers: `header`, `section`, `bullets`, `numbered`, `field`, `options` (quote block), `hint` (italic), `step` ("Step 2/5"), `money` (₹ for INR) and `LINE`. Google and Meta chat prompts, region suggestions, plans, saved/paused/live messages and competitor research now use one card layout. The text and flow logic are unchanged. Meta fallback copy uses the same plan layout.

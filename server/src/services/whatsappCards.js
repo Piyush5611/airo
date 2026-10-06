@@ -300,9 +300,11 @@ function callCaption(visual) {
   return lines.join('\n');
 }
 
-export async function whatsappReportCard(organizationId, messages, businessName = '') {
-  const ads = await adsReportCard(organizationId, messages, businessName);
-  if (ads) return ads;
+export async function whatsappReportCard(organizationId, messages, businessName = '', { only = '' } = {}) {
+  if (only !== 'call') {
+    const ads = await adsReportCard(organizationId, messages, businessName);
+    if (ads || only === 'ads') return ads;
+  }
   const call = await callReportCard(organizationId, messages, businessName);
   if (!call) return null;
   let image = null;

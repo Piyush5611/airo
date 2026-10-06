@@ -11,6 +11,8 @@ import { replyWhatsapp } from './llmService.js';
 import { handleMetaAdChat } from './metaAdChat.js';
 import { handleGoogleAdChat } from './googleAdChat.js';
 import { competitorReply, wantsCompetitorInfo } from './adsAgent/competitorResearch.js';
+import { campaignCountReply, wantsCampaignCount } from './adsAgent/campaignCount.js';
+import { classifyMessage, withLatest } from './whatsappIntent.js';
 
 function publicBot(row) {
   if (!row) return null;
@@ -360,10 +362,21 @@ async function answerWithModel(saved) {
     }
   }
   const lastText = String([...messages].reverse().find((row) => row.role === 'user')?.content || '');
-  if (saved.recognized && saved.organizationId && wantsCompetitorInfo(lastText)) {
+  const route = saved.recognized && saved.organizationId && lastText && !imageBase64 && !imageError
+    ? await classifyMessage({ organizationId: saved.organizationId, conversationId: saved.conversationId, messages })
+    : null;
+  if (route && await routeByIntent(saved, messages, route, lastText)) return;
+  if (!route && saved.recognized && saved.organizationId && wantsCompetitorInfo(lastText)) {
     const report = await competitorReply({ organizationId: saved.organizationId, conversationId: saved.conversationId, text: lastText }).catch(() => '');
     if (report) {
       await deliverWhatsapp({ conversationId: saved.conversationId, text: report, actionTaken: 'Competitor research' });
+      return;
+    }
+  }
+  if (!route && saved.recognized && saved.organizationId && wantsCampaignCount(lastText)) {
+    const list = await campaignCountReply({ organizationId: saved.organizationId, text: lastText }).catch(() => '');
+    if (list) {
+      await deliverWhatsapp({ conversationId: saved.conversationId, text: list, actionTaken: 'Campaign list' });
       return;
     }
   }
@@ -397,11 +410,77 @@ async function answerWithModel(saved) {
     });
     return;
   }
+  await sendAnswer(saved, messages, '');
+}
+
+async function sendAdChat(saved, messages, { force = false, only = '' } = {}) {
+  const google = only === 'meta' ? null : await handleGoogleAdChat({
+    organizationId: saved.organizationId,
+    conversationId: saved.conversationId,
+    recognized: saved.recognized,
+    messages,
+    force
+  });
+  if (google?.text) {
+    await deliverWhatsapp({ conversationId: saved.conversationId, text: String(google.text).slice(0, 4000), actionTaken: 'Google ad' });
+    return true;
+  }
+  const meta = only === 'google' ? null : await handleMetaAdChat({
+    organizationId: saved.organizationId,
+    conversationId: saved.conversationId,
+    recognized: saved.recognized,
+    messages,
+    force
+  });
+  if (meta?.text) {
+    await deliverWhatsapp({ conversationId: saved.conversationId, text: String(meta.text).slice(0, 4000), actionTaken: 'Meta ad' });
+    return true;
+  }
+  return false;
+}
+
+async function routeByIntent(saved, messages, route, lastText) {
+  const { intent } = route;
+  const orgId = saved.organizationId;
+  if (intent === 'ad_setup_answer') return sendAdChat(saved, messages, { force: true });
+  if (intent === 'start_google_ad') return sendAdChat(saved, withLatest(messages, `run google ads ${lastText}`), { only: 'google' });
+  if (intent === 'start_meta_ad') return sendAdChat(saved, withLatest(messages, `run meta ads ${lastText}`), { only: 'meta' });
+  if (intent === 'cancel_ad_setup') {
+    if (await sendAdChat(saved, withLatest(messages, 'cancel'), { force: true })) return true;
+    await sendAnswer(saved, messages, 'other');
+    return true;
+  }
+  if (intent === 'competitors') {
+    const report = await competitorReply({ organizationId: orgId, conversationId: saved.conversationId, text: lastText, topic: route.topic }).catch(() => '');
+    if (!report) return false;
+    await deliverWhatsapp({ conversationId: saved.conversationId, text: report, actionTaken: 'Competitor research' });
+    return true;
+  }
+  if (intent === 'campaign_list') {
+    const platformWord = route.platform === 'google' ? ' google' : route.platform === 'meta' ? ' meta' : '';
+    const list = await campaignCountReply({ organizationId: orgId, text: `${lastText}${platformWord}` }).catch(() => '');
+    if (!list) return false;
+    await deliverWhatsapp({ conversationId: saved.conversationId, text: list, actionTaken: 'Campaign list' });
+    return true;
+  }
+  if (intent === 'greeting') {
+    if (await sendAdChat(saved, messages)) return true;
+    await sendAnswer(saved, messages, 'greeting');
+    return true;
+  }
+  const reportIntent = ['ads_report', 'call_report', 'crm_report'].includes(intent);
+  const asked = reportIntent && route.request ? withLatest(messages, `${route.request} | ${lastText}`) : messages;
+  await sendAnswer(saved, asked, intent);
+  return true;
+}
+
+async function sendAnswer(saved, messages, intent) {
   const answer = await replyWhatsapp({
     organizationId: saved.organizationId,
     recognized: saved.recognized,
     businessLabel: saved.businessLabel,
-    messages
+    messages,
+    intent
   });
   if (!answer?.text) return;
   if (answer.image?.png) {

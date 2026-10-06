@@ -190,9 +190,9 @@ export function wantsAdsAdvice(text) {
   return ADVICE_ASK.test(value) && ADS_WORD.test(value);
 }
 
-export async function adsAdviceReply(organizationId, messages) {
+export async function adsAdviceReply(organizationId, messages, { force = false } = {}) {
   const last = [...(messages || [])].reverse().find((row) => row.role === 'user');
-  if (!wantsAdsAdvice(last?.content)) return null;
+  if (!force && !wantsAdsAdvice(last?.content)) return null;
   let rows;
   try {
     rows = await repo.openDecisions(organizationId, 5);

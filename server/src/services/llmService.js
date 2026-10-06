@@ -197,6 +197,8 @@ async function whatsappFacts({ organizationId, recognized, businessLabel, messag
     [organizationId]
   ).catch(() => null);
   const name = org?.name || 'this business';
+  const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  lines.push(`Current date and time: ${now} IST. Use this for "today"; never guess another date.`);
   lines.push(businessLabel
     ? `This WhatsApp number is registered to ${name} (${businessLabel}).`
     : `This WhatsApp number is registered to ${name}.`);
@@ -261,9 +263,9 @@ STRATEGY: one or two sentences about who searches for this and why these keyword
 HEADLINE: text (write this line 8 times, one headline per line)
 DESCRIPTION: text (write this line 3 times, one description per line)`;
 
-async function adModels() {
+async function adModels(purposes = ['ads', 'whatsapp', 'assistant']) {
   const attempts = [];
-  for (const purpose of ['ads', 'whatsapp', 'assistant']) {
+  for (const purpose of purposes) {
     let row;
     try { row = await repo.connectionByPurpose(purpose); } catch (error) {
       if (schemaMissing(error)) return [];
@@ -276,8 +278,8 @@ async function adModels() {
   return attempts;
 }
 
-export async function structuredLlm({ organizationId = null, schema, system, facts, task, maxTokens = 4096 }) {
-  const attempts = await adModels();
+export async function structuredLlm({ organizationId = null, schema, system, facts, task, maxTokens = 4096, purposes }) {
+  const attempts = await adModels(purposes);
   if (!attempts.length) throw new ApiError(422, 'Connect an AI model for Ad writing on Platform AI first.', 'llm_missing');
   const brief = `${system}\nReply with one JSON object only. No markdown and no text outside the JSON.`;
   let lastError = null;
@@ -414,16 +416,21 @@ export async function writeAdPlan({ intake, publicAds, english }) {
   throw lastError;
 }
 
-export async function replyWhatsapp({ organizationId, recognized, businessLabel, messages }) {
+export async function replyWhatsapp({ organizationId, recognized, businessLabel, messages, intent = '' }) {
   if (recognized && organizationId) {
-    const advice = await adsAdviceReply(organizationId, messages).catch(() => null);
-    if (advice) return { text: advice, image: null, purpose: 'ads_agent', providerName: 'AIRO', model: 'rules' };
-    try {
-      const org = await one(`SELECT name FROM organizations WHERE id = ?`, [organizationId]);
-      const card = await whatsappReportCard(organizationId, messages, org?.name || businessLabel || '');
-      if (card?.text) return { text: card.text, image: card.image || null, purpose: 'report', providerName: 'AIRO', model: card.model };
-    } catch {
-      // The model reply below still answers with the report facts.
+    if (!intent || intent === 'ads_advice') {
+      const advice = await adsAdviceReply(organizationId, messages, { force: intent === 'ads_advice' }).catch(() => null);
+      if (advice) return { text: advice, image: null, purpose: 'ads_agent', providerName: 'AIRO', model: 'rules' };
+    }
+    if (!intent || intent === 'ads_report' || intent === 'call_report') {
+      try {
+        const org = await one(`SELECT name FROM organizations WHERE id = ?`, [organizationId]);
+        const only = intent === 'ads_report' ? 'ads' : intent === 'call_report' ? 'call' : '';
+        const card = await whatsappReportCard(organizationId, messages, org?.name || businessLabel || '', { only });
+        if (card?.text) return { text: card.text, image: card.image || null, purpose: 'report', providerName: 'AIRO', model: card.model };
+      } catch {
+        // The model reply below still answers with the report facts.
+      }
     }
   }
   let attempts;

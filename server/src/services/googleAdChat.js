@@ -14,6 +14,8 @@ const CANCEL = /^(cancel|stop|ruk|band|nahi chahiye|nahin chahiye)\b/i;
 const GREETING = /^(hi+|hello|hey|hlo|namaste|namaskar|good\s+(morning|afternoon|evening))[\s!.?]*$/i;
 const YES = /^(ok|okay|haan|han|ha|yes|y|theek|thik|done|approve|approved|save|publish|live|chalao)\b/i;
 const NO = /^(nahi|nahin|no|mat|pause|ruk)\b/i;
+const APPROVAL_REPLY = /^(haan|han|ha|yes|y|publish|live|ok|okay|nahi|nahin|no|mat|pause|ruk)\b/i;
+const AWAY = /\b(reports?|kitne|kitni|how many|kya hua|calls?)\b/i;
 const HINGLISH = /\b(kya|hai|hain|karo|chahiye|bhejo|nahi|nahin|haan|mujhe|mera|meri|chalao|banao|ruk|theek|thik|yaar|kro)\b/i;
 const STALE_HOURS = 24;
 const MAX_KEYWORDS = 15;
@@ -335,7 +337,7 @@ function intakePrompt(step, english) {
   return fmtStep(5, 5, say(english, 'Daily budget', 'Daily budget'), say(english, 'How much per day should the campaign spend?', 'Roz ka budget kitna rakhna hai?'), say(english, 'Send a number, for example 500', 'Number bhejo, jaise 500'));
 }
 
-export async function handleGoogleAdChat({ organizationId, conversationId, recognized, messages }) {
+export async function handleGoogleAdChat({ organizationId, conversationId, recognized, messages, force = false }) {
   const text = lastUser(messages);
   if (!text || !organizationId || !conversationId) return null;
   const starting = START.test(text);
@@ -371,6 +373,7 @@ export async function handleGoogleAdChat({ organizationId, conversationId, recog
   if (/^Photo \d{6,40}$/.test(text)) {
     return { text: say(english, 'Google Search ads use text only, no photo. Answer the last question in text.', 'Google Search ads mein photo nahi lagti, sirf text. Pichhle sawaal ka jawab text mein do.') };
   }
+  if (!force && (draft.step === 'approval' ? !APPROVAL_REPLY.test(text.trim()) : AWAY.test(text))) return null;
   return continueDraft(organizationId, conversationId, draft, text, english);
 }
 

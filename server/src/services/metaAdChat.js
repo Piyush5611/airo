@@ -273,7 +273,7 @@ async function rememberCampaign(organizationId, account, created, intake) {
   });
 }
 
-export async function handleMetaAdChat({ organizationId, conversationId, recognized, messages, imageBase64 = '', imageError = '' }) {
+export async function handleMetaAdChat({ organizationId, conversationId, recognized, messages, imageBase64 = '', imageError = '', force = false }) {
   const text = lastUser(messages);
   if ((!text && !imageBase64 && !imageError) || !organizationId || !conversationId) return null;
   let draft = null;
@@ -322,7 +322,7 @@ export async function handleMetaAdChat({ organizationId, conversationId, recogni
     if (needsAdSet) return attachAdSet(organizationId, conversationId, draft, english, imageBase64, imageError);
     return finishAd(organizationId, conversationId, draft.payload, text, english, imageBase64, imageError);
   }
-  if (draft && !starting && REPORT.test(text)) return null;
+  if (!force && draft && !starting && REPORT.test(text)) return null;
   if (!recognized) {
     return {
       text: say(
@@ -363,6 +363,7 @@ export async function handleMetaAdChat({ organizationId, conversationId, recogni
       )
     };
   }
+  if (!force && draft.step === 'approval' && !/^(haan|han|ha|yes|y|publish|live|nahi|nahin|no|mat|pause|ruk)\b/i.test(text.trim())) return null;
   return continueDraft(organizationId, conversationId, draft, text, messages, imageBase64, imageError);
 }
 

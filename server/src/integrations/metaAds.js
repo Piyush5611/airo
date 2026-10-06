@@ -580,6 +580,17 @@ export async function metaCampaignDetail({ apiKey, accountId }, campaignId, rang
   };
 }
 
+export async function metaCampaignList({ apiKey, accountId }) {
+  const rows = await list(`act_${actId(accountId)}/campaigns`, apiKey, { fields: 'id,name,status,effective_status,objective' });
+  return rows.map((row) => ({
+    id: String(row.id || ''),
+    name: String(row.name || 'Campaign').slice(0, 120),
+    status: String(row.status || ''),
+    delivery: String(row.effective_status || ''),
+    objective: String(row.objective || '')
+  })).filter((row) => row.status !== 'DELETED' && row.status !== 'ARCHIVED');
+}
+
 export async function pullMetaAds({ apiKey, accountId }) {
   const act = actId(accountId);
   const account = await graph(`act_${act}`, apiKey, { fields: 'id,name,currency' });

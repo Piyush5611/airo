@@ -8,6 +8,9 @@ import {
 } from '../services/adsAgent/monitorRules.js';
 import { chosenNames, hasProfileDetails, intakeFacts } from '../services/adsAgent/chatPlanner.js';
 import { competitorTopic, libraryStats, wantsCompetitorInfo } from '../services/adsAgent/competitorResearch.js';
+import { platformsAsked, statusGroups, wantsCampaignCount } from '../services/adsAgent/campaignCount.js';
+import { reportRequest } from '../services/whatsappReport.js';
+import { chatFacts, withLatest } from '../services/whatsappIntent.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 
 const profile = businessProfileSchema.parse({
@@ -306,4 +309,35 @@ test('ad library stats count advertisers and platform share', () => {
   assert.deepEqual(stats.advertisers[0], { page: 'A Homes', count: 2, firstStart: '2026-08-01' });
   assert.equal(stats.platforms.instagram, 2);
   assert.equal(stats.platforms.facebook, 2);
+});
+
+test('campaign count questions are routed, report questions are not', () => {
+  assert.equal(wantsCampaignCount('Total campaign kitne hai google ads pe'), true);
+  assert.equal(wantsCampaignCount('how many campaigns on meta'), true);
+  assert.equal(wantsCampaignCount('campaign wise report'), false);
+  assert.equal(wantsCampaignCount('campaign ke leads kitne aaye'), false);
+  assert.deepEqual(platformsAsked('Total campaign kitne hai google ads pe'), { google: true, meta: false });
+  assert.deepEqual(platformsAsked('campaigns kitne hai'), { google: true, meta: true });
+  const groups = statusGroups([{ status: 'ENABLED' }, { status: 'PAUSED' }, { status: 'ACTIVE' }, { status: 'REMOVED' }]);
+  assert.equal(groups.active.length, 2);
+  assert.equal(groups.paused.length, 1);
+  assert.equal(groups.other.length, 1);
+});
+
+test('an ads question ends an older call report request', () => {
+  const user = (content) => ({ role: 'user', content });
+  assert.equal(reportRequest([user('Call report do'), user('Total campaign kitne hai google ads pe'), user('Kya hua')]), '');
+  assert.equal(reportRequest([user('Call report do'), user('Kya hua')]), 'Call report do');
+  assert.equal(reportRequest([user('google ads ke leads kitne aaye')]), 'google ads ke leads kitne aaye');
+});
+test('router facts show the open ad step and only the latest user line is rewritten', () => {
+  const messages = [{ role: 'user', content: 'Call report do' }, { role: 'assistant', content: 'Report...' }, { role: 'user', content: 'Kya hua' }];
+  const facts = chatFacts(messages, { platform: 'Google', step: 'approval' });
+  assert.match(facts, /Open ad setup: Google, waiting for whether to publish/);
+  assert.match(facts, /User: Kya hua$/);
+  assert.match(chatFacts(messages, null), /Open ad setup: none/);
+  const rewritten = withLatest(messages, 'call report today | Kya hua');
+  assert.equal(rewritten[0].content, 'Call report do');
+  assert.equal(rewritten[2].content, 'call report today | Kya hua');
+  assert.equal(messages[2].content, 'Kya hua');
 });

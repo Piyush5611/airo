@@ -10,7 +10,7 @@ Significant structural changes only. Newest first.
   - `attribution` decides between Google Ads (gclid, gbraid, wbraid, gad_* or google with a paid medium), Meta Ads (facebook or instagram that is not organic, or fbclid) and the website, and reads a numeric campaign id from `gad_campaignid` or `utm_id`.
   - Every entry needs a phone number. It creates a lead (project = the offering name, source Google Ads, Meta Ads or Website), or matches an existing phone and adds an activity.
   - Ad-attributed entries also get an `ad_lead_imports` row with `channel = 'website'` on the matching connection, so they show in that connection's Leads tab.
-- **Change:** `POST/DELETE /api/offerings/:id/website-form` create, renew or remove the link. `POST /api/offerings` accepts `websiteForm: true`.
+- **Change:** `POST/DELETE /api/offerings/:id/website-form` create, renew or remove the link. `POST /api/offerings` accepts `websiteForm: true`. A link is only made for an item that has a website link. Clearing the website on edit removes the link, and a link on an item without a website is not accepted.
 - **Change:** The Google Ads Leads tab now reads `ad_lead_imports` like Meta does.
 - **Change (client):** The Add new form has a "Create a website form link" checkbox (on by default). The list has a Website form column and a panel with a WordPress guide (WPCode footer), an HTML guide, the plugin webhook URL, and a copy-paste script. The script copies every form submit on the page to AIRO with `sendBeacon`, skips forms that have a password field, and keeps the UTM tags and click ids from the landing URL in localStorage.
 - **Migration/API impact:** `024_website_forms.sql` adds `offerings.form_token`, `form_leads` and `form_last_at`, and `ad_lead_imports.channel`.

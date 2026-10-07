@@ -309,7 +309,7 @@ function OfferingForm({ item, catalog, onDone, onCancel }) {
     try {
       if (item) await api.patch(`/api/offerings/${item.id}`, form);
       else await api.post('/api/offerings', form);
-      onDone(!item && form.websiteForm ? form.name.trim() : '');
+      onDone(!item && form.websiteForm && form.website.trim() ? form.name.trim() : '');
     } catch (err) {
       setMessage(err.message);
     } finally {
@@ -341,7 +341,7 @@ function OfferingForm({ item, catalog, onDone, onCancel }) {
           </select>
         </label>
       ) : null}
-      {!item ? (
+      {!item && form.website.trim() ? (
         <label className="check-row">
           <input type="checkbox" checked={form.websiteForm} onChange={(event) => setForm((current) => ({ ...current, websiteForm: event.target.checked }))} />
           <span>
@@ -350,6 +350,8 @@ function OfferingForm({ item, catalog, onDone, onCancel }) {
           </span>
         </label>
       ) : null}
+      {!item && !form.website.trim() ? <p className="quiet">Add the website or landing page link to get a website form link (webhook) for this item.</p> : null}
+      {item?.formToken && !form.website.trim() ? <p className="quiet">Removing the website link also turns off the website form link.</p> : null}
       {!item ? <p className="quiet">Save first, then add photos from the list below.</p> : null}
       <div className="page-actions">
         <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
@@ -368,7 +370,7 @@ export function Offerings() {
   const [note, setNote] = useState('');
   const [formFor, setFormFor] = useState(null);
   const items = data?.items || [];
-  const formItem = formFor ? items.find((row) => row.id === formFor || row.name === formFor) : null;
+  const formItem = formFor ? items.find((row) => row.website && (row.id === formFor || row.name === formFor)) : null;
   const catalog = data?.catalog?.kinds?.length ? data.catalog : FALLBACK;
   const refresh = () => reload({ silent: true });
 
@@ -409,14 +411,14 @@ export function Offerings() {
     {
       key: 'websiteForm',
       label: 'Website form',
-      render: (row) => (
+      render: (row) => (row.website ? (
         <div className="stack-cell">
           <button className="btn" type="button" onClick={() => setFormFor(row.id)} disabled={!row.formToken && !canManage}>
             {row.formToken ? 'Get code' : 'Create link'}
           </button>
           {row.formToken ? <small>{row.formLeads ? `${row.formLeads} leads · ${day(row.formLastAt)}` : 'No entry yet'}</small> : null}
         </div>
-      )
+      ) : <small className="quiet">Add a website link first</small>)
     },
     { key: 'source', label: 'Saved from', render: (row) => SOURCE[row.source] || label(row.source) },
     { key: 'status', label: 'Status', render: (row) => <Badge value={row.status} /> },

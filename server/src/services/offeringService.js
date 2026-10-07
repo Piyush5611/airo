@@ -407,7 +407,7 @@ export async function createOffering(auth, req) {
   if (await repo.byName(auth.organizationId, item.name)) throw new ApiError(409, 'An item with this name already exists.', 'conflict');
   const id = await repo.create(auth.organizationId, { ...item, source: 'manual' });
   await recordAudit(req, { action: 'offering.created', resource: 'offering', resourceId: id });
-  if (req.body.websiteForm) {
+  if (req.body.websiteForm && item.website) {
     await repo.setFormToken(auth.organizationId, id, randomToken());
     await recordAudit(req, { action: 'offering.form_link_created', resource: 'offering', resourceId: id });
   }
@@ -422,6 +422,10 @@ export async function updateOffering(auth, req, id) {
   if (clash && clash.id !== found.id) throw new ApiError(409, 'An item with this name already exists.', 'conflict');
   await repo.update(auth.organizationId, id, item);
   await recordAudit(req, { action: 'offering.updated', resource: 'offering', resourceId: id });
+  if (!item.website && found.formToken) {
+    await repo.setFormToken(auth.organizationId, id, null);
+    await recordAudit(req, { action: 'offering.form_link_removed', resource: 'offering', resourceId: id });
+  }
   return listOfferings(auth);
 }
 

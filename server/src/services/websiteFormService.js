@@ -115,7 +115,7 @@ async function campaignFor(organizationId, channel, campaignId) {
 export async function ingestWebsiteForm(token, body) {
   if (!TOKEN.test(String(token || ''))) throw new ApiError(404, 'Unknown form link.', 'not_found');
   const offering = await offeringRepo.byFormToken(token);
-  if (!offering) throw new ApiError(404, 'Unknown form link.', 'not_found');
+  if (!offering?.website) throw new ApiError(404, 'Unknown form link.', 'not_found');
   if (text(body?._gotcha) || text(body?.airo_hp)) return { stored: false };
   const fields = flattenFields(body);
   const contact = pickContact(fields);
@@ -188,6 +188,7 @@ export async function ingestWebsiteForm(token, body) {
 export async function enableWebsiteForm(auth, req, id) {
   const found = await offeringRepo.byId(auth.organizationId, id);
   if (!found) throw new ApiError(404, 'Item not found.', 'not_found');
+  if (!found.website) throw new ApiError(422, 'Add the website link first, then create the website form link.', 'validation_error');
   await offeringRepo.setFormToken(auth.organizationId, id, randomToken());
   await recordAudit(req, { action: found.formToken ? 'offering.form_link_renewed' : 'offering.form_link_created', resource: 'offering', resourceId: id });
 }

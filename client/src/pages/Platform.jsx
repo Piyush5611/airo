@@ -697,6 +697,72 @@ export function PlatformAi() {
   );
 }
 
+export function PlatformResearch() {
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  return (
+    <Gate path="/api/admin/research" eyebrow="Platform" title="Research Tools" lede="Shared tools that power AIRO's competitor search for every business. Businesses never see these keys.">
+      {(data, reload) => {
+        const apify = data.apify || {};
+        async function save(event) {
+          event.preventDefault();
+          setBusy(true);
+          setMessage('');
+          try {
+            await api.post('/api/admin/research/apify', { apiKey });
+            setApiKey('');
+            setMessage('Apify is connected. Businesses can now press Find competitors, and AIRO searches for each business every week.');
+            reload();
+          } catch (err) {
+            setMessage(err.message);
+          } finally {
+            setBusy(false);
+          }
+        }
+        async function remove() {
+          if (!window.confirm('Disconnect Apify? Competitor search stops for every business.')) return;
+          setBusy(true);
+          setMessage('');
+          try {
+            await api.del('/api/admin/research/apify');
+            setMessage('Apify is disconnected.');
+            reload();
+          } catch (err) {
+            setMessage(err.message);
+          } finally {
+            setBusy(false);
+          }
+        }
+        return (
+          <section className="panel form-grid">
+            <header>
+              <h2>Apify</h2>
+              <p className="quiet">Finds competitors for each business from Google search, Meta ads and Google Maps. Every search is capped at about $0.75 of Apify credit, and usually costs less than $0.50. Each business is searched once a week, plus when someone presses Find competitors.</p>
+            </header>
+            <p>
+              <Badge value={apify.connected ? 'connected' : 'not_connected'} />
+              {apify.connected ? ` ${apify.keyPreview} · ${apify.accountLabel || 'Apify account'} · checked ${when(apify.checkedAt)}` : ''}
+            </p>
+            <form className="stack" onSubmit={save}>
+              <p className="quiet">At console.apify.com open Settings, then API &amp; Integrations, and copy the Personal API token. AIRO checks it with Apify before saving. A wrong token shows Wrong API and is not saved.</p>
+              <label className="stack-field">{apify.connected ? 'Replace Apify API token' : 'Apify API token'}
+                <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" required minLength={8} />
+              </label>
+              <div className="page-actions">
+                <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Checking' : 'Save API key'}</button>
+                {apify.connected ? <button className="btn" type="button" onClick={remove} disabled={busy}>Disconnect</button> : null}
+              </div>
+            </form>
+            {message ? <p className="quiet">{message}</p> : null}
+          </section>
+        );
+      }}
+    </Gate>
+  );
+}
+
 export function PlatformSecurity() {
   const [section, setSection] = useSection(SECURITY);
   const show = (name) => section === name;

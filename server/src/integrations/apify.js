@@ -36,7 +36,7 @@ export async function runActor(token, actor, input, { maxItems, maxChargeUsd, ti
   }
   if (!response.ok) {
     const reason = String(body?.error?.message || `Apify answered ${response.status}`).replace(/token=\S+/gi, '').slice(0, 200);
-    if (response.status === 401 || response.status === 403) throw new ApiError(422, 'The Apify token is not accepted. Update it in Connections, Research.', 'apify_auth');
+    if (response.status === 401 || response.status === 403) throw new ApiError(422, 'The Apify token is not accepted. A platform admin must update it in Research tools.', 'apify_auth');
     if (response.status === 402) throw new ApiError(422, 'Apify credit is used up for this month.', 'apify_credit');
     throw new ApiError(502, reason, 'apify_failed');
   }

@@ -292,8 +292,8 @@ function Suggestions({ canManage, onAdded }) {
       </header>
       {!data.apify ? (
         <div className="comp-failed">
-          <strong>Connect Apify to let AIRO find competitors.</strong>
-          <span>Open <Link to="/app/connections?section=Research">Connections, Research</Link> and save your Apify token. The free Apify plan gives $5 credit a month; one search uses about $0.50 at most.</span>
+          <strong>Competitor search is not turned on yet.</strong>
+          <span>The AIRO team turns it on for everyone. Until then, add competitors yourself with Add competitor.</span>
         </div>
       ) : null}
       {running ? (

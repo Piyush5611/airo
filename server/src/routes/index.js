@@ -25,6 +25,7 @@ import * as offerings from '../services/offeringService.js';
 import * as websiteForms from '../services/websiteFormService.js';
 import * as competitors from '../services/competitorService.js';
 import * as discovery from '../services/competitorDiscovery.js';
+import * as research from '../services/researchTools.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -489,6 +490,13 @@ admin.post('/ai/connect', requirePermission('platform_ai.manage'), validate(sche
 }));
 admin.post('/ai/disconnect', requirePermission('platform_ai.manage'), validate(schemas.llmDisconnectSchema), asyncHandler(async (req, res) => {
   ok(res, await llm.disconnectLlm(req));
+}));
+admin.get('/research', requirePermission('research_tools.manage'), asyncHandler(async (req, res) => ok(res, await research.researchTools())));
+admin.post('/research/apify', requirePermission('research_tools.manage'), validate(schemas.researchKeySchema), asyncHandler(async (req, res) => {
+  ok(res, await research.connectApify(req));
+}));
+admin.delete('/research/apify', requirePermission('research_tools.manage'), asyncHandler(async (req, res) => {
+  ok(res, await research.disconnectApify(req));
 }));
 admin.get('/security', requirePermission('security.view'), asyncHandler(async (req, res) => ok(res, await platform.security())));
 admin.get('/settings', requirePermission('platform_settings.view'), asyncHandler(async (req, res) => ok(res, await platform.settings())));

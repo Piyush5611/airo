@@ -364,6 +364,10 @@ export const competitorSchema = body({
   status: z.enum(['active', 'archived']).optional().default('active')
 });
 
+export const researchKeySchema = body({
+  apiKey: z.string().trim().min(8).max(300)
+});
+
 export const imageUploadSchema = body({
   imageBase64: z.string().min(100).max(3500000)
 });

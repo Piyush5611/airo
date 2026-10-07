@@ -24,9 +24,7 @@ export const PROVIDERS = [
   ['crm', 'other_crms', 'Other CRMs', 'Additional CRM systems through the provider adapter.'],
   ['analytics', 'google_analytics', 'Google Analytics', 'Site behaviour used as context for campaign and source quality.'],
   ['analytics', 'google_tag_manager', 'Google Tag Manager', 'Tag and conversion container health.'],
-  ['analytics', 'other_analytics', 'Other Analytics', 'Additional analytics sources.'],
-  ['research', 'apify', 'Apify', 'Finds competitors from Google search, Meta ads and Google Maps. Uses your Apify token and credit.'],
-  ['developer', 'api', 'API', 'Organization API access into the AIRO domain model.'],
+  ['analytics', 'other_analytics', 'Other Analytics', 'Additional analytics sources.'],  ['developer', 'api', 'API', 'Organization API access into the AIRO domain model.'],
   ['developer', 'webhooks', 'Webhooks', 'Outbound events for leads, calls, and sync health.'],
   ['developer', 'oauth', 'OAuth', 'OAuth clients for custom workspace applications.'],
   ['developer', 'custom', 'Custom Integration', 'A custom connector that still normalizes into AIRO records.']
@@ -38,7 +36,5 @@ export const CATEGORIES = [
   { key: 'communication', name: 'Communication', purpose: 'WhatsApp, email, and SMS.' },
   { key: 'calling', name: 'Calling', purpose: 'Calls, recordings, and transcripts.' },
   { key: 'crm', name: 'CRM', purpose: 'External pipeline context.' },
-  { key: 'analytics', name: 'Analytics', purpose: 'Site and conversion context.' },
-  { key: 'research', name: 'Research', purpose: 'Market and competitor research tools.' },
-  { key: 'developer', name: 'Developer / API', purpose: 'API, webhooks, and custom connectors.' }
+  { key: 'analytics', name: 'Analytics', purpose: 'Site and conversion context.' },  { key: 'developer', name: 'Developer / API', purpose: 'API, webhooks, and custom connectors.' }
 ];

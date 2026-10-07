@@ -68,7 +68,8 @@ export const PLATFORM_PERMISSIONS = define([
   ['security.view', 'View security and audit'],
   ['platform_settings.view', 'View platform settings'],
   ['platform_settings.manage', 'Manage platform settings'],
-  ['whatsapp_bot.manage', 'Manage the shared WhatsApp chatbot']
+  ['whatsapp_bot.manage', 'Manage the shared WhatsApp chatbot'],
+  ['research_tools.manage', 'Manage the shared research tools (Apify)']
 ]);
 
 const clientView = CLIENT_PERMISSIONS.filter((item) => item.action === 'view').map((item) => item.key);
@@ -164,7 +165,8 @@ export const PLATFORM_ROLES = {
       'security.view',
       'platform_ai.view',
       'platform_ai.manage',
-      'whatsapp_bot.manage'
+      'whatsapp_bot.manage',
+      'research_tools.manage'
     ]
   }
 };

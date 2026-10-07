@@ -129,15 +129,18 @@ export function closeStaleRuns() {
 
 export function dueForDiscovery(limit = 3) {
   return many(
-    `SELECT c.organization_id AS organizationId
-     FROM integration_connections c
-     JOIN integration_providers p ON p.id = c.provider_id
-     WHERE p.provider_key = 'apify' AND c.status = 'connected' AND c.mode = 'live'
+    `SELECT o.id AS organizationId
+     FROM organizations o
+     WHERE o.status IN ('active', 'onboarding')
+       AND (
+         EXISTS (SELECT 1 FROM offerings f WHERE f.organization_id = o.id AND f.status = 'active')
+         OR EXISTS (SELECT 1 FROM business_profiles b WHERE b.organization_id = o.id)
+       )
        AND NOT EXISTS (
          SELECT 1 FROM competitor_discovery_runs r
-         WHERE r.organization_id = c.organization_id AND r.started_at > UTC_TIMESTAMP() - INTERVAL 7 DAY
+         WHERE r.organization_id = o.id AND r.started_at > UTC_TIMESTAMP() - INTERVAL 7 DAY
        )
-     ORDER BY c.organization_id
+     ORDER BY o.id
      LIMIT ?`,
     [limit]
   );

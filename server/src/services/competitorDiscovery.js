@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { one } from '../db/sql.js';
 import * as repo from '../repositories/competitorRepo.js';
 import * as offeringRepo from '../repositories/offeringRepo.js';
 import { googleSearch, mapsPlaces, metaKeywordAds } from '../integrations/apify.js';
@@ -7,7 +6,7 @@ import { fetchPublic, pageText } from '../integrations/webPage.js';
 import { businessProfile } from './adsAgent/chatPlanner.js';
 import { catalogFacts, structuredLlm } from './llmService.js';
 import { sectorOf } from '../domain/sectors.js';
-import { decryptJson } from '../utils/cryptoBox.js';
+import { apifyToken } from './researchTools.js';
 import { recordAudit } from './auditService.js';
 import { analyzeCompetitor } from './competitorService.js';
 import { ApiError } from '../utils/errors.js';
@@ -46,25 +45,8 @@ export function notCompetitor(domain) {
 
 const nameKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-function token(organizationId) {
-  return one(
-    `SELECT c.status, c.mode, cred.ciphertext
-     FROM integration_connections c
-     JOIN integration_providers p ON p.id = c.provider_id
-     LEFT JOIN integration_credentials cred ON cred.connection_id = c.id
-     WHERE c.organization_id = ? AND p.provider_key = 'apify' AND c.status = 'connected' AND c.mode = 'live'
-     ORDER BY c.id LIMIT 1`,
-    [organizationId]
-  ).then((row) => {
-    if (!row?.ciphertext) return null;
-    try {
-      const secret = decryptJson(row.ciphertext);
-      return secret?.verified === true && secret.apiKey ? secret.apiKey : null;
-    } catch {
-      return null;
-    }
-  }).catch(() => null);
-}
+const token = () => apifyToken().catch(() => null);
+const NOT_READY = 'Competitor search is not turned on yet. The AIRO team connects it on the platform.';
 
 const text = (max) => z.preprocess((value) => (value == null ? '' : String(value)), z.string())
   .transform((value) => value.replace(/\s+/g, ' ').trim().slice(0, max));
@@ -273,8 +255,8 @@ async function judge(organizationId, { candidates, homes, ourFacts }) {
 
 async function discover(organizationId, trigger, runId) {
   const notes = [];
-  const apiKey = await token(organizationId);
-  if (!apiKey) throw new ApiError(422, 'Connect Apify in Connections, Research first.', 'apify_missing');
+  const apiKey = await token();
+  if (!apiKey) throw new ApiError(422, NOT_READY, 'apify_missing');
   const [profile, items, org, known] = await Promise.all([
     businessProfile(organizationId).catch(() => null),
     offeringRepo.list(organizationId, { limit: 30 }).catch(() => []),
@@ -358,7 +340,7 @@ function utcTime(value) {
 }
 
 export async function startDiscovery(auth, req) {
-  if (!(await token(auth.organizationId))) throw new ApiError(422, 'Connect Apify in Connections, Research first.', 'apify_missing');
+  if (!(await token())) throw new ApiError(422, NOT_READY, 'apify_missing');
   if (running.has(auth.organizationId)) return suggestionList(auth);
   const last = await repo.latestRun(auth.organizationId);
   if (last?.status === 'running' && Date.now() - utcTime(last.startedAt) < 20 * 60 * 1000) return suggestionList(auth);
@@ -383,7 +365,7 @@ function parse(value, fallback) {
 
 export async function suggestionList(auth) {
   try {
-    const [connected, run, rows] = await Promise.all([token(auth.organizationId), repo.latestRun(auth.organizationId), repo.suggestions(auth.organizationId)]);
+    const [connected, run, rows] = await Promise.all([token(), repo.latestRun(auth.organizationId), repo.suggestions(auth.organizationId)]);
     return {
       ready: true,
       apify: Boolean(connected),
@@ -426,9 +408,10 @@ export async function ignoreSuggestion(auth, req, id) {
 }
 
 export async function discoverDue() {
+  const result = { organizations: 0, suggested: 0, notes: [] };
+  if (!(await token())) return result;
   await repo.closeStaleRuns().catch(() => {});
   const rows = await repo.dueForDiscovery(3);
-  const result = { organizations: 0, suggested: 0, notes: [] };
   for (const row of rows) {
     if (running.has(row.organizationId)) continue;
     try {

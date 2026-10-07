@@ -358,6 +358,7 @@ export const platformNav = [
     { to: '/platform/integrations', label: 'Integrations & Technical', permission: 'platform_integrations.view' },
     { to: '/platform/whatsapp', label: 'WhatsApp Chatbot', permission: 'whatsapp_bot.manage' },
     { to: '/platform/ai', label: 'Platform AI', permission: 'platform_ai.view' },
+    { to: '/platform/research', label: 'Research Tools', permission: 'research_tools.manage' },
     { to: '/platform/security', label: 'Security & Audit', permission: 'security.view' },
     { to: '/platform/settings', label: 'Platform Settings', permission: 'platform_settings.view' }
   ]}

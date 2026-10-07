@@ -82,6 +82,7 @@ const PlatformHome = page('platform', 'PlatformHome');
 const PlatformIntegrations = page('platform', 'PlatformIntegrations');
 const PlatformModeration = page('platform', 'PlatformModeration');
 const PlatformSales = page('platform', 'PlatformSales');
+const PlatformResearch = page('platform', 'PlatformResearch');
 const PlatformSecurity = page('platform', 'PlatformSecurity');
 const PlatformSettings = page('platform', 'PlatformSettings');
 const PlatformSupport = page('platform', 'PlatformSupport');
@@ -167,6 +168,7 @@ export function App() {
           <Route path="whatsapp" element={<PlatformWhatsapp />} />
           <Route path="assistant" element={<AssistantPage />} />
           <Route path="ai" element={<PlatformAi />} />
+          <Route path="research" element={<PlatformResearch />} />
           <Route path="security" element={<PlatformSecurity />} />
           <Route path="settings" element={<PlatformSettings />} />
         </Route>

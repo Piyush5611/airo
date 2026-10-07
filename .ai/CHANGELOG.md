@@ -2,6 +2,13 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-08 (Apify moved to the platform)
+
+- **Change:** Apify is no longer a business connection. One shared token lives in the new `platform_tools` table (encrypted, last 4 shown). It is managed on the new platform page Research Tools (`/platform/research`) through `GET/POST/DELETE /api/admin/research(/apify)`. The token is checked with `GET https://api.apify.com/v2/users/me` before it is saved.
+- **Change:** New platform permission `research_tools.manage`, held by Super Admin (all) and Developer/Admin only. Businesses do not see the Research tab or the key.
+- **Change:** Discovery uses the platform token. The weekly job runs only when that token exists, for active or onboarding organizations that have an active offering or a business profile.
+- **Migration/API impact:** `029_platform_research_tools.sql` creates `platform_tools`, copies any connected business Apify token into it, and removes the `apify` provider and its connections. The Connections Research category is gone.
+
 ### 2026-10-08 (AIRO finds competitors itself)
 
 - **Change:** New provider `apify` in a new Connections category, Research. The token is checked with `GET https://api.apify.com/v2/users/me` before it is saved encrypted.

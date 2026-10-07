@@ -360,38 +360,178 @@ export function WorkspaceWhatsapp() {
     if (first) setOpen((current) => current || first);
   }, [data]);
   useWhatsappLive(refresh, '/api/whatsapp/live');
+  const [section, setSection] = useSection(WORKSPACE_SECTIONS);
+  const [filter, setFilter] = useState('all');
   const people = data?.conversations || [];
+  const shown = people.filter((person) => filter === 'all' || (filter === 'team' ? person.businessNumber : !person.businessNumber));
   const active = detail.data?.conversation?.id === open ? detail.data.conversation : null;
   const messages = active ? detail.data.messages || [] : [];
+  function openChat(id) {
+    setOpen(id);
+    setSection('Chats');
+  }
   return (
-    <Page className="page-fill" eyebrow="Workspace" title="WhatsApp" lede="Add this business's WhatsApp numbers. A chat from one of those numbers is recognized as this workspace.">
+    <Page className={section === 'Chats' ? 'page-fill' : ''} eyebrow="Workspace" title="WhatsApp" lede="Chat with AIRO on WhatsApp from your business numbers, and see chats with your leads.">
       <State loading={loading} error={error} onRetry={reload}>
         {data ? (
           <div className="stack wa-stack">
-            {data.notice ? <p className="error-box">{data.notice}</p> : <BusinessNumbers numbers={data.numbers || []} reload={reload} />}
-            <section className="wa-inbox" aria-label="Customer WhatsApp chats">
-              <div className="wa-people">
-                <header>
-                  <h2>Chats</h2>
-                  <p className="quiet">Business numbers and lead numbers</p>
-                </header>
-                {people.length ? people.map((person) => (
-                  <button key={person.id} type="button" className={person.id === open ? 'wa-person is-on' : 'wa-person'} onClick={() => setOpen(person.id)}>
-                    <span className="wa-avatar" aria-hidden="true">{initials(chatTitle(person))}</span>
-                    <span>
-                      <strong>{chatTitle(person)}</strong>
-                      <em>{person.businessNumber ? `${person.contactPhone} · Business number` : person.contactPhone}</em>
-                      <p>{person.lastDirection === 'outbound' ? 'AIRO: ' : ''}{person.lastMessage || 'No message yet'}</p>
-                    </span>
-                  </button>
-                )) : <p className="quiet wa-empty">No chat yet. Add a number, then message the chatbot from that number.</p>}
-              </div>
-              <CustomerThread active={active} messages={messages} loading={detail.loading && Boolean(open)} />
-            </section>
+            <Subnav items={WORKSPACE_SECTIONS} value={section} onChange={setSection} />
+            {data.notice && section !== 'What to ask' ? <p className="error-box">{data.notice}</p> : null}
+            {section === 'Chats' ? (
+              <section className="wa-inbox" aria-label="Customer WhatsApp chats">
+                <div className="wa-people">
+                  <header>
+                    <h2>Chats</h2>
+                    <div className="chip-tabs wa-filter">
+                      {[['all', 'All', people.length], ['team', 'Team', people.filter((person) => person.businessNumber).length], ['leads', 'Leads', people.filter((person) => !person.businessNumber).length]].map(([key, text, count]) => (
+                        <button key={key} type="button" className={filter === key ? 'is-on' : ''} onClick={() => setFilter(key)}>{text} · {num(count)}</button>
+                      ))}
+                    </div>
+                  </header>
+                  {shown.length ? shown.map((person) => (
+                    <button key={person.id} type="button" className={person.id === open ? 'wa-person is-on' : 'wa-person'} onClick={() => setOpen(person.id)}>
+                      <span className="wa-avatar" aria-hidden="true">{initials(chatTitle(person))}</span>
+                      <span>
+                        <strong>{chatTitle(person)}{person.lastDirection === 'inbound' ? <i className="wa-waiting" title="Waiting for a reply" /> : null}</strong>
+                        <em>{person.businessNumber ? `${person.contactPhone} · Business number` : person.contactPhone}</em>
+                        <p>{person.lastDirection === 'outbound' ? 'AIRO: ' : ''}{person.lastMessage || 'No message yet'}</p>
+                      </span>
+                    </button>
+                  )) : <p className="quiet wa-empty">{people.length ? 'No chat in this filter.' : 'No chat yet. Add a number, then message the chatbot from that number.'}</p>}
+                </div>
+                <CustomerThread active={active} messages={messages} loading={detail.loading && Boolean(open)} />
+              </section>
+            ) : null}
+            {section === 'Overview' ? <WhatsappOverview people={people} numbers={data.numbers || []} onOpen={openChat} /> : null}
+            {section === 'Business numbers' && !data.notice ? <BusinessNumbers numbers={data.numbers || []} reload={reload} /> : null}
+            {section === 'What to ask' ? <WhatToAsk /> : null}
           </div>
         ) : null}
       </State>
     </Page>
+  );
+}
+
+const WORKSPACE_SECTIONS = ['Chats', 'Overview', 'Business numbers', 'What to ask'];
+
+function isToday(value) {
+  if (!value) return false;
+  const date = new Date(value);
+  const now = new Date();
+  return date.toDateString() === now.toDateString();
+}
+
+function WhatsappOverview({ people, numbers, onOpen }) {
+  const leads = people.filter((person) => !person.businessNumber);
+  const team = people.filter((person) => person.businessNumber);
+  const waiting = leads
+    .filter((person) => person.lastDirection === 'inbound')
+    .sort((a, b) => String(a.lastMessageAt || '').localeCompare(String(b.lastMessageAt || '')));
+  const today = people.filter((person) => isToday(person.lastMessageAt));
+  const recent = [...people].sort((a, b) => String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || ''))).slice(0, 8);
+  const row = (person) => ({ ...person, id: person.id });
+  return (
+    <div className="stack">
+      <div className="metric-strip">
+        <div className="metric"><span>All chats</span><strong>{num(people.length)}</strong><em>{num(today.length)} active today</em></div>
+        <div className="metric"><span>Lead chats</span><strong>{num(leads.length)}</strong><em>Numbers that match a lead</em></div>
+        <div className="metric"><span>Team chats</span><strong>{num(team.length)}</strong><em>From {num(numbers.length)} business numbers</em></div>
+        <div className="metric"><span>Leads waiting</span><strong>{num(waiting.length)}</strong><em>Last message was from the lead</em></div>
+      </div>
+      <section className="panel">
+        <header>
+          <h2>Leads waiting for a reply</h2>
+          <p>Oldest first</p>
+        </header>
+        {waiting.length ? (
+          <Table
+            onRow={(person) => onOpen(person.id)}
+            columns={[
+              { key: 'name', label: 'Lead', render: (person) => <><strong>{chatTitle(person)}</strong><small>{person.contactPhone}</small></> },
+              { key: 'message', label: 'Last message', render: (person) => person.lastMessage || '—' },
+              { key: 'when', label: 'When', render: (person) => when(person.lastMessageAt) },
+              { key: 'lead', label: '', render: (person) => (person.leadId ? <Link className="btn" to={`/app/growth/leads/${person.leadId}`} onClick={(event) => event.stopPropagation()}>Open lead</Link> : null) }
+            ]}
+            rows={waiting.map(row)}
+          />
+        ) : <p className="quiet">No lead is waiting. Every lead chat ends with a reply.</p>}
+      </section>
+      <section className="panel">
+        <header>
+          <h2>Recent chats</h2>
+          <p>Click to open</p>
+        </header>
+        {recent.length ? (
+          <Table
+            onRow={(person) => onOpen(person.id)}
+            columns={[
+              { key: 'name', label: 'Chat', render: (person) => <><strong>{chatTitle(person)}</strong><small>{person.businessNumber ? 'Team · business number' : 'Lead'}</small></> },
+              { key: 'message', label: 'Last message', render: (person) => `${person.lastDirection === 'outbound' ? 'AIRO: ' : ''}${person.lastMessage || '—'}` },
+              { key: 'when', label: 'When', render: (person) => when(person.lastMessageAt) }
+            ]}
+            rows={recent.map(row)}
+          />
+        ) : <p className="quiet">No chat yet.</p>}
+      </section>
+    </div>
+  );
+}
+
+const ASK_GROUPS = [
+  {
+    title: 'Ads',
+    items: [
+      ['Create a Meta ad', 'Facebook ad banao', 'AIRO asks a few questions, designs the ad and saves it paused. It goes live only after you say haan.'],
+      ['Create a Google ad', 'Google ad banao', 'A Search campaign with keywords and ad text, saved paused until you approve.'],
+      ['See your campaigns', 'Mere campaigns dikhao', 'Every Meta and Google campaign with its status.'],
+      ['Ads report', 'Ads ki report do', 'Spend, clicks, leads and cost per lead from the last sync.'],
+      ['Best and weakest ads', 'Kaun sa ad sabse achha chal raha hai', 'The top and bottom ads with their score, cost per result and click rate.'],
+      ['Ad advice', 'Ads kaise improve karein', 'What to change first, based on your own numbers.'],
+      ['Competitors', 'Competitors kya ads chala rahe hain', 'What similar businesses are running.'],
+      ['Stop an ad setup', 'Ad setup cancel karo', 'Drops the half-done ad in the chat.']
+    ]
+  },
+  {
+    title: 'Calls and leads',
+    items: [
+      ['Call report', 'Aaj ki call report', 'Calls by agent, connected and missed, from Call Yatri.'],
+      ['Leads report', 'Leads ki report do', 'New leads, stages and follow-ups from AIRO.']
+    ]
+  }
+];
+
+function WhatToAsk() {
+  const [copied, setCopied] = useState('');
+  async function copy(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(text);
+      setTimeout(() => setCopied(''), 1500);
+    } catch {
+      setCopied('');
+    }
+  }
+  return (
+    <div className="stack">
+      <p className="quiet">Send these from one of your business numbers to the AIRO WhatsApp number. Hindi, Hinglish and English all work, and you can tap the menu buttons AIRO sends back.</p>
+      {ASK_GROUPS.map((group) => (
+        <section className="panel" key={group.title}>
+          <header><h2>{group.title}</h2></header>
+          <div className="ask-grid">
+            {group.items.map(([title, example, detail]) => (
+              <article className="ask-card" key={title}>
+                <strong>{title}</strong>
+                <button type="button" className="ask-bubble" onClick={() => copy(example)} title="Copy">
+                  {example}
+                  <em>{copied === example ? 'Copied' : 'Copy'}</em>
+                </button>
+                <p className="quiet">{detail}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 

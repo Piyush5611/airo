@@ -542,6 +542,14 @@ fieldset.form-grid { border: 0; padding: 0; margin: 0; min-width: 0; }
   .workspace:has(.page-fill) { height: auto; overflow: visible; }
   .page-fill .wa-inbox { height: 80vh; flex: none; }
 }
+.wa-filter { margin-top: 10px; }
+.wa-waiting { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: #1a9a62; vertical-align: middle; }
+.ask-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.ask-card { display: grid; gap: 8px; align-content: start; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); }
+.ask-card p { margin: 0; }
+.ask-bubble { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 14px 14px 14px 4px; border: 1px solid #c4ead6; background: #e9f8f0; color: #0f5132; font: inherit; font-weight: 600; cursor: pointer; }
+.ask-bubble em { font-style: normal; font-size: 11px; font-weight: 600; color: #12805a; opacity: 0.8; }
+.ask-bubble:hover { border-color: #8fd3b0; }
 .wa-inbox { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 640px; background: white; border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; }
 .wa-people { border-right: 1px solid var(--line); background: var(--surface-2); overflow: auto; }
 .wa-people header, .wa-thread header { display: flex; gap: 12px; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); background: white; }

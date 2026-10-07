@@ -476,8 +476,28 @@ function CoverSlider({ ids, alt }) {
     const track = trackRef.current;
     if (track?.clientWidth) setIndex(Math.round(track.scrollLeft / track.clientWidth));
   };
+  const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    if (paused || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
+    const timer = window.setInterval(() => {
+      const track = trackRef.current;
+      if (!track?.clientWidth || document.hidden) return;
+      const current = Math.round(track.scrollLeft / track.clientWidth);
+      const target = (current + 1) % ids.length;
+      track.scrollTo({ left: target * track.clientWidth, behavior: 'smooth' });
+    }, 3500);
+    return () => window.clearInterval(timer);
+  }, [paused, ids.length]);
   return (
-    <div className="cover-slider">
+    <div
+      className="cover-slider"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+      onTouchStart={() => setPaused(true)}
+      onTouchEnd={() => setPaused(false)}
+    >
       <div className="cover-track" ref={trackRef} onScroll={onScroll}>
         {ids.map((id, at) => <div className="cover-slide" key={id}><MediaImage id={id} alt={`${alt} photo ${at + 1}`} /></div>)}
       </div>

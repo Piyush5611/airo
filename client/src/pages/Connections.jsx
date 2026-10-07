@@ -4062,29 +4062,24 @@ function ConnectionLeads({ id, google, canImport }) {
     }
   }
 
-  if (google) {
-    return (
-      <div className="empty">
-        <strong>Google Ads leads are not linked yet.</strong>
-        <p className="quiet">Only Meta lead form leads are brought into AIRO today. Leads you add by hand are on the <Link to="/app/growth/leads">Leads</Link> page.</p>
-      </div>
-    );
-  }
-
   return (
     <div className="stack">
       <section className="panel">
         <header>
           <h2>Leads from this account</h2>
-          {canImport ? <button className="btn" type="button" disabled={busy} onClick={importNow}>{busy ? 'Importing…' : 'Import leads now'}</button> : null}
+          {canImport && !google ? <button className="btn" type="button" disabled={busy} onClick={importNow}>{busy ? 'Importing…' : 'Import leads now'}</button> : null}
         </header>
         <p className="quiet">
-          Meta lead form leads are imported every 30 minutes and saved in Leads. A lead whose phone number is already in Leads is matched to that lead, not added again.
+          {google
+            ? 'Leads from your website forms that came through Google Ads show here. Create the website form link on '
+            : 'Meta lead form leads are imported every 30 minutes, and website form leads that came through Meta Ads arrive at once. Create the website form link on '}
+          <Link to="/app/growth/offerings">Products &amp; Projects</Link>.
+          {' '}A lead whose phone number is already in Leads is matched to that lead, not added again.
           {counts ? ` So far: ${num(counts.created)} added, ${num(counts.matched)} matched${counts.skipped ? `, ${num(counts.skipped)} skipped for having no phone number` : ''}.` : ''}
         </p>
         {note ? <p className="quiet">{note}</p> : null}
       </section>
-      <State loading={loading} error={error} onRetry={reload} empty={data && !items.length ? { title: 'No leads from this account yet', body: 'Leads show up here after a Meta lead form ad gets a submission and the import runs.' } : null}>
+      <State loading={loading} error={error} onRetry={reload} empty={data && !items.length ? { title: 'No leads from this account yet', body: google ? 'Leads show up here when someone clicks a Google ad and fills the form on your website.' : 'Leads show up here after a Meta lead form gets a submission, or someone from a Meta ad fills the form on your website.' } : null}>
         {items.length ? (
           <section className="panel">
             <div className="cy-tab-head">
@@ -4104,6 +4099,7 @@ function ConnectionLeads({ id, google, canImport }) {
                 { key: 'name', label: 'Lead', render: (row) => <><strong>{row.fullName}</strong><small>{[row.phone, row.city].filter(Boolean).join(' · ')}</small></> },
                 { key: 'status', label: 'Stage', render: (row) => <Badge value={row.status} /> },
                 { key: 'campaign', label: 'Campaign', render: (row) => <>{row.campaignName || (row.campaignId ? `Campaign ${row.campaignId}` : '—')}{row.adName ? <small>{row.adName}</small> : null}</> },
+                { key: 'via', label: 'Came from', render: (row) => (row.channel === 'website' ? 'Website form' : 'Lead form') },
                 { key: 'submitted', label: 'Submitted', render: (row) => when(row.submittedAt || row.createdAt) },
                 { key: 'outcome', label: 'In Leads', render: (row) => (row.outcome === 'matched' ? 'Already there' : 'Added') },
                 { key: 'assigned', label: 'Owner', render: (row) => row.assignedTo || 'Unassigned' }

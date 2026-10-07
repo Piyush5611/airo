@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { authenticate } from '../middleware/authenticate.js';
 import { blockSupportWrites, requirePermission, requireRealm } from '../middleware/authorize.js';
 import { validate } from '../middleware/validate.js';
@@ -22,6 +22,7 @@ import * as adsMonitor from '../services/adsAgent/monitorService.js';
 import * as adsApply from '../services/adsAgent/applyService.js';
 import * as adsQuality from '../services/adsAgent/qualityService.js';
 import * as offerings from '../services/offeringService.js';
+import * as websiteForms from '../services/websiteFormService.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -63,6 +64,10 @@ router.get('/meta-ads/callback', asyncHandler(async (req, res) => {
 
 router.post('/hooks/:token', asyncHandler(async (req, res) => {
   ok(res, await connections.ingestWebhook(req.params.token, req.body));
+}));
+
+router.post('/forms/:token', express.urlencoded({ extended: true, limit: '64kb', parameterLimit: 120 }), asyncHandler(async (req, res) => {
+  ok(res, await websiteForms.ingestWebsiteForm(req.params.token, req.body));
 }));
 
 const authRouter = Router();
@@ -147,6 +152,14 @@ client.patch('/offerings/:id', requirePermission('campaigns.update'), validate(s
 }));
 client.delete('/offerings/:id', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await offerings.deleteOffering(req.auth, req, req.params.id));
+}));
+client.post('/offerings/:id/website-form', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  await websiteForms.enableWebsiteForm(req.auth, req, req.params.id);
+  ok(res, await offerings.listOfferings(req.auth));
+}));
+client.delete('/offerings/:id/website-form', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  await websiteForms.disableWebsiteForm(req.auth, req, req.params.id);
+  ok(res, await offerings.listOfferings(req.auth));
 }));
 client.post('/offerings/:id/photos', requirePermission('campaigns.update'), validate(schemas.idParams.merge(schemas.imageUploadSchema)), asyncHandler(async (req, res) => {
   ok(res, await offerings.addPhoto(req.auth, req, req.params.id), 201);

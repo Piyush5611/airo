@@ -410,6 +410,15 @@ export async function claimLeadImport(row) {
   return result.affectedRows === 1;
 }
 
+export function recordWebsiteImport(row) {
+  return insert(
+    `INSERT INTO ad_lead_imports
+       (organization_id, connection_id, platform, external_lead_id, lead_id, campaign_external_id, outcome, submitted_at, channel)
+     VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), 'website')`,
+    [row.organizationId, row.connectionId, row.platform, row.externalLeadId, row.leadId, row.campaignExternalId || null, row.outcome]
+  );
+}
+
 export function finishLeadImport(organizationId, platform, externalLeadId, leadId, outcome) {
   return run(
     `UPDATE ad_lead_imports SET lead_id = ?, outcome = ? WHERE organization_id = ? AND platform = ? AND external_lead_id = ?`,

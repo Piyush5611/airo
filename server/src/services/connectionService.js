@@ -247,9 +247,6 @@ export async function connectionLeads(auth, id) {
   if (connection.providerKey !== 'meta_ads' && connection.providerKey !== 'google_ads') {
     throw new ApiError(422, 'Leads are only linked for ad accounts.', 'validation_error');
   }
-  if (connection.providerKey === 'google_ads') {
-    return { linked: false, items: [], counts: { created: 0, matched: 0, skipped: 0 } };
-  }
   const scope = leadScope(auth);
   const [items, outcomes] = await Promise.all([
     repo.adLeads({ organizationId: auth.organizationId, connectionId: connection.id, scopeSql: scope.sql, scopeParams: scope.params, limit: 200 }),

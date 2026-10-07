@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import * as repo from '../repositories/offeringRepo.js';
 import { ApiError } from '../utils/errors.js';
+import { randomToken } from '../utils/cryptoBox.js';
 import { recordAudit } from './auditService.js';
 import { structuredLlm } from './llmService.js';
 import { catalogFor, sectorOf } from '../domain/sectors.js';
@@ -406,6 +407,10 @@ export async function createOffering(auth, req) {
   if (await repo.byName(auth.organizationId, item.name)) throw new ApiError(409, 'An item with this name already exists.', 'conflict');
   const id = await repo.create(auth.organizationId, { ...item, source: 'manual' });
   await recordAudit(req, { action: 'offering.created', resource: 'offering', resourceId: id });
+  if (req.body.websiteForm) {
+    await repo.setFormToken(auth.organizationId, id, randomToken());
+    await recordAudit(req, { action: 'offering.form_link_created', resource: 'offering', resourceId: id });
+  }
   return listOfferings(auth);
 }
 

@@ -182,7 +182,7 @@ export function adLeads({ organizationId, connectionId, scopeSql, scopeParams, l
   return many(
     `SELECT l.id, l.full_name AS fullName, l.phone, l.email, l.city, l.status, l.score,
             l.created_at AS createdAt, u.full_name AS assignedTo,
-            i.outcome, i.submitted_at AS submittedAt, i.campaign_external_id AS campaignId,
+            i.outcome, i.channel, i.submitted_at AS submittedAt, i.campaign_external_id AS campaignId,
             camp.name AS campaignName, ad.name AS adName
      FROM ad_lead_imports i
      JOIN leads l ON l.id = i.lead_id AND l.organization_id = i.organization_id
@@ -323,6 +323,32 @@ export async function sourceForProvider(organizationId, name, providerKey) {
   return insert(
     `INSERT INTO lead_sources (organization_id, name, category, provider_key) VALUES (?, ?, 'advertising', ?)`,
     [organizationId, name, providerKey]
+  );
+}
+
+export async function websiteSource(organizationId) {
+  const existing = await one(
+    `SELECT id FROM lead_sources WHERE organization_id = ? AND (provider_key = 'website' OR name = 'Website')
+     ORDER BY provider_key = 'website' DESC LIMIT 1`,
+    [organizationId]
+  );
+  if (existing) return existing.id;
+  return insert(
+    `INSERT INTO lead_sources (organization_id, name, category, provider_key) VALUES (?, 'Website', 'direct', 'website')`,
+    [organizationId]
+  );
+}
+
+export function adConnectionFor(organizationId, providerKey, campaignExternalId) {
+  return one(
+    `SELECT c.id
+     FROM integration_connections c
+     JOIN integration_providers p ON p.id = c.provider_id
+     LEFT JOIN integration_objects o ON o.connection_id = c.id AND o.object_type = 'campaign' AND o.external_id = ?
+     WHERE c.organization_id = ? AND p.provider_key = ? AND c.status = 'connected'
+     ORDER BY o.id IS NULL, c.id
+     LIMIT 1`,
+    [campaignExternalId || '', organizationId, providerKey]
   );
 }
 

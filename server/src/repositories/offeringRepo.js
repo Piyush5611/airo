@@ -1,7 +1,8 @@
 import { insert, many, one, run } from '../db/sql.js';
 
 const FIELDS = `id, kind, name, details, usps, offer, price_text AS priceText, locations, website, source, status,
-  times_used AS timesUsed, last_used_at AS lastUsedAt, created_at AS createdAt, updated_at AS updatedAt`;
+  times_used AS timesUsed, last_used_at AS lastUsedAt, form_token AS formToken, form_leads AS formLeads,
+  form_last_at AS formLastAt, created_at AS createdAt, updated_at AS updatedAt`;
 
 export function list(organizationId, { status = 'active', limit = 200 } = {}) {
   return many(
@@ -36,6 +37,21 @@ export function update(organizationId, id, item) {
     `UPDATE offerings SET kind = ?, name = ?, details = ?, usps = ?, offer = ?, price_text = ?, locations = ?, website = ?, status = ?
      WHERE organization_id = ? AND id = ?`,
     [item.kind, item.name, item.details || null, item.usps || null, item.offer || null, item.priceText || null, item.locations || null, item.website || null, item.status, organizationId, id]
+  );
+}
+
+export function setFormToken(organizationId, id, token) {
+  return run(`UPDATE offerings SET form_token = ? WHERE organization_id = ? AND id = ?`, [token, organizationId, id]);
+}
+
+export function byFormToken(token) {
+  return one(`SELECT organization_id AS organizationId, ${FIELDS} FROM offerings WHERE form_token = ?`, [token]);
+}
+
+export function markFormLead(organizationId, id) {
+  return run(
+    `UPDATE offerings SET form_leads = form_leads + 1, form_last_at = UTC_TIMESTAMP() WHERE organization_id = ? AND id = ?`,
+    [organizationId, id]
   );
 }
 

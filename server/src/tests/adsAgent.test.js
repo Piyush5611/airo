@@ -20,6 +20,7 @@ import { demandSection } from '../services/googleAdChat.js';
 import { usableInterest } from '../services/adsAgent/chatPlanner.js';
 import { menuMessage, messageParts } from '../services/whatsappService.js';
 import { catalogFacts } from '../services/llmService.js';
+import { attribution, flattenFields, pickContact } from '../services/websiteFormService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
@@ -761,4 +762,33 @@ test('catalogFacts lists saved projects for the WhatsApp reply', () => {
   assert.match(text, /Saved products\/projects\/services \(1/);
   assert.match(text, /1\. Prestige Park - type project; location Noida; price 80 lakh onwards/);
   assert.doesNotMatch(text, /offer/);
+});
+
+test('website form fields: plain HTML, WordPress Contact Form 7 and Elementor', () => {
+  const plain = pickContact(flattenFields({ name: 'Ravi Kumar', phone: '+91 98765 43210', email: 'ravi@example.com', city: 'Noida', message: 'Need 2 BHK', _wpnonce: 'x', password: 'secret' }));
+  assert.deepEqual(plain, { name: 'Ravi Kumar', phone: '+91 98765 43210', email: 'ravi@example.com', city: 'Noida', message: 'Need 2 BHK' });
+  const cf7 = pickContact(flattenFields({ 'your-name': 'Asha', 'your-email': 'asha@example.com', 'your-tel': '9876501234', _wpcf7: '12' }));
+  assert.equal(cf7.name, 'Asha');
+  assert.equal(cf7.phone, '9876501234');
+  const elementor = pickContact(flattenFields({ form: { id: 'a1' }, fields: { name: { title: 'Name', value: 'Neha' }, field_2: { title: 'Mobile', value: '98111 22233' } } }));
+  assert.equal(elementor.name, 'Neha');
+  assert.equal(elementor.phone, '98111 22233');
+  const split = pickContact(flattenFields({ first_name: 'Amit', last_name: 'Shah', mobile: '9000000001' }));
+  assert.equal(split.name, 'Amit Shah');
+  assert.equal(pickContact(flattenFields({ name: 'No phone', email: 'a@b.co' })).phone, '');
+  assert.equal(flattenFields({ card_number: '4111', cvv: '1' }).card_number, undefined);
+});
+
+test('website form attribution splits Google Ads, Meta Ads and the website', () => {
+  assert.equal(attribution({ gclid: 'abc' }).channel, 'google');
+  assert.equal(attribution({ airo_landing: 'https://site.in/?gad_source=1&gad_campaignid=2233445566' }).campaignId, '2233445566');
+  assert.equal(attribution({ utm_source: 'google', utm_medium: 'cpc', utm_campaign: 'Noida 2BHK' }).campaignName, 'Noida 2BHK');
+  assert.equal(attribution({ utm_source: 'google', utm_medium: 'organic' }).channel, 'website');
+  const meta = attribution({ utm_source: 'facebook', utm_medium: 'paid', utm_id: '120210000000001' });
+  assert.equal(meta.channel, 'meta');
+  assert.equal(meta.campaignId, '120210000000001');
+  assert.equal(attribution({ utm_source: 'ig' }).channel, 'meta');
+  assert.equal(attribution({ utm_source: 'facebook', utm_medium: 'organic' }).channel, 'website');
+  assert.equal(attribution({ airo_page: 'https://site.in/contact?fbclid=xyz' }).channel, 'meta');
+  assert.equal(attribution({}).channel, 'website');
 });

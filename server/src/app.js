@@ -26,6 +26,13 @@ export function createApp() {
     legacyHeaders: false,
     message: { success: false, error: { code: 'rate_limited', message: 'Too many webhook posts.' } }
   }));
+  app.use('/api/forms', rateLimit({
+    windowMs: 60 * 1000,
+    limit: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'rate_limited', message: 'Too many form posts.' } }
+  }));
   app.use('/api', api);
   app.use(notFound);
   app.use(errorHandler);

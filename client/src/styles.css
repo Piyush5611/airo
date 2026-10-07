@@ -933,3 +933,18 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
   table.responsive td { display: flex; justify-content: space-between; gap: 12px; border: 0; padding: 5px 8px; }
   table.responsive td::before { content: attr(data-label); color: var(--muted); font-size: 12px; }
 }
+
+.check-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); cursor: pointer; }
+.check-row input { margin-top: 3px; width: 16px; height: 16px; flex: none; }
+.check-row span { display: grid; gap: 2px; }
+.check-row small { color: var(--muted); font-size: 12px; }
+.copy-block { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.copy-block code, .copy-block pre { flex: 1; min-width: 0; margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.copy-block pre { max-height: 260px; overflow: auto; white-space: pre; }
+.copy-block .btn { flex: none; }
+.form-route { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.form-route div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.form-route span { color: var(--muted); font-size: 12px; }
+.form-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.form-steps code, .quiet code { font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-radius: 6px; }
+@media (max-width: 760px) { .form-route { grid-template-columns: 1fr; } }

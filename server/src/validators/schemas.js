@@ -347,7 +347,8 @@ export const offeringSchema = body({
   priceText: z.string().trim().max(160).optional().default(''),
   locations: z.string().trim().max(400).optional().default(''),
   website: httpsLink,
-  status: z.enum(['active', 'archived']).optional().default('active')
+  status: z.enum(['active', 'archived']).optional().default('active'),
+  websiteForm: z.boolean().optional().default(false)
 });
 
 export const imageUploadSchema = body({

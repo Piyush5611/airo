@@ -510,8 +510,10 @@ export async function saveProviderApi(auth, req) {
   const saved = await detail(auth, id);
   saved.notice = provider.providerKey === 'nexcall'
     ? 'Call Yatri is connected. The API key is saved for this business.'
-    : `${provider.name} is connected.`;
-  saved.linked = true;
+    : provider.providerKey === 'apify'
+      ? 'Apify is connected. Open Growth, Competitors and press Find competitors.'
+      : `${provider.name} is connected.`;
+  saved.linked = provider.providerKey !== 'apify';
   return saved;
 }
 

@@ -2,6 +2,20 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-08 (AIRO finds competitors itself)
+
+- **Change:** New provider `apify` in a new Connections category, Research. The token is checked with `GET https://api.apify.com/v2/users/me` before it is saved encrypted.
+- **Change:** New `integrations/apify.js`. `runActor` uses `run-sync-get-dataset-items` with `maxItems` and a `maxTotalChargeUsd` cap per run: Google search (`apify/google-search-scraper`, 1 page per search, India, $0.10 cap), Meta Ad Library keyword search (`apify/facebook-ads-scraper`, 20 ads per keyword, $0.40 cap), and Google Maps (`compass/crawler-google-places`, 15 places per search, $0.25 cap).
+- **Change:** New `services/competitorDiscovery.js`.
+  - The AI plans up to 4 searches, 3 ad keywords, 2 Maps categories and the location from the profile and saved offerings, and never uses the owner's own names. Without an AI model it falls back to the category and city.
+  - `collectCandidates` merges Google ads, Google results, Meta advertisers and Maps places by domain, or by name when there is no website. It drops portals, directories, social, news and government sites, the owner's own domains and name, and saved competitors, and scores by how often and where they show up.
+  - The top 15 home pages are read. The AI marks each one direct, indirect, not_competitor or unclear with a one-line reason. Not-competitors are not saved.
+  - Suggestions are saved in `competitor_suggestions` with status new, added or ignored. Ignored and added stay that way on later runs. Add creates the competitor and starts its analysis.
+- **Change:** Routes `GET /api/competitors/suggestions`, `POST /api/competitors/discover` (30 minute cooldown), and `POST /api/competitors/suggestions/:id/add` and `/ignore`.
+- **Change:** The job `competitors.discover` runs every 6 hours and searches for up to 3 organizations that have Apify connected and no search in the last 7 days.
+- **Change (client):** The Competitors page has a "Suggested by AIRO" panel with a Find competitors button, the last search summary, cards with fit, reason and where each one was seen, and Add, Ignore and Bring back.
+- **Migration/API impact:** `028_competitor_discovery.sql` adds the `apify` provider row, `competitor_discovery_runs` and `competitor_suggestions`.
+
 ### 2026-10-07 (Competitor Intelligence, phase 1)
 
 - **Change:** New `integrations/webPage.js`, a shared public page reader. `fetchPublic` (public http or https only, private addresses blocked, every redirect checked, 12 second timeout, size cap), `pageText` (title, description, h1 to h3, visible text without scripts), `samePageLinks` (same-site links scored by project, price, offer and similar words) and `pricesIn`. `websiteFormService` now uses it instead of its own copy.

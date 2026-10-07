@@ -235,6 +235,126 @@ function Sources({ report }) {
   );
 }
 
+const FIT = { direct: ['bad', 'Direct competitor'], indirect: ['warn', 'Indirect'], unclear: ['', 'Check yourself'] };
+const SOURCE = { google_ad: 'Google ad', google_search: 'Google search', meta_ad: 'Meta ads', maps: 'Google Maps' };
+
+function Suggestions({ canManage, onAdded }) {
+  const { data, loading, error, reload } = useResource('/api/competitors/suggestions');
+  const [busy, setBusy] = useState(0);
+  const [message, setMessage] = useState('');
+  const [showIgnored, setShowIgnored] = useState(false);
+  const running = Boolean(data?.running);
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setInterval(() => reload({ silent: true }), 5000);
+    return () => clearInterval(timer);
+  }, [running, reload]);
+
+  async function act(path, id = -1) {
+    setBusy(id);
+    setMessage('');
+    try {
+      const result = await api.post(path, {});
+      if (result.competitorId) {
+        setMessage(result.analysing ? 'Added. AIRO is reading their website now.' : 'Added to your competitors.');
+        onAdded(result.competitorId);
+      }
+      reload({ silent: true });
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(0);
+    }
+  }
+
+  if (loading || error || !data?.ready) return null;
+  const items = data.items || [];
+  const fresh = items.filter((row) => row.status === 'new');
+  const ignored = items.filter((row) => row.status === 'ignored');
+  const shown = showIgnored ? ignored : fresh;
+  const run = data.run;
+
+  return (
+    <section className="panel comp-suggest">
+      <header className="comp-head">
+        <div>
+          <h2>Suggested by AIRO</h2>
+          <p className="quiet">
+            AIRO searches Google, Meta ads and Google Maps for what you sell, removes portals and directories, reads each website and asks AI whether they really compete with you. Every week, and whenever you press Find competitors.
+          </p>
+        </div>
+        {canManage && data.apify ? (
+          <button className="btn-primary" type="button" onClick={() => act('/api/competitors/discover')} disabled={running || busy !== 0}>
+            {running ? 'Searching...' : 'Find competitors'}
+          </button>
+        ) : null}
+      </header>
+      {!data.apify ? (
+        <div className="comp-failed">
+          <strong>Connect Apify to let AIRO find competitors.</strong>
+          <span>Open <Link to="/app/connections?section=Research">Connections, Research</Link> and save your Apify token. The free Apify plan gives $5 credit a month; one search uses about $0.50 at most.</span>
+        </div>
+      ) : null}
+      {running ? (
+        <div className="comp-running">
+          <span className="comp-spinner" aria-hidden="true" />
+          <div>
+            <strong>Searching Google, Meta ads and Google Maps...</strong>
+            <p className="quiet">This takes 2 to 4 minutes. You can leave this page.</p>
+          </div>
+        </div>
+      ) : null}
+      {!running && run ? (
+        <p className="quiet comp-note">
+          Last search {when(run.finishedAt || run.startedAt)}{run.triggerType === 'weekly' ? ' (weekly)' : ''}
+          {run.status === 'failed' ? ' did not finish. ' : '. '}
+          {run.counts ? `Checked ${num(run.counts.candidates)} businesses, suggested ${num(run.counts.suggested)}, left out ${num(run.counts.dropped)} that were not a match. ` : ''}
+          {run.plan?.searches?.length ? `Searched: ${run.plan.searches.join(', ')}. ` : ''}
+          {(run.notes || []).join(' ')}
+        </p>
+      ) : null}
+      {message ? <p className="quiet">{message}</p> : null}
+      {shown.length ? (
+        <div className="comp-suggest-grid">
+          {shown.map((row) => {
+            const [tone, text] = FIT[row.verdict] || FIT.unclear;
+            return (
+              <article className="comp-offer" key={row.id}>
+                <header>
+                  <strong>{row.name}</strong>
+                  <span className={`badge ${tone}`}>{text}</span>
+                </header>
+                <p className="quiet">{[row.website ? host(row.website) : '', row.city, row.category].filter(Boolean).join(' · ') || 'No website found'}</p>
+                {row.reason ? <p>{row.reason}</p> : null}
+                <div className="comp-chips">
+                  {row.sources.slice(0, 5).map((source, index) => (
+                    <span key={`${index}-${source.type}`} className="channel-pill" title={source.note}>
+                      {SOURCE[source.type] || source.type}{source.query ? `: ${source.query}` : ''}
+                    </span>
+                  ))}
+                </div>
+                {canManage ? (
+                  <div className="page-actions">
+                    {row.status === 'new' ? <button className="btn-primary" type="button" disabled={busy !== 0} onClick={() => act(`/api/competitors/suggestions/${row.id}/add`, row.id)}>{busy === row.id ? 'Adding...' : 'Add'}</button> : null}
+                    <button className="btn" type="button" disabled={busy !== 0} onClick={() => act(`/api/competitors/suggestions/${row.id}/ignore`, row.id)}>{row.status === 'ignored' ? 'Bring back' : 'Ignore'}</button>
+                    {row.website ? <a className="btn-ghost" href={row.website} target="_blank" rel="noreferrer">Website</a> : row.facebook ? <a className="btn-ghost" href={row.facebook} target="_blank" rel="noreferrer">Facebook</a> : null}
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      ) : data.apify && !running ? <p className="quiet">{showIgnored ? 'Nothing ignored.' : run ? 'No new suggestions. AIRO searches again next week.' : 'Press Find competitors to start.'}</p> : null}
+      {ignored.length ? (
+        <button className="btn-ghost" type="button" onClick={() => setShowIgnored((value) => !value)}>
+          {showIgnored ? 'Back to suggestions' : `Ignored (${ignored.length})`}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 function Detail({ id, canManage, onChanged, onEdit }) {
   const { data, loading, error, reload } = useResource(`/api/competitors/${id}`);
   const [tab, setTab] = useState('overview');
@@ -373,7 +493,7 @@ export function Competitors() {
     <Page
       eyebrow="Growth"
       title="Competitors"
-      lede="Track who you compete with. AIRO reads their website, finds what they sell, their prices and offers, compares them with your products and projects, and suggests what to do. Ask for it on WhatsApp too: send competitors."
+      lede="AIRO finds who you compete with, reads their website, finds what they sell, their prices and offers, compares them with your products and projects, and suggests what to do. Ask for it on WhatsApp too: send competitors."
       actions={canManage && editing === null ? (
         <>
           <button className="btn" type="button" onClick={importProfile}>Import from profile</button>
@@ -390,6 +510,7 @@ export function Competitors() {
               <div className="metric"><span>High threat</span><strong>{num(high)}</strong><em>Same market, similar or better deal</em></div>
             </div>
             {editing !== null ? <CompetitorForm key={editing?.id || 'new'} item={editing || null} onDone={done} onCancel={() => setEditing(null)} /> : null}
+            <Suggestions canManage={canManage} onAdded={(competitorId) => { refresh(); navigate(`/app/growth/competitors/${competitorId}`); }} />
             {note ? <p className="quiet">{note}</p> : null}
             {items.length ? (
               <div className="comp-layout">

@@ -87,6 +87,7 @@ const CHECKS = {
   google_tag_manager: googleToken,
   meta_ads: metaToken,
   linkedin_ads: (apiKey) => bearerCheck('https://api.linkedin.com/v2/userinfo', apiKey),
+  apify: (apiKey) => bearerCheck('https://api.apify.com/v2/users/me', apiKey),
   hubspot: (apiKey) => bearerCheck('https://api.hubapi.com/account-info/v3/details', apiKey),
   salesforce: (apiKey) => bearerCheck('https://login.salesforce.com/services/oauth2/userinfo', apiKey)
 };

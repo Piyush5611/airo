@@ -2,6 +2,7 @@ import * as repo from '../../repositories/adsAgentRepo.js';
 import { importAll } from './leadImport.js';
 import { syncAll } from './metricsSync.js';
 import { monitorAll } from './monitorService.js';
+import { discoverDue } from '../competitorDiscovery.js';
 
 const TICK_MS = 10 * 60 * 1000;
 
@@ -38,6 +39,18 @@ export const JOBS = [
       const result = await monitorAll();
       return {
         summary: `${result.created} new recommendations, ${result.applied} applied, across ${result.organizations} organizations.`,
+        error: result.notes.length ? result.notes.join(' | ') : null
+      };
+    }
+  },
+  {
+    key: 'competitors.discover',
+    everyMinutes: 360,
+    lockMinutes: 45,
+    run: async () => {
+      const result = await discoverDue();
+      return {
+        summary: `${result.suggested} competitor suggestions across ${result.organizations} organizations.`,
         error: result.notes.length ? result.notes.join(' | ') : null
       };
     }

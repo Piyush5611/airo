@@ -8,7 +8,7 @@ import { providerLogo } from '../providerLogos.js';
 import { Badge, Page, State, Subnav, Table, useSection } from '../ui.jsx';
 import { AnalysisPanel, ExperimentsPanel, QualityPanel } from './AdsQuality.jsx';
 
-const CONNECTION_SECTIONS = ['Advertising', 'Real Estate Portals', 'Communication', 'Calling', 'CRM', 'Analytics', 'Developer / API'];
+const CONNECTION_SECTIONS = ['Advertising', 'Real Estate Portals', 'Communication', 'Calling', 'CRM', 'Analytics', 'Research', 'Developer / API'];
 const CATEGORY_KEY = {
   Advertising: 'advertising',
   'Real Estate Portals': 'portals',
@@ -16,6 +16,7 @@ const CATEGORY_KEY = {
   Calling: 'calling',
   CRM: 'crm',
   Analytics: 'analytics',
+  Research: 'research',
   'Developer / API': 'developer'
 };
 export function Connections() {
@@ -124,6 +125,7 @@ function ProviderApiForm({ provider, onDone }) {
   const [manual, setManual] = useState(false);
   const nexcall = provider.providerKey === 'nexcall';
   const meta = provider.providerKey === 'meta_ads';
+  const apify = provider.providerKey === 'apify';
 
   if (provider.providerKey === 'whatsapp') {
     return (
@@ -173,16 +175,20 @@ function ProviderApiForm({ provider, onDone }) {
   return (
     <form className="form-grid panel" onSubmit={save}>
       <h2>{adding ? `Add a ${provider.name} account` : provider.connection?.linked ? `Update ${provider.name} API` : `Connect ${provider.name} API`}</h2>
-      <p className="quiet">{meta ? `Paste the Meta access token and the ad account id, like act_123456789. Meta checks both before the account connects.${adding ? ' An account id that is already connected is updated; a new one is added as another account.' : ''}` : 'The key is checked with the provider before it is saved. A wrong key shows Wrong API and does not connect.'}</p>
-      <label className="stack-field">{nexcall ? 'x-api-key' : 'API key or access token'}
+      <p className="quiet">{meta
+        ? `Paste the Meta access token and the ad account id, like act_123456789. Meta checks both before the account connects.${adding ? ' An account id that is already connected is updated; a new one is added as another account.' : ''}`
+        : apify
+          ? 'Sign in at console.apify.com, open Settings, then API & Integrations, and copy the Personal API token. AIRO checks it with Apify before saving. Searches use your Apify credit; the free plan gives $5 every month.'
+          : 'The key is checked with the provider before it is saved. A wrong key shows Wrong API and does not connect.'}</p>
+      <label className="stack-field">{nexcall ? 'x-api-key' : apify ? 'Apify API token' : 'API key or access token'}
         <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" required minLength={8} />
       </label>
-      {nexcall ? null : (
+      {nexcall || apify ? null : (
         <label className="stack-field">Account id
           <input value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder={meta ? 'act_123456789' : 'Optional account or customer id'} required={meta} />
         </label>
       )}
-      {meta ? null : (
+      {meta || apify ? null : (
         <label className="stack-field">Base URL
           <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={nexcall ? 'Blank uses the Call Yatri default' : 'Optional'} />
         </label>

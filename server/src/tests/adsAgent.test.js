@@ -27,6 +27,8 @@ import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts,
 import { competitorSchema, imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
 import { pageText, pricesIn, samePageLinks } from '../integrations/webPage.js';
 import { analysisFacts, analysisSchema } from '../services/competitorService.js';
+import { collectCandidates, domainOf, fallbackPlan, notCompetitor, planSchema, verdictSchema } from '../services/competitorDiscovery.js';
+import { adLibraryUrl } from '../integrations/apify.js';
 import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
 } from '../services/offeringService.js';
@@ -860,4 +862,63 @@ test('competitor facts carry page urls, prices and keyword data within budget', 
   assert.ok(facts.includes('skyline noida: 880/mo, HIGH'));
   assert.ok(facts.includes('Green Heights'));
   assert.ok(facts.length < 6000);
+});
+
+test('discovery reads domains and leaves out portals, directories and social sites', () => {
+  assert.equal(domainOf('https://www.Skyline.example/lp?gclid=1'), 'skyline.example');
+  assert.equal(domainOf('skyline.example'), 'skyline.example');
+  assert.equal(domainOf(''), '');
+  assert.equal(notCompetitor('99acres.com'), true);
+  assert.equal(notCompetitor('noida.justdial.com'), true);
+  assert.equal(notCompetitor('wa.me'), true);
+  assert.equal(notCompetitor('skyline.example'), false);
+  assert.ok(adLibraryUrl('3 bhk noida').includes('q=3+bhk+noida'));
+  assert.ok(adLibraryUrl('3 bhk noida').includes('country=IN'));
+});
+
+test('discovery merges one business seen on Google, Meta and Maps and skips our own and known names', () => {
+  const rows = collectCandidates({
+    google: [{
+      searchQuery: { term: '3 bhk flats noida' },
+      paidResults: [{ title: 'Skyline Towers | Skyline Group', url: 'https://www.skyline.example/lp' }],
+      organicResults: [
+        { title: '3 BHK in Noida', url: 'https://www.99acres.com/x', position: 1 },
+        { title: 'Skyline Group - Projects', url: 'https://skyline.example/projects', position: 2 },
+        { title: 'Green Heights', url: 'https://green.example.com', position: 3 },
+        { title: 'Old Rival', url: 'https://oldrival.example', position: 4 }
+      ]
+    }],
+    meta: [
+      { pageID: '9', pageName: 'Skyline Group', inputUrl: 'https://www.facebook.com/ads/library/?q=3%20bhk%20noida', snapshot: { linkUrl: 'https://skyline.example/offer' } },
+      { pageID: '7', pageName: 'Metro Homes', snapshot: { linkUrl: 'https://wa.me/91999' } },
+      { pageID: '7', pageName: 'Metro Homes', snapshot: { linkUrl: 'https://metrohomes.example/' } },
+      { pageID: '5', pageName: 'Green Builders', snapshot: { linkUrl: 'https://greenbuilders.example' } }
+    ],
+    maps: [
+      { title: 'Metro Homes', website: 'https://metrohomes.example', totalScore: 4.4, reviewsCount: 80, categoryName: 'Real estate developer', city: 'Noida' },
+      { title: 'Closed Co', permanentlyClosed: true }
+    ],
+    ownDomains: ['green.example.com'],
+    knownDomains: ['oldrival.example'],
+    orgName: 'Green Builders'
+  });
+  assert.deepEqual(rows.map((row) => row.key), ['skyline.example', 'metrohomes.example']);
+  assert.deepEqual(rows[0].sources.map((source) => source.type), ['google_ad', 'google_search', 'meta_ad']);
+  assert.equal(rows[0].sources[2].query, '3 bhk noida');
+  assert.equal(rows[1].city, 'Noida');
+  assert.ok(rows[1].sources.some((source) => source.note === '2 active ads'));
+});
+
+test('discovery plan and AI verdicts are checked before use', () => {
+  assert.equal(planSchema.safeParse({ searches: [], adKeywords: ['x'] }).success, false);
+  const plan = planSchema.safeParse({ searches: ['a', 'b', 'c', 'd', 'e'], adKeywords: 'x', location: 'Noida, India' });
+  assert.equal(plan.success, true);
+  assert.equal(plan.data.searches.length, 4);
+  assert.deepEqual(plan.data.adKeywords, []);
+  const verdicts = verdictSchema.parse({ items: [{ id: '2', verdict: 'DIRECT', reason: 'Same area' }, { id: 3, verdict: 'rival' }] });
+  assert.equal(verdicts.items[0].id, 2);
+  assert.equal(verdicts.items[0].verdict, 'direct');
+  assert.equal(verdicts.items[1].verdict, 'unclear');
+  assert.deepEqual(fallbackPlan({ profile: { category: 'Real estate', officeCity: 'Noida' } }).searches, ['real estate noida']);
+  assert.equal(fallbackPlan({ profile: {} }), null);
 });

@@ -24,6 +24,7 @@ import * as adsQuality from '../services/adsAgent/qualityService.js';
 import * as offerings from '../services/offeringService.js';
 import * as websiteForms from '../services/websiteFormService.js';
 import * as competitors from '../services/competitorService.js';
+import * as discovery from '../services/competitorDiscovery.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -172,6 +173,16 @@ client.delete('/offerings/:id/website-form', requirePermission('campaigns.update
 client.get('/competitors', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await competitors.listCompetitors(req.auth))));
 client.post('/competitors', requirePermission('campaigns.update'), validate(schemas.competitorSchema), asyncHandler(async (req, res) => {
   ok(res, await competitors.createCompetitor(req.auth, req), 201);
+}));
+client.get('/competitors/suggestions', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await discovery.suggestionList(req.auth))));
+client.post('/competitors/discover', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
+  ok(res, await discovery.startDiscovery(req.auth, req));
+}));
+client.post('/competitors/suggestions/:id/add', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await discovery.addSuggestion(req.auth, req, req.params.id));
+}));
+client.post('/competitors/suggestions/:id/ignore', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await discovery.ignoreSuggestion(req.auth, req, req.params.id));
 }));
 client.post('/competitors/import-profile', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
   ok(res, await competitors.importFromProfile(req.auth, req));

@@ -1114,3 +1114,8 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
   .comp-row { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .comp-spinner { animation: none; } }
+.comp-suggest { display: grid; gap: 12px; }
+.comp-suggest-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.comp-suggest .comp-offer .page-actions { margin-top: 4px; }
+.comp-suggest > .btn-ghost { justify-self: start; }
+.comp-failed span { color: var(--ink-soft); font-size: 13px; }

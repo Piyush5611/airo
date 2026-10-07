@@ -2,7 +2,8 @@ import { insert, many, one, run } from '../db/sql.js';
 
 const FIELDS = `id, kind, name, details, usps, offer, price_text AS priceText, locations, website, source, status,
   times_used AS timesUsed, last_used_at AS lastUsedAt, form_token AS formToken, form_leads AS formLeads,
-  form_last_at AS formLastAt, created_at AS createdAt, updated_at AS updatedAt`;
+  form_last_at AS formLastAt, form_check AS formCheck, form_checked_at AS formCheckedAt,
+  created_at AS createdAt, updated_at AS updatedAt`;
 
 export function list(organizationId, { status = 'active', limit = 200 } = {}) {
   return many(
@@ -41,7 +42,17 @@ export function update(organizationId, id, item) {
 }
 
 export function setFormToken(organizationId, id, token) {
-  return run(`UPDATE offerings SET form_token = ? WHERE organization_id = ? AND id = ?`, [token, organizationId, id]);
+  return run(
+    `UPDATE offerings SET form_token = ?, form_check = NULL, form_checked_at = NULL WHERE organization_id = ? AND id = ?`,
+    [token, organizationId, id]
+  );
+}
+
+export function setFormCheck(organizationId, id, status) {
+  return run(
+    `UPDATE offerings SET form_check = ?, form_checked_at = UTC_TIMESTAMP() WHERE organization_id = ? AND id = ?`,
+    [status, organizationId, id]
+  );
 }
 
 export function byFormToken(token) {

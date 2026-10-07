@@ -1016,3 +1016,15 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
   .offer-search { margin-left: 0; width: 100%; }
   .offer-grid { grid-template-columns: 1fr; }
 }
+.form-check { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+.form-check > div { display: grid; gap: 2px; min-width: 0; }
+.form-check small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.form-check.is-found { border-color: #a6e3c4; background: #ecfaf3; }
+.form-check.is-found strong { color: #0f7a4f; }
+.form-check.is-missing, .form-check.is-old_code { border-color: #fcd9a8; background: #fff8ec; }
+.form-check.is-missing strong, .form-check.is-old_code strong { color: #b54708; }
+.form-check.is-unreachable, .form-check.is-blocked, .form-check.is-error { border-color: #f6c4bf; background: #fef3f2; }
+.form-check.is-unreachable strong, .form-check.is-blocked strong, .form-check.is-error strong { color: #b42318; }
+.check-note.is-found { color: #0f7a4f !important; font-weight: 600; }
+.check-note.is-missing, .check-note.is-old_code { color: #b54708 !important; }
+.check-note.is-unreachable, .check-note.is-blocked { color: #b42318 !important; }

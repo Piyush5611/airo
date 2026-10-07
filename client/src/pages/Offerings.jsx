@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, currentToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
-import { day, label, num } from '../format.js';
+import { day, label, num, when } from '../format.js';
 import { Page, State } from '../ui.jsx';
 
 const FALLBACK = {
@@ -210,6 +210,15 @@ function CopyBlock({ value, multiline }) {
 }
 
 const FORM_GUIDES = ['WordPress', 'HTML website', 'Form plugin webhook'];
+const CHECK_TITLE = {
+  found: 'Code found on the website',
+  old_code: 'An old code is on the website',
+  missing: 'Code not found on the website',
+  unreachable: 'Website did not open',
+  blocked: 'This link cannot be checked',
+  error: 'Check failed'
+};
+const CHECK_SHORT = { found: 'Code on site', old_code: 'Old code on site', missing: 'Code not on site', unreachable: 'Site did not open', blocked: 'Cannot check' };
 
 function WebsiteFormPanel({ item, canManage, onChange, onClose }) {
   const [guide, setGuide] = useState(FORM_GUIDES[0]);
@@ -217,6 +226,22 @@ function WebsiteFormPanel({ item, canManage, onChange, onClose }) {
   const [message, setMessage] = useState('');
   const endpoint = item.formToken ? formEndpoint(item.formToken) : '';
   const panelRef = useRef(null);
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState(null);
+
+  async function verify() {
+    setChecking(true);
+    setCheck(null);
+    try {
+      const result = await api.post(`/api/offerings/${item.id}/website-form/check`, {});
+      setCheck(result.check);
+      onChange();
+    } catch (err) {
+      setCheck({ status: 'error', message: err.message });
+    } finally {
+      setChecking(false);
+    }
+  }
   useEffect(() => { panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, []);
 
   async function act(method, confirmText) {
@@ -252,7 +277,16 @@ function WebsiteFormPanel({ item, canManage, onChange, onClose }) {
             <div><strong>Meta Ads</strong><span>utm_source=facebook or instagram (not organic), or a Facebook click id, go to Leads and the Meta Ads Leads tab.</span></div>
             <div><strong>Website</strong><span>Everyone else is saved in Leads with the source Website.</span></div>
           </div>
-          <p className="quiet">{item.formLeads ? `${item.formLeads} form ${item.formLeads === 1 ? 'entry' : 'entries'} received, last ${day(item.formLastAt)}.` : 'No form entry yet.'} The form must have a phone number field. A phone number already in Leads is matched to that lead, not added again.</p>
+          <div className={`form-check is-${check?.status || item.formCheck || 'none'}`}>
+            <div>
+              <strong>{CHECK_TITLE[check?.status || item.formCheck] || 'Not checked yet'}</strong>
+              <small>
+                {check?.message || (item.formCheckedAt ? `Checked ${when(item.formCheckedAt)} on ${item.website}` : `AIRO opens ${item.website} and looks for this code.`)}
+              </small>
+            </div>
+            <button className="btn" type="button" disabled={checking} onClick={verify}>{checking ? 'Checking…' : 'Check website'}</button>
+          </div>
+          <p className="quiet">{item.formLeads ? `${item.formLeads} form ${item.formLeads === 1 ? 'entry' : 'entries'} received, last ${when(item.formLastAt)}. That also proves the code works.` : 'No form entry yet.'} The form must have a phone number field. A phone number already in Leads is matched to that lead, not added again.</p>
           <div className="chip-tabs">
             {FORM_GUIDES.map((key) => <button key={key} type="button" className={guide === key ? 'is-on' : ''} onClick={() => setGuide(key)}>{key}</button>)}
           </div>
@@ -415,7 +449,7 @@ function OfferingCard({ item, catalog, maxPhotos, canManage, onEdit, onDelete, o
         <div>
           <span>Website form</span>
           {!item.website ? <><strong className="is-muted">Off</strong><small>Add a website link first</small></> : item.formToken
-            ? <><strong>{item.formLeads ? `${item.formLeads} leads` : 'Live'}</strong><small>{item.formLeads ? day(item.formLastAt) : 'No entry yet'}</small></>
+            ? <><strong>{item.formLeads ? `${item.formLeads} leads` : 'Live'}</strong><small className={`check-note is-${item.formCheck || 'none'}`}>{CHECK_SHORT[item.formCheck] || 'Code not checked'}</small></>
             : <><strong className="is-muted">Not set up</strong><small>Website added</small></>}
         </div>
       </div>

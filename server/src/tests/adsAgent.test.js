@@ -20,7 +20,7 @@ import { demandSection } from '../services/googleAdChat.js';
 import { usableInterest } from '../services/adsAgent/chatPlanner.js';
 import { menuMessage, messageParts } from '../services/whatsappService.js';
 import { catalogFacts } from '../services/llmService.js';
-import { attribution, flattenFields, pickContact } from '../services/websiteFormService.js';
+import { attribution, codeState, flattenFields, pickContact, scriptSources } from '../services/websiteFormService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
@@ -791,4 +791,13 @@ test('website form attribution splits Google Ads, Meta Ads and the website', () 
   assert.equal(attribution({ utm_source: 'facebook', utm_medium: 'organic' }).channel, 'website');
   assert.equal(attribution({ airo_page: 'https://site.in/contact?fbclid=xyz' }).channel, 'meta');
   assert.equal(attribution({}).channel, 'website');
+});
+
+test('website form check finds the current code, an old code, or nothing', () => {
+  const token = 'a'.repeat(64);
+  assert.equal(codeState(`<script>var AIRO = 'https://x.in/api/forms/${token}';</script>`, token), 'found');
+  assert.equal(codeState(`var AIRO='https://x.in/api/forms/${'b'.repeat(64)}'`, token), 'old_code');
+  assert.equal(codeState('<html><body>Hello</body></html>', token), '');
+  const scripts = scriptSources('<script src="/wp-content/cache/min.js?ver=1&amp;x=2"></script><script src="https://cdn.other.com/a.js"></script><script src=\'app.js\'></script>', 'https://site.in/projects/');
+  assert.deepEqual(scripts, ['https://site.in/wp-content/cache/min.js?ver=1&x=2', 'https://site.in/projects/app.js']);
 });

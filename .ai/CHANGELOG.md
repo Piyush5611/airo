@@ -13,6 +13,7 @@ Significant structural changes only. Newest first.
 - **Change:** `POST/DELETE /api/offerings/:id/website-form` create, renew or remove the link. `POST /api/offerings` accepts `websiteForm: true`. A link is only made for an item that has a website link. Clearing the website on edit removes the link, and a link on an item without a website is not accepted.
 - **Change:** The Google Ads Leads tab now reads `ad_lead_imports` like Meta does.
 - **Change (client):** The Add new form has a "Create a website form link" checkbox (on by default). The list has a Website form column and a panel with a WordPress guide (WPCode footer), an HTML guide, the plugin webhook URL, and a copy-paste script. The script copies every form submit on the page to AIRO with `sendBeacon`, skips forms that have a password field, and keeps the UTM tags and click ids from the landing URL in localStorage.
+- **Change:** `POST /api/offerings/:id/website-form/check` opens the item's website (public http or https only, private addresses blocked, up to 4 redirects, 3 MB page cap) and up to 8 same-site script files, and looks for the current token. The result (found, old_code, missing, unreachable or blocked) is saved in `offerings.form_check` and `form_checked_at` (migration `025_website_form_check.sql`) and cleared when the link changes.
 - **Migration/API impact:** `024_website_forms.sql` adds `offerings.form_token`, `form_leads` and `form_last_at`, and `ad_lead_imports.channel`.
 
 ### 2026-10-06 (AIRO score out of 100 for every Meta ad)

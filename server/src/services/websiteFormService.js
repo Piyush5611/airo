@@ -1,4 +1,7 @@
 import crypto from 'crypto';
+import dns from 'node:dns/promises';
+import net from 'node:net';
+import { privateAddress } from '../integrations/verify.js';
 import * as offeringRepo from '../repositories/offeringRepo.js';
 import * as adsRepo from '../repositories/adsAgentRepo.js';
 import { adConnectionFor, sourceForProvider, websiteSource, workspaceId } from '../repositories/connectionRepo.js';
@@ -183,6 +186,118 @@ export async function ingestWebsiteForm(token, body) {
   }
   await offeringRepo.markFormLead(organizationId, offering.id);
   return { stored: true, channel: attr.channel, outcome };
+}
+
+const MAX_PAGE_BYTES = 3 * 1024 * 1024;
+const MAX_SCRIPT_BYTES = 1024 * 1024;
+const MAX_SCRIPTS = 8;
+
+async function publicUrl(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return null;
+  const host = url.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return null;
+  if (net.isIP(host)) return privateAddress(host) ? null : url;
+  const records = await dns.lookup(host, { all: true }).catch(() => []);
+  if (!records.length || records.some((record) => privateAddress(record.address))) return null;
+  return url;
+}
+
+async function readCapped(response, cap) {
+  const reader = response.body?.getReader();
+  if (!reader) return '';
+  const chunks = [];
+  let size = 0;
+  while (size < cap) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.length;
+  }
+  reader.cancel().catch(() => {});
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8').slice(0, cap);
+}
+
+async function fetchPublic(raw, cap) {
+  let target = raw;
+  for (let hop = 0; hop < 4; hop += 1) {
+    const url = await publicUrl(target);
+    if (!url) return { blocked: true };
+    let response;
+    try {
+      response = await fetch(url, {
+        redirect: 'manual',
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIRO-FormCheck/1.0)', Accept: 'text/html,application/javascript,*/*' },
+        signal: AbortSignal.timeout(12000)
+      });
+    } catch {
+      return { failed: true };
+    }
+    if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
+      target = new URL(response.headers.get('location'), url).toString();
+      continue;
+    }
+    if (!response.ok) return { status: response.status };
+    return { url, body: await readCapped(response, cap) };
+  }
+  return { failed: true };
+}
+
+export function scriptSources(html, pageUrl) {
+  const out = [];
+  for (const match of String(html).matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)) {
+    try {
+      const url = new URL(match[1].replace(/&amp;/g, '&'), pageUrl);
+      if (url.hostname === new URL(pageUrl).hostname && !out.includes(url.toString())) out.push(url.toString());
+    } catch {
+      // Ignore broken script links.
+    }
+  }
+  return out.slice(0, MAX_SCRIPTS);
+}
+
+export function codeState(text, token) {
+  if (String(text).includes(token)) return 'found';
+  if (/\/api\/forms\/[a-f0-9]{64}/.test(String(text))) return 'old_code';
+  return '';
+}
+
+const CHECK_MESSAGES = {
+  found: 'The AIRO code is on the website.',
+  old_code: 'The website has an older AIRO code. Paste the current code again; the old one no longer sends leads.',
+  missing: 'The AIRO code was not found on this page. Paste it and save, clear any cache plugin, then check again. If the code is only on another page, put that page link in Website.',
+  unreachable: 'The website could not be opened from AIRO. Check that the link works.',
+  blocked: 'This link cannot be checked. Use the public https link of the website.'
+};
+
+export async function scanWebsite(website, token) {
+  const page = await fetchPublic(website, MAX_PAGE_BYTES);
+  if (page.blocked) return { status: 'blocked' };
+  if (!page.body && page.body !== '') return { status: 'unreachable', httpStatus: page.status || null };
+  const direct = codeState(page.body, token);
+  if (direct) return { status: direct, where: 'page' };
+  for (const src of scriptSources(page.body, page.url)) {
+    const script = await fetchPublic(src, MAX_SCRIPT_BYTES);
+    const state = script.body ? codeState(script.body, token) : '';
+    if (state) return { status: state, where: 'script' };
+  }
+  return { status: 'missing' };
+}
+
+export async function checkWebsiteForm(auth, req, id) {
+  const found = await offeringRepo.byId(auth.organizationId, id);
+  if (!found) throw new ApiError(404, 'Item not found.', 'not_found');
+  if (!found.website || !found.formToken) throw new ApiError(422, 'Create the website form link first.', 'validation_error');
+  const result = await scanWebsite(found.website, found.formToken);
+  await offeringRepo.setFormCheck(auth.organizationId, id, result.status);
+  await recordAudit(req, { action: 'offering.form_link_checked', resource: 'offering', resourceId: id, metadata: { status: result.status } });
+  const http = result.httpStatus ? ` (the site answered ${result.httpStatus})` : '';
+  return { status: result.status, message: `${CHECK_MESSAGES[result.status]}${http}` };
 }
 
 export async function enableWebsiteForm(auth, req, id) {

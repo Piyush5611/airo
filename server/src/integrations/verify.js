@@ -5,7 +5,7 @@ import { ApiError } from '../utils/errors.js';
 const WRONG = () => new ApiError(422, 'Wrong API.', 'validation_error');
 const SILENT = () => new ApiError(422, 'The API did not respond.', 'validation_error');
 
-function privateAddress(ip) {
+export function privateAddress(ip) {
   if (net.isIP(ip) === 4) {
     const [a, b] = ip.split('.').map(Number);
     if (a === 0 || a === 10 || a === 127) return true;

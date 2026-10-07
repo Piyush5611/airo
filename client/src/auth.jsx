@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { api, clearSupportToken, currentToken, restoreSupportToken, setAccessToken } from './api.js';
+import { clearResourceCache } from './data.js';
 
 const AuthContext = createContext(null);
 
@@ -8,7 +9,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const onLost = () => setUser(null);
+    const onLost = () => { clearResourceCache(); setUser(null); };
     window.addEventListener('airo:unauthorized', onLost);
     return () => window.removeEventListener('airo:unauthorized', onLost);
   }, []);
@@ -45,6 +46,7 @@ export function AuthProvider({ children }) {
     loading,
     async login(email, password, remember = true) {
       clearSupportToken();
+      clearResourceCache();
       const data = await api.post('/api/auth/login', { email, password, remember });
       setAccessToken(data.accessToken);
       setUser({ ...data.user, permissions: data.user.permissions });
@@ -53,6 +55,7 @@ export function AuthProvider({ children }) {
       return me;
     },
     async logout() {
+      clearResourceCache();
       const support = user?.supportAccess;
       if (support) {
         const platformToken = sessionStorage.getItem('airo_platform_token');
@@ -71,6 +74,7 @@ export function AuthProvider({ children }) {
       return 'login';
     },
     async enterSupport(organizationId) {
+      clearResourceCache();
       sessionStorage.setItem('airo_platform_token', currentToken() || '');
       const data = await api.post(`/api/admin/organizations/${organizationId}/support-access`);
       setAccessToken(data.accessToken, true);

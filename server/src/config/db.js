@@ -13,7 +13,9 @@ export const pool = mysql.createPool({
   timezone: 'Z',
   decimalNumbers: true,
   dateStrings: true,
-  connectTimeout: 8000
+  connectTimeout: 8000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000
 });
 
 export async function pingDatabase() {

@@ -2,12 +2,20 @@ import { pool } from '../config/db.js';
 import { ApiError } from '../utils/errors.js';
 import { env } from '../config/env.js';
 
+const DROPPED = new Set(['ECONNRESET', 'PROTOCOL_CONNECTION_LOST', 'EPIPE', 'ETIMEDOUT']);
+
 export async function many(sql, params = []) {
   try {
     const [rows] = await pool.query(sql, params);
     return rows;
   } catch (error) {
-    throw wrap(error);
+    if (!DROPPED.has(error?.code) || !/^\s*(SELECT|WITH)\b/i.test(sql)) throw wrap(error);
+    try {
+      const [rows] = await pool.query(sql, params);
+      return rows;
+    } catch (again) {
+      throw wrap(again);
+    }
   }
 }
 

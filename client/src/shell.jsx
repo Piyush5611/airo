@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api } from './api.js';
 import { useAuth } from './auth.jsx';
@@ -266,7 +266,9 @@ export function Shell({ kicker, nav, home }) {
           </div>
         ) : null}
         <main className="content">
-          <Outlet />
+          <Suspense fallback={<div className="skeleton-block" aria-label="Loading page" />}>
+            <Outlet />
+          </Suspense>
         </main>
         <AccountSetup />
       </div>

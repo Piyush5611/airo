@@ -32,10 +32,10 @@ export function useTitle(title) {
   }, [title]);
 }
 
-export function Page({ eyebrow, title, lede, actions, children }) {
+export function Page({ eyebrow, title, lede, actions, className, children }) {
   useTitle(title);
   return (
-    <section>
+    <section className={className}>
       <header className="page-head">
         <div>
           <p className="eyebrow">{eyebrow}</p>

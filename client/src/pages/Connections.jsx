@@ -861,7 +861,7 @@ function ScoreRing({ item }) {
 function EditButton({ disabled, onClick }) {
   return (
     <button
-      className="icon-btn"
+      className="edit-btn"
       type="button"
       disabled={disabled}
       onClick={(event) => { event.stopPropagation(); onClick(); }}

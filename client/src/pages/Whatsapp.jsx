@@ -364,10 +364,10 @@ export function WorkspaceWhatsapp() {
   const active = detail.data?.conversation?.id === open ? detail.data.conversation : null;
   const messages = active ? detail.data.messages || [] : [];
   return (
-    <Page eyebrow="Workspace" title="WhatsApp" lede="Add this business's WhatsApp numbers. A chat from one of those numbers is recognized as this workspace.">
+    <Page className="page-fill" eyebrow="Workspace" title="WhatsApp" lede="Add this business's WhatsApp numbers. A chat from one of those numbers is recognized as this workspace.">
       <State loading={loading} error={error} onRetry={reload}>
         {data ? (
-          <div className="stack">
+          <div className="stack wa-stack">
             {data.notice ? <p className="error-box">{data.notice}</p> : <BusinessNumbers numbers={data.numbers || []} reload={reload} />}
             <section className="wa-inbox" aria-label="Customer WhatsApp chats">
               <div className="wa-people">

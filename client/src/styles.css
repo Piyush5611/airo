@@ -1028,3 +1028,10 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
 .check-note.is-found { color: #0f7a4f !important; font-weight: 600; }
 .check-note.is-missing, .check-note.is-old_code { color: #b54708 !important; }
 .check-note.is-unreachable, .check-note.is-blocked { color: #b42318 !important; }
+.form-leads { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; }
+.form-leads header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.form-leads h3, .form-setup-title { margin: 0; font-size: 14px; color: var(--ink); }
+.channel-pill { display: inline-flex; align-items: center; min-height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--ink-soft); }
+.channel-pill.is-google { background: #e8f1fd; color: #1f62c4; }
+.channel-pill.is-meta { background: #eeebff; color: #4b3fe0; }
+.channel-pill.is-website { background: #e9f8f0; color: #0f7a4f; }

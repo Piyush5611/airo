@@ -3,7 +3,8 @@ import { api, currentToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { day, label, num, when } from '../format.js';
-import { Page, State } from '../ui.jsx';
+import { useNavigate } from 'react-router-dom';
+import { Badge, Page, State, Table } from '../ui.jsx';
 
 const FALLBACK = {
   kinds: [{ key: 'product', label: 'Product' }, { key: 'service', label: 'Service' }, { key: 'package', label: 'Package' }, { key: 'other', label: 'Other' }],
@@ -220,6 +221,52 @@ const CHECK_TITLE = {
 };
 const CHECK_SHORT = { found: 'Code on site', old_code: 'Old code on site', missing: 'Code not on site', unreachable: 'Site did not open', blocked: 'Cannot check' };
 
+const CHANNELS = [['all', 'All'], ['google', 'Google Ads'], ['meta', 'Meta Ads'], ['website', 'Website (organic)']];
+const CHANNEL_LABEL = { google: 'Google Ads', meta: 'Meta Ads', website: 'Website (organic)' };
+
+function FormLeads({ item }) {
+  const { can } = useAuth();
+  const navigate = useNavigate();
+  const allowed = can('leads.view');
+  const { data, loading, error, reload } = useResource(allowed ? `/api/offerings/${item.id}/website-form/leads` : null);
+  const [channel, setChannel] = useState('all');
+  if (!allowed) return null;
+  const items = data?.items || [];
+  const shown = items.filter((row) => channel === 'all' || row.channel === channel);
+  return (
+    <section className="form-leads">
+      <header>
+        <h3>Leads from this form</h3>
+        <div className="chip-tabs">
+          {CHANNELS.map(([key, text]) => (
+            <button key={key} type="button" className={channel === key ? 'is-on' : ''} onClick={() => setChannel(key)}>
+              {text} · {key === 'all' ? items.length : items.filter((row) => row.channel === key).length}
+            </button>
+          ))}
+        </div>
+      </header>
+      <State loading={loading} error={error} onRetry={reload}>
+        {shown.length ? (
+          <Table
+            onRow={(row) => navigate(`/app/growth/leads/${row.leadId}`)}
+            columns={[
+              { key: 'name', label: 'Lead', render: (row) => <><strong>{row.fullName}</strong><small>{[row.phone, row.city].filter(Boolean).join(' · ')}</small></> },
+              { key: 'channel', label: 'Came from', render: (row) => <><span className={`channel-pill is-${row.channel}`}>{CHANNEL_LABEL[row.channel] || label(row.channel)}</span>{row.campaignName ? <small>{row.campaignName}</small> : null}</> },
+              { key: 'status', label: 'Stage', render: (row) => <Badge value={row.status} /> },
+              { key: 'submitted', label: 'Submitted', render: (row) => when(row.submittedAt) },
+              { key: 'outcome', label: 'In Leads', render: (row) => (row.outcome === 'matched' ? 'Already there' : 'Added') },
+              { key: 'owner', label: 'Owner', render: (row) => row.assignedTo || 'Unassigned' }
+            ]}
+            rows={shown.map((row) => ({ ...row, leadId: row.id, id: `entry-${row.entryId}` }))}
+          />
+        ) : (
+          <p className="quiet">{items.length ? 'No lead from this channel yet.' : 'No lead from this form yet. They show here as soon as someone fills the form on your website.'}</p>
+        )}
+      </State>
+    </section>
+  );
+}
+
 function WebsiteFormPanel({ item, canManage, onChange, onClose }) {
   const [guide, setGuide] = useState(FORM_GUIDES[0]);
   const [busy, setBusy] = useState(false);
@@ -287,6 +334,8 @@ function WebsiteFormPanel({ item, canManage, onChange, onClose }) {
             <button className="btn" type="button" disabled={checking} onClick={verify}>{checking ? 'Checking…' : 'Check website'}</button>
           </div>
           <p className="quiet">{item.formLeads ? `${item.formLeads} form ${item.formLeads === 1 ? 'entry' : 'entries'} received, last ${when(item.formLastAt)}. That also proves the code works.` : 'No form entry yet.'} The form must have a phone number field. A phone number already in Leads is matched to that lead, not added again.</p>
+          <FormLeads item={item} />
+          <h3 className="form-setup-title">Put the form on your website</h3>
           <div className="chip-tabs">
             {FORM_GUIDES.map((key) => <button key={key} type="button" className={guide === key ? 'is-on' : ''} onClick={() => setGuide(key)}>{key}</button>)}
           </div>

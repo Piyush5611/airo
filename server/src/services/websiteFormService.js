@@ -10,6 +10,7 @@ import { phoneDigits } from './adsAgent/leadImport.js';
 import { randomToken } from '../utils/cryptoBox.js';
 import { ApiError } from '../utils/errors.js';
 import { recordAudit } from './auditService.js';
+import { leadScope } from '../utils/scope.js';
 
 const TOKEN = /^[a-f0-9]{64}$/;
 const SKIP_KEY = /pass|card|cvv|cvc|otp|nonce|captcha|recaptcha|token|^_/i;
@@ -184,6 +185,7 @@ export async function ingestWebsiteForm(token, body) {
       });
     }
   }
+  await offeringRepo.addFormEntry({ organizationId, offeringId: offering.id, leadId, channel: attr.channel, outcome, campaignName: attr.campaignName });
   await offeringRepo.markFormLead(organizationId, offering.id);
   return { stored: true, channel: attr.channel, outcome };
 }
@@ -298,6 +300,20 @@ export async function checkWebsiteForm(auth, req, id) {
   await recordAudit(req, { action: 'offering.form_link_checked', resource: 'offering', resourceId: id, metadata: { status: result.status } });
   const http = result.httpStatus ? ` (the site answered ${result.httpStatus})` : '';
   return { status: result.status, message: `${CHECK_MESSAGES[result.status]}${http}` };
+}
+
+export async function websiteFormLeads(auth, id) {
+  const found = await offeringRepo.byId(auth.organizationId, id);
+  if (!found) throw new ApiError(404, 'Item not found.', 'not_found');
+  const scope = leadScope(auth);
+  const items = await offeringRepo.formEntries({
+    organizationId: auth.organizationId,
+    offeringId: id,
+    scopeSql: scope.sql,
+    scopeParams: scope.params,
+    limit: 200
+  });
+  return { items };
 }
 
 export async function enableWebsiteForm(auth, req, id) {

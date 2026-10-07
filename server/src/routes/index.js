@@ -157,6 +157,9 @@ client.post('/offerings/:id/website-form', requirePermission('campaigns.update')
   await websiteForms.enableWebsiteForm(req.auth, req, req.params.id);
   ok(res, await offerings.listOfferings(req.auth));
 }));
+client.get('/offerings/:id/website-form/leads', requirePermission('campaigns.view'), requirePermission('leads.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await websiteForms.websiteFormLeads(req.auth, req.params.id));
+}));
 client.post('/offerings/:id/website-form/check', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   const check = await websiteForms.checkWebsiteForm(req.auth, req, req.params.id);
   ok(res, { check, ...(await offerings.listOfferings(req.auth)) });

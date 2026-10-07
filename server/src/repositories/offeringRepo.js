@@ -66,6 +66,27 @@ export function markFormLead(organizationId, id) {
   );
 }
 
+export function addFormEntry(row) {
+  return insert(
+    `INSERT INTO website_form_entries (organization_id, offering_id, lead_id, channel, outcome, campaign_name) VALUES (?, ?, ?, ?, ?, ?)`,
+    [row.organizationId, row.offeringId, row.leadId, row.channel, row.outcome, row.campaignName || null]
+  );
+}
+
+export function formEntries({ organizationId, offeringId, scopeSql, scopeParams, limit }) {
+  return many(
+    `SELECT e.id AS entryId, e.channel, e.outcome, e.campaign_name AS campaignName, e.created_at AS submittedAt,
+            l.id, l.full_name AS fullName, l.phone, l.email, l.city, l.status, u.full_name AS assignedTo
+     FROM website_form_entries e
+     JOIN leads l ON l.id = e.lead_id AND l.organization_id = e.organization_id
+     LEFT JOIN users u ON u.id = l.assigned_user_id
+     WHERE e.organization_id = ? AND e.offering_id = ?${scopeSql}
+     ORDER BY e.created_at DESC
+     LIMIT ?`,
+    [organizationId, offeringId, ...scopeParams, limit]
+  );
+}
+
 export function remove(organizationId, id) {
   return run(`DELETE FROM offerings WHERE organization_id = ? AND id = ?`, [organizationId, id]);
 }

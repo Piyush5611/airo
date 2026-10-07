@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api, currentToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
-import { day, label } from '../format.js';
-import { Badge, Page, State, Table } from '../ui.jsx';
+import { day, label, num } from '../format.js';
+import { Page, State } from '../ui.jsx';
 
 const FALLBACK = {
   kinds: [{ key: 'product', label: 'Product' }, { key: 'service', label: 'Service' }, { key: 'package', label: 'Package' }, { key: 'other', label: 'Other' }],
@@ -102,10 +102,10 @@ function Photos({ item, maxPhotos, canManage, onChange }) {
       {ids.map((id) => (
         <figure key={id}>
           <MediaImage id={id} alt={item.name} />
-          {canManage ? <button className="btn" type="button" onClick={() => remove(id)}>Delete</button> : null}
+          {canManage ? <button className="offer-photo-del" type="button" onClick={() => remove(id)} aria-label="Delete photo" title="Delete photo">×</button> : null}
         </figure>
       ))}
-      {canManage && ids.length < maxPhotos ? <ImageUpload text={busy ? 'Uploading…' : 'Add photo'} onFile={upload} disabled={busy} /> : null}
+      {canManage && ids.length < maxPhotos ? <ImageUpload text={busy ? 'Uploading…' : `+ Photo ${ids.length}/${maxPhotos}`} onFile={upload} disabled={busy} /> : null}
       {!ids.length && !canManage ? <span className="quiet">No photos</span> : null}
       {message ? <span className="quiet">{message}</span> : null}
     </div>
@@ -143,7 +143,7 @@ function LogoPanel({ logoId, canManage, onChange }) {
     <section className="panel offer-logo">
       <header>
         <h2>Business logo</h2>
-        <p className="quiet">AIRO puts this logo on the ad designs it makes. PNG with a transparent background looks best.</p>
+        <p className="quiet">Goes on every ad design. A transparent PNG looks best.</p>
       </header>
       <div className="offer-photos">
         {logoId ? <figure><MediaImage id={logoId} alt="Business logo" /></figure> : <span className="quiet">No logo yet</span>}
@@ -318,7 +318,7 @@ function OfferingForm({ item, catalog, onDone, onCancel }) {
   }
 
   return (
-    <form className="panel form-grid" onSubmit={save}>
+    <form className="panel form-grid offer-form" onSubmit={save}>
       <header>
         <h2>{item ? `Edit ${item.name}` : 'Add a product, project or service'}</h2>
         {catalog.sectorLabel ? <p className="quiet">Types and examples are for your sector: {catalog.sectorLabel}. Change the sector in Settings, Organization.</p> : null}
@@ -362,6 +362,85 @@ function OfferingForm({ item, catalog, onDone, onCancel }) {
   );
 }
 
+function points(value) {
+  return String(value || '')
+    .split(/\n|,|;|•|\|/)
+    .map((part) => part.replace(/^[\s\-*]+/, '').trim())
+    .filter((part) => part.length > 1)
+    .slice(0, 3);
+}
+
+function toneOf(name) {
+  let sum = 0;
+  for (const char of String(name)) sum = (sum + char.charCodeAt(0)) % 997;
+  return sum % 6;
+}
+
+function initialsOf(name) {
+  return String(name).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
+}
+
+function OfferingCard({ item, catalog, maxPhotos, canManage, onEdit, onDelete, onForm, onChange }) {
+  const cover = item.photoIds?.[0];
+  const highlights = points(item.usps);
+  const archived = item.status === 'archived';
+  return (
+    <article className={`offer-card${archived ? ' is-archived' : ''}`}>
+      <div className={`offer-cover tone-${toneOf(item.name)}`}>
+        {cover ? <MediaImage id={cover} alt={item.name} /> : <span className="offer-initials">{initialsOf(item.name)}</span>}
+        <span className="offer-kind">{kindLabel(catalog, item.kind)}</span>
+        {archived ? <span className="offer-state">Archived</span> : null}
+      </div>
+      <div className="offer-body">
+        <div className="offer-title">
+          <h3>{item.name}</h3>
+          {item.locations ? <p className="offer-place">{item.locations}</p> : null}
+        </div>
+        {item.priceText || item.offer ? (
+          <div className="offer-money">
+            {item.priceText ? <strong>{item.priceText}</strong> : null}
+            {item.offer ? <span className="offer-deal">{item.offer}</span> : null}
+          </div>
+        ) : null}
+        {item.details ? <p className="offer-details">{item.details}</p> : null}
+        {highlights.length ? <div className="offer-tags">{highlights.map((text) => <span key={text}>{text}</span>)}</div> : null}
+        <Photos item={item} maxPhotos={maxPhotos} canManage={canManage} onChange={onChange} />
+      </div>
+      <div className="offer-stats">
+        <div>
+          <span>Used in ads</span>
+          <strong>{item.timesUsed ? `${item.timesUsed}×` : 'Not yet'}</strong>
+          {item.timesUsed ? <small>{day(item.lastUsedAt)}</small> : <small>{SOURCE[item.source] || label(item.source)}</small>}
+        </div>
+        <div>
+          <span>Website form</span>
+          {!item.website ? <><strong className="is-muted">Off</strong><small>Add a website link first</small></> : item.formToken
+            ? <><strong>{item.formLeads ? `${item.formLeads} leads` : 'Live'}</strong><small>{item.formLeads ? day(item.formLastAt) : 'No entry yet'}</small></>
+            : <><strong className="is-muted">Not set up</strong><small>Website added</small></>}
+        </div>
+      </div>
+      <footer className="offer-actions">
+        {item.website ? (
+          <button className={item.formToken ? 'btn' : 'btn-primary'} type="button" onClick={() => onForm(item.id)} disabled={!item.formToken && !canManage}>
+            {item.formToken ? 'Website form code' : 'Create website form'}
+          </button>
+        ) : null}
+        {item.website ? <a className="btn-ghost" href={item.website} target="_blank" rel="noreferrer">Open site</a> : null}
+        {canManage ? (
+          <span className="offer-icons">
+            <button className="edit-btn" type="button" onClick={() => onEdit(item)} aria-label={`Edit ${item.name}`} title="Edit">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+            </button>
+            <button className="edit-btn is-danger" type="button" onClick={() => onDelete(item)} aria-label={`Delete ${item.name}`} title="Delete">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+            </button>
+          </span>
+        ) : null}
+      </footer>
+    </article>
+  );
+}
+
 export function Offerings() {
   const { can } = useAuth();
   const canManage = can('campaigns.update');
@@ -369,7 +448,20 @@ export function Offerings() {
   const [editing, setEditing] = useState(null);
   const [note, setNote] = useState('');
   const [formFor, setFormFor] = useState(null);
+  const [query, setQuery] = useState('');
+  const [kind, setKind] = useState('all');
+  const [view, setView] = useState('active');
   const items = data?.items || [];
+  const kindsUsed = [...new Set(items.map((row) => row.kind))];
+  const needle = query.trim().toLowerCase();
+  const shown = items
+    .filter((row) => (view === 'all' ? true : row.status === view))
+    .filter((row) => kind === 'all' || row.kind === kind)
+    .filter((row) => !needle || [row.name, row.details, row.usps, row.offer, row.locations, row.priceText].some((value) => String(value || '').toLowerCase().includes(needle)));
+  const active = items.filter((row) => row.status === 'active').length;
+  const withForm = items.filter((row) => row.formToken).length;
+  const formLeads = items.reduce((sum, row) => sum + Number(row.formLeads || 0), 0);
+  const usedInAds = items.filter((row) => row.timesUsed).length;
   const formItem = formFor ? items.find((row) => row.website && (row.id === formFor || row.name === formFor)) : null;
   const catalog = data?.catalog?.kinds?.length ? data.catalog : FALLBACK;
   const refresh = () => reload({ silent: true });
@@ -391,49 +483,6 @@ export function Offerings() {
     refresh();
   };
 
-  const columns = [
-    { key: 'name', label: 'Name', render: (row) => <><strong>{row.name}</strong><small>{kindLabel(catalog, row.kind)}</small></> },
-    {
-      key: 'details',
-      label: 'Details',
-      render: (row) => (
-        <>
-          {row.details ? <span>{String(row.details).slice(0, 140)}</span> : null}
-          {row.usps ? <small>USPs: {String(row.usps).slice(0, 120)}</small> : null}
-          {row.offer ? <small>Offer: {row.offer}</small> : null}
-          {!row.details && !row.usps && !row.offer ? '—' : null}
-        </>
-      )
-    },
-    { key: 'priceText', label: 'Price', render: (row) => row.priceText || '—' },
-    { key: 'locations', label: catalog.fields.locationLabel.charAt(0) + catalog.fields.locationLabel.slice(1).toLowerCase(), render: (row) => row.locations || '—' },
-    { key: 'photos', label: 'Photos', render: (row) => <Photos item={row} maxPhotos={data?.maxPhotos || 5} canManage={canManage} onChange={refresh} /> },
-    {
-      key: 'websiteForm',
-      label: 'Website form',
-      render: (row) => (row.website ? (
-        <div className="stack-cell">
-          <button className="btn" type="button" onClick={() => setFormFor(row.id)} disabled={!row.formToken && !canManage}>
-            {row.formToken ? 'Get code' : 'Create link'}
-          </button>
-          {row.formToken ? <small>{row.formLeads ? `${row.formLeads} leads · ${day(row.formLastAt)}` : 'No entry yet'}</small> : null}
-        </div>
-      ) : <small className="quiet">Add a website link first</small>)
-    },
-    { key: 'source', label: 'Saved from', render: (row) => SOURCE[row.source] || label(row.source) },
-    { key: 'status', label: 'Status', render: (row) => <Badge value={row.status} /> },
-    { key: 'timesUsed', label: 'Used in ads', render: (row) => row.timesUsed ? `${row.timesUsed}× · ${day(row.lastUsedAt)}` : 'Not yet' },
-    ...(canManage ? [{
-      key: 'actions',
-      label: '',
-      render: (row) => (
-        <div className="filters">
-          <button className="btn" type="button" onClick={() => setEditing(row)}>Edit</button>
-          <button className="btn" type="button" onClick={() => remove(row)}>Delete</button>
-        </div>
-      )
-    }] : [])
-  ];
 
   return (
     <Page
@@ -452,12 +501,60 @@ export function Offerings() {
       >
         {data && !data.ready ? <p className="quiet">{data.note}</p> : (
           <div className="stack">
-            <LogoPanel logoId={data?.logoId} canManage={canManage} onChange={refresh} />
+            <div className="offer-top">
+              <div className="metric-strip offer-metrics">
+                <div className="metric"><span>Active</span><strong>{num(active)}</strong><em>{num(items.length - active)} archived</em></div>
+                <div className="metric"><span>Used in ads</span><strong>{num(usedInAds)}</strong><em>Picked in an ad setup</em></div>
+                <div className="metric"><span>Website forms</span><strong>{num(withForm)}</strong><em>Links that are live</em></div>
+                <div className="metric"><span>Form leads</span><strong>{num(formLeads)}</strong><em>From all website forms</em></div>
+              </div>
+              <LogoPanel logoId={data?.logoId} canManage={canManage} onChange={refresh} />
+            </div>
             {editing !== null ? <OfferingForm key={editing?.id || 'new'} item={editing || null} catalog={catalog} onDone={done} onCancel={() => setEditing(null)} /> : null}
             {formItem ? <WebsiteFormPanel key={formItem.id} item={formItem} canManage={canManage} onChange={refresh} onClose={() => setFormFor(null)} /> : null}
             {note ? <p className="quiet">{note}</p> : null}
-            {items.length ? <Table columns={columns} rows={items} /> : (
-              <p className="quiet">Nothing saved yet. Press Add new, or tell AIRO about a product, project or service on WhatsApp.</p>
+            {items.length ? (
+              <>
+                <div className="offer-toolbar">
+                  <div className="chip-tabs">
+                    {['active', 'archived', 'all'].map((key) => (
+                      <button key={key} type="button" className={view === key ? 'is-on' : ''} onClick={() => setView(key)}>
+                        {key === 'all' ? `All · ${items.length}` : `${label(key)} · ${items.filter((row) => row.status === key).length}`}
+                      </button>
+                    ))}
+                  </div>
+                  {kindsUsed.length > 1 ? (
+                    <div className="chip-tabs">
+                      <button type="button" className={kind === 'all' ? 'is-on' : ''} onClick={() => setKind('all')}>Every type</button>
+                      {kindsUsed.map((key) => <button key={key} type="button" className={kind === key ? 'is-on' : ''} onClick={() => setKind(key)}>{kindLabel(catalog, key)}</button>)}
+                    </div>
+                  ) : null}
+                  <input className="offer-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, place, offer" aria-label="Search products and projects" />
+                </div>
+                {shown.length ? (
+                  <div className="offer-grid">
+                    {shown.map((item) => (
+                      <OfferingCard
+                        key={item.id}
+                        item={item}
+                        catalog={catalog}
+                        maxPhotos={data?.maxPhotos || 5}
+                        canManage={canManage}
+                        onEdit={(row) => { setEditing(row); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                        onDelete={remove}
+                        onForm={setFormFor}
+                        onChange={refresh}
+                      />
+                    ))}
+                  </div>
+                ) : <p className="quiet">Nothing matches. Clear the search or pick another filter.</p>}
+              </>
+            ) : (
+              <div className="offer-empty">
+                <strong>Nothing saved yet</strong>
+                <p className="quiet">Add your first product, project or service. You can also tell AIRO about it on WhatsApp.</p>
+                {canManage && editing === null ? <button className="btn-primary" type="button" onClick={() => setEditing(false)}>Add new</button> : null}
+              </div>
             )}
           </div>
         )}

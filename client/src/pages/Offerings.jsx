@@ -463,6 +463,34 @@ function initialsOf(name) {
   return String(name).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
 }
 
+function CoverSlider({ ids, alt }) {
+  const trackRef = useRef(null);
+  const [index, setIndex] = useState(0);
+  const go = (next) => {
+    const track = trackRef.current;
+    if (!track) return;
+    const target = (next + ids.length) % ids.length;
+    track.scrollTo({ left: target * track.clientWidth, behavior: 'smooth' });
+  };
+  const onScroll = () => {
+    const track = trackRef.current;
+    if (track?.clientWidth) setIndex(Math.round(track.scrollLeft / track.clientWidth));
+  };
+  return (
+    <div className="cover-slider">
+      <div className="cover-track" ref={trackRef} onScroll={onScroll}>
+        {ids.map((id, at) => <div className="cover-slide" key={id}><MediaImage id={id} alt={`${alt} photo ${at + 1}`} /></div>)}
+      </div>
+      <button className="cover-nav is-prev" type="button" onClick={() => go(index - 1)} aria-label="Previous photo">‹</button>
+      <button className="cover-nav is-next" type="button" onClick={() => go(index + 1)} aria-label="Next photo">›</button>
+      <div className="cover-dots">
+        {ids.map((id, at) => <button key={id} type="button" className={at === index ? 'is-on' : ''} onClick={() => go(at)} aria-label={`Photo ${at + 1}`} />)}
+      </div>
+      <span className="cover-count">{index + 1}/{ids.length}</span>
+    </div>
+  );
+}
+
 function OfferingCard({ item, catalog, maxPhotos, canManage, onEdit, onDelete, onForm, onChange }) {
   const cover = item.photoIds?.[0];
   const highlights = points(item.usps);
@@ -470,7 +498,9 @@ function OfferingCard({ item, catalog, maxPhotos, canManage, onEdit, onDelete, o
   return (
     <article className={`offer-card${archived ? ' is-archived' : ''}`}>
       <div className={`offer-cover tone-${toneOf(item.name)}`}>
-        {cover ? <MediaImage id={cover} alt={item.name} /> : <span className="offer-initials">{initialsOf(item.name)}</span>}
+        {item.photoIds?.length > 1
+          ? <CoverSlider ids={item.photoIds} alt={item.name} />
+          : cover ? <MediaImage id={cover} alt={item.name} /> : <span className="offer-initials">{initialsOf(item.name)}</span>}
         <span className="offer-kind">{kindLabel(catalog, item.kind)}</span>
         {archived ? <span className="offer-state">Archived</span> : null}
       </div>

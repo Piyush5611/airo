@@ -13,6 +13,7 @@ const pages = {
   connections: () => import('./pages/Connections.jsx'),
   adsAgent: () => import('./pages/AdsAgent.jsx'),
   offerings: () => import('./pages/Offerings.jsx'),
+  competitors: () => import('./pages/Competitors.jsx'),
   ai: () => import('./pages/Ai.jsx'),
   assistant: () => import('./pages/AssistantChat.jsx'),
   workspace: () => import('./pages/Workspace.jsx'),
@@ -41,7 +42,7 @@ function page(group, name) {
 export function preloadPages(realm) {
   const groups = realm === 'platform'
     ? ['platform', 'assistant', 'whatsapp']
-    : ['command', 'growth', 'sales', 'intel', 'connections', 'adsAgent', 'offerings', 'ai', 'assistant', 'workspace', 'whatsapp'];
+    : ['command', 'growth', 'sales', 'intel', 'connections', 'adsAgent', 'offerings', 'competitors', 'ai', 'assistant', 'workspace', 'whatsapp'];
   for (const group of groups) pages[group]().catch(() => null);
 }
 
@@ -65,6 +66,7 @@ const ConnectionDetail = page('connections', 'ConnectionDetail');
 const Connections = page('connections', 'Connections');
 const AdsAgent = page('adsAgent', 'AdsAgent');
 const Offerings = page('offerings', 'Offerings');
+const Competitors = page('competitors', 'Competitors');
 const Assistant = page('ai', 'Assistant');
 const Monitoring = page('ai', 'Monitoring');
 const Recommendations = page('ai', 'Recommendations');
@@ -128,6 +130,8 @@ export function App() {
           <Route path="growth/campaigns/:id" element={<CampaignDetail />} />
           <Route path="growth/ads-agent" element={<AdsAgent />} />
           <Route path="growth/offerings" element={<Offerings />} />
+          <Route path="growth/competitors" element={<Competitors />} />
+          <Route path="growth/competitors/:id" element={<Competitors />} />
           <Route path="growth/sources" element={<Sources />} />
           <Route path="growth/leads" element={<Leads />} />
           <Route path="growth/leads/:id" element={<LeadDetail />} />

@@ -311,6 +311,7 @@ export const clientNav = [
     { to: '/app/growth/campaigns', label: 'Campaigns', permission: 'campaigns.view' },
     { to: '/app/growth/ads-agent', label: 'AI Ads Agent', permission: 'campaigns.view' },
     { to: '/app/growth/offerings', label: 'Products & Projects', permission: 'campaigns.view' },
+    { to: '/app/growth/competitors', label: 'Competitors', permission: 'campaigns.view' },
     { to: '/app/growth/sources', label: 'Lead sources', permission: 'sources.view' },
     { to: '/app/growth/leads', label: 'Leads', permission: 'leads.view' },
     { to: '/app/whatsapp', label: 'WhatsApp', permission: 'leads.view' }

@@ -351,6 +351,19 @@ export const offeringSchema = body({
   websiteForm: z.boolean().optional().default(false)
 });
 
+const looseLink = (max) => z.string().trim().max(max).optional().default('')
+  .refine((value) => !value || /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(\/\S*)?$/i.test(value), 'Enter a valid link like example.com');
+
+export const competitorSchema = body({
+  name: z.string().trim().min(2).max(160),
+  website: looseLink(500),
+  facebook: looseLink(300),
+  instagram: z.string().trim().max(120).optional().default(''),
+  city: z.string().trim().max(120).optional().default(''),
+  notes: z.string().trim().max(1000).optional().default(''),
+  status: z.enum(['active', 'archived']).optional().default('active')
+});
+
 export const imageUploadSchema = body({
   imageBase64: z.string().min(100).max(3500000)
 });
@@ -404,7 +417,7 @@ export const llmModelsSchema = body({
 });
 
 export const llmConnectSchema = body({
-  purpose: z.enum(['assistant', 'whatsapp', 'leads', 'ads', 'calls']),
+  purpose: z.enum(['assistant', 'whatsapp', 'leads', 'ads', 'calls', 'competitors']),
   provider: z.enum(['openai', 'anthropic', 'gemini']),
   model: z.string().trim().min(2).max(120),
   apiKey: llmKey,

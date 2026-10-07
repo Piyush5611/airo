@@ -24,7 +24,9 @@ import { attribution, codeState, flattenFields, pickContact, scriptSources } fro
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
-import { imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
+import { competitorSchema, imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
+import { pageText, pricesIn, samePageLinks } from '../integrations/webPage.js';
+import { analysisFacts, analysisSchema } from '../services/competitorService.js';
 import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
 } from '../services/offeringService.js';
@@ -800,4 +802,62 @@ test('website form check finds the current code, an old code, or nothing', () =>
   assert.equal(codeState('<html><body>Hello</body></html>', token), '');
   const scripts = scriptSources('<script src="/wp-content/cache/min.js?ver=1&amp;x=2"></script><script src="https://cdn.other.com/a.js"></script><script src=\'app.js\'></script>', 'https://site.in/projects/');
   assert.deepEqual(scripts, ['https://site.in/wp-content/cache/min.js?ver=1&x=2', 'https://site.in/projects/app.js']);
+});
+
+test('competitor page reading keeps text, headings and prices, and drops scripts', () => {
+  const html = `<html><head><title>Skyline &amp; Co</title><meta name="description" content="Luxury 3 BHK in Noida"><script>var x = "hidden";</script></head>
+    <body><h1>Skyline Towers</h1><p>3 BHK from &#8377; 1.2 Cr onwards</p><div>2 BHK Rs 85 lakh</div><style>.a{}</style></body></html>`;
+  const page = pageText(html);
+  assert.equal(page.title, 'Skyline & Co');
+  assert.equal(page.description, 'Luxury 3 BHK in Noida');
+  assert.deepEqual(page.headings, ['Skyline Towers']);
+  assert.ok(!page.text.includes('hidden'));
+  assert.deepEqual(pricesIn(page.text), ['\u20b9 1.2 Cr onwards', 'Rs 85 lakh']);
+});
+
+test('competitor crawl follows only useful links on the same site', () => {
+  const html = `<a href="/projects/skyline">Skyline</a><a href="https://www.skyline.example/pricing">Prices</a>
+    <a href="https://other.example/projects">Other site</a><a href="/brochure.pdf">Brochure</a><a href="#top">Top</a>
+    <a href="/blog/news">News</a><a href="/projects/skyline#plans">Plans</a><a href="mailto:a@b.c">Mail</a>`;
+  const links = samePageLinks(html, 'https://skyline.example/', 5);
+  assert.deepEqual(links.sort(), ['https://skyline.example/projects/skyline', 'https://www.skyline.example/pricing'].sort());
+});
+
+test('competitor form accepts plain domains and rejects junk links', () => {
+  const parse = (body) => competitorSchema.safeParse({ body, query: {}, params: {} });
+  assert.equal(parse({ name: 'Skyline', website: 'skyline.example.com' }).success, true);
+  assert.equal(parse({ name: 'Skyline', website: 'https://skyline.example.com/projects' }).success, true);
+  assert.equal(parse({ name: 'Skyline', website: 'not a link' }).success, false);
+  assert.equal(parse({ name: 'S' }).success, false);
+});
+
+test('competitor analysis output is trimmed and unknown values fall back safely', () => {
+  const result = analysisSchema.safeParse({
+    summary: 'They sell 3 BHK flats in Noida Sector 150 from 1.2 Cr.',
+    threat: 'HIGH',
+    offerings: [{ name: 'Skyline Towers', highlights: 'not a list' }],
+    comparison: [{ ours: 'Green Heights', theirs: 'Skyline Towers', verdict: 'maybe' }],
+    strengths: Array.from({ length: 10 }, (_, i) => `point ${i}`)
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.data.threat, 'high');
+  assert.deepEqual(result.data.offerings[0].highlights, []);
+  assert.equal(result.data.comparison[0].verdict, 'unclear');
+  assert.equal(result.data.strengths.length, 6);
+  assert.equal(analysisSchema.safeParse({ summary: '' }).success, false);
+});
+
+test('competitor facts carry page urls, prices and keyword data within budget', () => {
+  const facts = analysisFacts({
+    competitor: { name: 'Skyline', city: 'Noida', website: 'https://skyline.example', notes: '' },
+    pages: [{ url: 'https://skyline.example/', title: 'Skyline', description: '', headings: ['Skyline Towers'], text: 'x'.repeat(20000), prices: ['Rs 85 lakh'] }],
+    keywords: { currency: 'INR', rows: [{ text: 'skyline noida', searches: '880', competition: 'HIGH' }] },
+    ours: catalogFacts(SAVED),
+    sector: 'Real estate'
+  });
+  assert.ok(facts.includes('PAGE https://skyline.example/'));
+  assert.ok(facts.includes('Prices seen: Rs 85 lakh'));
+  assert.ok(facts.includes('skyline noida: 880/mo, HIGH'));
+  assert.ok(facts.includes('Green Heights'));
+  assert.ok(facts.length < 6000);
 });

@@ -1,7 +1,5 @@
 import crypto from 'crypto';
-import dns from 'node:dns/promises';
-import net from 'node:net';
-import { privateAddress } from '../integrations/verify.js';
+import { fetchPublic } from '../integrations/webPage.js';
 import * as offeringRepo from '../repositories/offeringRepo.js';
 import * as adsRepo from '../repositories/adsAgentRepo.js';
 import { adConnectionFor, sourceForProvider, websiteSource, workspaceId } from '../repositories/connectionRepo.js';
@@ -193,62 +191,6 @@ export async function ingestWebsiteForm(token, body) {
 const MAX_PAGE_BYTES = 3 * 1024 * 1024;
 const MAX_SCRIPT_BYTES = 1024 * 1024;
 const MAX_SCRIPTS = 8;
-
-async function publicUrl(raw) {
-  let url;
-  try {
-    url = new URL(raw);
-  } catch {
-    return null;
-  }
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return null;
-  const host = url.hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return null;
-  if (net.isIP(host)) return privateAddress(host) ? null : url;
-  const records = await dns.lookup(host, { all: true }).catch(() => []);
-  if (!records.length || records.some((record) => privateAddress(record.address))) return null;
-  return url;
-}
-
-async function readCapped(response, cap) {
-  const reader = response.body?.getReader();
-  if (!reader) return '';
-  const chunks = [];
-  let size = 0;
-  while (size < cap) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    size += value.length;
-  }
-  reader.cancel().catch(() => {});
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8').slice(0, cap);
-}
-
-async function fetchPublic(raw, cap) {
-  let target = raw;
-  for (let hop = 0; hop < 4; hop += 1) {
-    const url = await publicUrl(target);
-    if (!url) return { blocked: true };
-    let response;
-    try {
-      response = await fetch(url, {
-        redirect: 'manual',
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIRO-FormCheck/1.0)', Accept: 'text/html,application/javascript,*/*' },
-        signal: AbortSignal.timeout(12000)
-      });
-    } catch {
-      return { failed: true };
-    }
-    if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
-      target = new URL(response.headers.get('location'), url).toString();
-      continue;
-    }
-    if (!response.ok) return { status: response.status };
-    return { url, body: await readCapped(response, cap) };
-  }
-  return { failed: true };
-}
 
 export function scriptSources(html, pageUrl) {
   const out = [];

@@ -23,6 +23,7 @@ import * as adsApply from '../services/adsAgent/applyService.js';
 import * as adsQuality from '../services/adsAgent/qualityService.js';
 import * as offerings from '../services/offeringService.js';
 import * as websiteForms from '../services/websiteFormService.js';
+import * as competitors from '../services/competitorService.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -167,6 +168,25 @@ client.post('/offerings/:id/website-form/check', requirePermission('campaigns.vi
 client.delete('/offerings/:id/website-form', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   await websiteForms.disableWebsiteForm(req.auth, req, req.params.id);
   ok(res, await offerings.listOfferings(req.auth));
+}));
+client.get('/competitors', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await competitors.listCompetitors(req.auth))));
+client.post('/competitors', requirePermission('campaigns.update'), validate(schemas.competitorSchema), asyncHandler(async (req, res) => {
+  ok(res, await competitors.createCompetitor(req.auth, req), 201);
+}));
+client.post('/competitors/import-profile', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
+  ok(res, await competitors.importFromProfile(req.auth, req));
+}));
+client.get('/competitors/:id', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await competitors.competitorDetail(req.auth, req.params.id));
+}));
+client.patch('/competitors/:id', requirePermission('campaigns.update'), validate(schemas.idParams.merge(schemas.competitorSchema)), asyncHandler(async (req, res) => {
+  ok(res, await competitors.updateCompetitor(req.auth, req, req.params.id));
+}));
+client.delete('/competitors/:id', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await competitors.deleteCompetitor(req.auth, req, req.params.id));
+}));
+client.post('/competitors/:id/analyze', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await competitors.analyzeCompetitor(req.auth, req, req.params.id));
 }));
 client.post('/offerings/:id/photos', requirePermission('campaigns.update'), validate(schemas.idParams.merge(schemas.imageUploadSchema)), asyncHandler(async (req, res) => {
   ok(res, await offerings.addPhoto(req.auth, req, req.params.id), 201);

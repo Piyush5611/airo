@@ -2,6 +2,15 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-07 (Competitor Intelligence, phase 1)
+
+- **Change:** New `integrations/webPage.js`, a shared public page reader. `fetchPublic` (public http or https only, private addresses blocked, every redirect checked, 12 second timeout, size cap), `pageText` (title, description, h1 to h3, visible text without scripts), `samePageLinks` (same-site links scored by project, price, offer and similar words) and `pricesIn`. `websiteFormService` now uses it instead of its own copy.
+- **Change:** New `services/competitorService.js` and `repositories/competitorRepo.js`. `POST /api/competitors/:id/analyze` reads the competitor's home page plus up to 5 useful same-site pages, adds Google Keyword Planner ideas for their name and website when Google Ads is connected, and asks the AI (purpose `competitors`, then `ads`, then `assistant`) for a schema-checked report: summary, positioning, audience, offerings with source page, strengths, weak spots, messaging, enquiry methods, comparison with the saved offerings, actions, threat level and gaps. The analysis runs in the background (one at a time per competitor, 5 minute cooldown), and the page polls. A failed run is saved with plain notes. No paid tool or browser is used, so pages that only render with JavaScript may read thin.
+- **Change:** Routes `GET/POST /api/competitors`, `GET/PATCH/DELETE /api/competitors/:id`, `POST /api/competitors/import-profile` (names from the business profile). View needs `campaigns.view`, changes need `campaigns.update`.
+- **Change:** The WhatsApp competitors reply now starts with the latest analysis of up to 4 tracked competitors (threat, prices seen, summary, first action).
+- **Change (client):** New Growth, Competitors page (`/app/growth/competitors/:id`) with a card list and a detail panel with Overview, Website & offers, Compare with us, Search demand and Sources tabs.
+- **Migration/API impact:** `027_competitors.sql` adds `competitors` and `competitor_reports`. New LLM purpose `competitors` (Competitor research) on Platform AI.
+
 ### 2026-10-07 (Website form link per product or project)
 
 - **Change:** New `services/websiteFormService.js`. Public `POST /api/forms/:token` takes JSON or normal form posts, rate limited to 20 a minute per IP.

@@ -4,6 +4,7 @@ import { googleKeywordIdeas } from '../../integrations/googleAds.js';
 import { googleAccount } from '../googleAdChat.js';
 import { metaAccount } from '../metaAdChat.js';
 import { businessProfile } from './chatPlanner.js';
+import { readyReports } from '../../repositories/competitorRepo.js';
 import { LINE, bullets, card, header, hint, money, section } from './waFormat.js';
 
 const TRIGGER = /\b(competitors?|competition|competitive|rivals?|ad ?library|transparency)\b/i;
@@ -180,15 +181,45 @@ function profileLinks(profile, english) {
   );
 }
 
+export async function trackedSection(organizationId, english) {
+  const rows = await readyReports(organizationId, 4).catch(() => []);
+  if (!rows.length) return '';
+  return section(
+    say(english, 'TRACKED COMPETITORS (AIRO ANALYSIS)', 'TRACKED COMPETITORS (AIRO ANALYSIS)'),
+    rows.map((row) => {
+      let analysis = {};
+      try {
+        analysis = typeof row.analysis === 'object' && row.analysis ? row.analysis : JSON.parse(row.analysis || '{}');
+      } catch {
+        analysis = {};
+      }
+      const threat = analysis.threat && analysis.threat !== 'unknown' ? ` · ${say(english, 'threat', 'khatra')} ${analysis.threat}` : '';
+      const price = analysis.priceRange ? `\n${analysis.priceRange}` : '';
+      const action = analysis.actions?.[0]?.title ? `\n${say(english, 'Do', 'Karo')}: ${analysis.actions[0].title}` : '';
+      return `*${row.name}*${threat}${price}\n${String(analysis.summary || '').slice(0, 220)}${action}`;
+    }).join('\n\n')
+  );
+}
+
 export async function competitorReply({ organizationId, conversationId, text, topic: askedTopic = '' }) {
   const english = !HINGLISH.test(text);
   const draft = await draftProduct(conversationId);
   const profile = await businessProfile(organizationId);
+  const tracked = await trackedSection(organizationId, english);
   const topic = competitorTopic(askedTopic) || competitorTopic(text) || competitorTopic(draft?.product) || competitorTopic(profile?.offering || profile?.category || '');
   if (topic.length < 3) {
+    if (tracked) {
+      return card([
+        header(say(english, 'Competitor Research', 'Competitor Research'), say(english, 'Tracked', 'Tracked')),
+        tracked,
+        LINE,
+        `${say(english, 'Ads and keywords for a product?', 'Kisi product ke ads aur keywords?')} \`competitors <${say(english, 'product and city', 'product aur city')}>\``
+      ]).slice(0, 3900);
+    }
     return card([
       say(english, 'Which product or project should I check?', 'Kis product ya project ke competitors dekhun?'),
-      hint('Example: competitors 2bhk flats noida')
+      hint('Example: competitors 2bhk flats noida'),
+      hint(say(english, 'Add competitors in AIRO under Growth, Competitors for a full website analysis.', 'Poore website analysis ke liye AIRO mein Growth, Competitors mein competitors add karo.'))
     ]);
   }
   const meta = await metaSection(organizationId, topic, english);
@@ -198,6 +229,8 @@ export async function competitorReply({ organizationId, conversationId, text, to
     : say(english, 'Neither platform shares an advertiser count through the API here, so a Google vs Meta ratio cannot be measured honestly.', 'Yahan dono platform API se advertisers ki ginti nahi dete, isliye Google vs Meta ratio sach mein nikal nahi sakte.');
   return card([
     header(say(english, 'Competitor Research', 'Competitor Research'), topic),
+    tracked,
+    tracked ? LINE : '',
     meta.text,
     LINE,
     google,

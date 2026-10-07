@@ -19,6 +19,7 @@ import {
 import { demandSection } from '../services/googleAdChat.js';
 import { usableInterest } from '../services/adsAgent/chatPlanner.js';
 import { menuMessage, messageParts } from '../services/whatsappService.js';
+import { catalogFacts } from '../services/llmService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
@@ -752,4 +753,12 @@ test('airo ad score blends results once an ad has enough data', () => {
   assert.ok(scores.a.score > scores.b.score);
   assert.equal(scores.c.basis, 'creative');
   assert.equal(scores.c.score, scores.c.creativeScore);
+});
+
+test('catalogFacts lists saved projects for the WhatsApp reply', () => {
+  assert.match(catalogFacts([]), /none saved yet/);
+  const text = catalogFacts([{ name: 'Prestige Park', kind: 'project', locations: 'Noida', priceText: '80 lakh onwards', offer: '' }]);
+  assert.match(text, /Saved products\/projects\/services \(1/);
+  assert.match(text, /1\. Prestige Park - type project; location Noida; price 80 lakh onwards/);
+  assert.doesNotMatch(text, /offer/);
 });

@@ -10,6 +10,7 @@ import { modelJson } from '../utils/modelJson.js';
 import { adsAdviceReply } from './adsAgent/monitorService.js';
 import * as whatsappRepo from '../repositories/whatsappRepo.js';
 import * as repo from '../repositories/llmRepo.js';
+import * as offeringRepo from '../repositories/offeringRepo.js';
 import { organizationSector } from '../repositories/workspaceRepo.js';
 import { sectorOf } from '../domain/sectors.js';
 
@@ -189,6 +190,26 @@ function wantsReport(messages) {
   return Boolean(reportRequest(messages));
 }
 
+export function catalogFacts(items) {
+  if (!items.length) return 'Saved products/projects/services: none saved yet. They can be added in AIRO under Offerings.';
+  const clip = (value, size) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, size);
+  return [
+    `Saved products/projects/services (${items.length}, from the AIRO Offerings page):`,
+    ...items.map((item, index) => {
+      const parts = [
+        item.kind ? `type ${clip(item.kind, 30)}` : '',
+        item.locations ? `location ${clip(item.locations, 80)}` : '',
+        item.priceText ? `price ${clip(item.priceText, 60)}` : '',
+        item.offer ? `offer ${clip(item.offer, 80)}` : '',
+        item.usps ? `highlights ${clip(item.usps, 120)}` : '',
+        item.details ? `details ${clip(item.details, 160)}` : '',
+        item.website ? `website ${clip(item.website, 100)}` : ''
+      ].filter(Boolean);
+      return `${index + 1}. ${clip(item.name, 80)}${parts.length ? ` - ${parts.join('; ')}` : ''}`;
+    })
+  ].join('\n');
+}
+
 async function whatsappFacts({ organizationId, recognized, businessLabel, messages }) {
   if (!recognized || !organizationId) {
     return 'This WhatsApp number is not registered to a business in AIRO. Do not name a business or share connection status.';
@@ -224,6 +245,11 @@ async function whatsappFacts({ organizationId, recognized, businessLabel, messag
     }
   } catch {
     lines.push('Connections: status could not be read');
+  }
+  try {
+    lines.push(catalogFacts(await offeringRepo.list(organizationId, { limit: 40 })));
+  } catch {
+    lines.push('Saved products/projects/services: list could not be read');
   }
   if (wantsReport(messages)) {
     try { lines.push(await reportFacts(organizationId, messages)); } catch {

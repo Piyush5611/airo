@@ -369,6 +369,9 @@ client.get('/connections/google/accounts', requirePermission('connections.manage
 client.post('/connections/google/account', requirePermission('connections.manage'), validate(schemas.googleAccountSchema), asyncHandler(async (req, res) => {
   ok(res, await connections.chooseGoogleAccount(req.auth, req));
 }));
+client.post('/connections/:id/google/keyword-check', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await connections.recheckKeywordPlanner(req.auth, req, req.params.id));
+}));
 client.get('/connections/:id/google/locations', requirePermission('connections.manage'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await connections.googleLocations(req.auth, req.params.id, req.query.q));
 }));

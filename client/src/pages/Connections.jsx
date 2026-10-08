@@ -4113,7 +4113,46 @@ function ConnectionLeads({ id, google, canImport }) {
   );
 }
 
-function ConnectionAccount({ data }) {
+const PLANNER = {
+  ready: ['good', 'Working', 'AIRO can show monthly searches, competition and bids for keywords.'],
+  needs_basic: ['warn', 'Needs Basic access', 'The AIRO Google Ads developer token has Explorer access, which Google does not allow for Keyword Planner. A platform admin applies once in Google Ads (Tools, Setup, API Center, Apply for Basic access). After Google approves it, press Check again; it then works for every business.'],
+  failed: ['bad', 'Not answering', '']
+};
+
+function KeywordPlannerStatus({ id, planner, canManage, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [tone, text, help] = PLANNER[planner?.status] || ['', 'Not checked yet', 'AIRO checks it when Google Ads is connected. Press Check now.'];
+
+  async function check() {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await api.post(`/api/connections/${id}/google/keyword-check`, {});
+      setMessage(result.notice || '');
+      onDone();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel">
+      <header>
+        <h2>Google Keyword Planner</h2>
+        <Badge value={text} tone={tone} />
+      </header>
+      <p className="quiet">{help || planner?.note}</p>
+      {planner?.checkedAt ? <p className="quiet">Checked {when(planner.checkedAt)}. The check is one keyword idea request and costs nothing.</p> : null}
+      {canManage ? <div><button className="btn" type="button" disabled={busy} onClick={check}>{busy ? 'Checking…' : planner?.status ? 'Check again' : 'Check now'}</button></div> : null}
+      {message ? <p className="quiet">{message}</p> : null}
+    </section>
+  );
+}
+
+function ConnectionAccount({ data, canManage, onChange }) {
   const jobs = data.jobs || [];
   const logs = data.logs || [];
   const errors = data.errors || [];
@@ -4121,6 +4160,7 @@ function ConnectionAccount({ data }) {
   const related = RELATED_PAGES[data.providerKey] || [];
   return (
     <div className="stack">
+      {data.providerKey === 'google_ads' ? <KeywordPlannerStatus id={data.id} planner={data.keywordPlanner} canManage={canManage} onDone={onChange} /> : null}
       <section className="panel">
         <header>
           <h2>Account</h2>
@@ -4267,7 +4307,7 @@ export function ConnectionDetail() {
             {meta && section === 'Ad analysis' ? <AnalysisPanel connectionId={id} /> : null}
             {metaOnly && section === 'Lead quality' ? <QualityPanel connectionId={id} canManage={can('campaigns.update')} /> : null}
             {metaOnly && section === 'A/B tests' ? <ExperimentsPanel connectionId={id} /> : null}
-            {section === 'Account & sync' ? <ConnectionAccount data={data} /> : null}
+            {section === 'Account & sync' ? <ConnectionAccount data={data} canManage={can('connections.manage')} onChange={() => reload({ silent: true })} /> : null}
             {!meta && !callYatri && section === 'Webhook' && data.webhookPath ? (
               <section className="panel">
                 <h2>Webhook</h2>

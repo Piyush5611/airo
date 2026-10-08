@@ -2,6 +2,13 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-08 (Keyword Planner check on Google Ads connect)
+
+- **Change:** Choosing a Google Ads account now also sends one read-only keyword idea request and saves the Keyword Planner status (`ready`, `needs_basic` when the developer token has Explorer access, or `failed`) in the encrypted credential. Connection detail returns `keywordPlanner`, and `POST /api/connections/:id/google/keyword-check` checks again.
+- **Change (client):** The Google Ads Account & sync tab shows a Google Keyword Planner panel with the status, what to do, and Check again.
+- **Change:** The competitor report says plainly when search demand is empty because of Explorer access.
+- **Change:** `structuredLlm` waits and retries twice when a model answers that it is busy (high demand, overloaded, 429, 503, 529).
+
 ### 2026-10-08 (Competitor websites found automatically)
 
 - **Change:** Discovery looks up a website for up to 8 top candidates that have none (one Google search run with "name city" per candidate). A result is taken only when every distinctive word of the name is in its domain or title; portals and social sites are never taken.

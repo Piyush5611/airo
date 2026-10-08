@@ -215,7 +215,9 @@ async function readKeywords(organizationId, competitor, notes) {
       .slice(0, 15);
     return { currency: account.input.currency || '', rows };
   } catch (error) {
-    notes.push(`Google Keyword Planner did not answer: ${String(error?.message || 'unknown error').slice(0, 160)}`);
+    notes.push(/explorer access|basic or standard access/i.test(String(error?.message || ''))
+      ? 'Search demand is empty because Google Keyword Planner needs Basic access on the AIRO Google Ads developer token. The rest of the report is not affected.'
+      : `Google Keyword Planner did not answer: ${String(error?.message || 'unknown error').slice(0, 160)}`);
     return null;
   }
 }

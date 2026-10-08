@@ -1001,3 +1001,9 @@ test('a busy AI model is waited out, other failures are not', () => {
   assert.equal(modelBusy(new Error('API key not valid')), false);
   assert.equal(notCompetitor('realtyassistant.in'), true);
 });
+test('Keyword Planner access is read from the Google answer', async () => {
+  const { plannerStatus } = await import('../services/connectionService.js');
+  assert.equal(plannerStatus(null), 'ready');
+  assert.equal(plannerStatus(new Error('This method is not allowed for use with explorer access. Please apply for basic or standard access.')), 'needs_basic');
+  assert.equal(plannerStatus(new Error('Request had invalid authentication credentials.')), 'failed');
+});

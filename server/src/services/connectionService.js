@@ -155,6 +155,9 @@ export async function detail(auth, id) {
     accountId: MULTI_ACCOUNT.has(connection.providerKey) ? storedSecret?.accountId || null : null,
     accounts,
     tokenExpiresAt: storedSecret?.tokenExpiresAt || null,
+    keywordPlanner: connection.providerKey === 'google_ads'
+      ? { status: storedSecret?.keywordPlanner || null, note: storedSecret?.keywordPlannerNote || '', checkedAt: storedSecret?.keywordPlannerCheckedAt || null }
+      : null,
     webhookPath: canManage && token ? `/api/hooks/${token}` : null,
     tool: connection.providerKey === 'nexcall' ? await nexcallTool(id, connection.mode) : null
   };
@@ -969,6 +972,46 @@ export async function chooseMetaAccount(auth, req) {
   return synced;
 }
 
+const PLANNER_NOTE = {
+  ready: 'Keyword Planner works. AIRO can show monthly searches and bids.',
+  needs_basic: 'Keyword Planner needs Basic access on the AIRO Google Ads developer token. A platform admin applies once in Google Ads API Center; then it works for every business.',
+  failed: 'Keyword Planner did not answer.'
+};
+
+export function plannerStatus(error) {
+  if (!error) return 'ready';
+  return /explorer access|basic or standard access|DEVELOPER_TOKEN_NOT_APPROVED|not allowed for use with/i.test(String(error?.message || '')) ? 'needs_basic' : 'failed';
+}
+
+// One read-only keyword idea request; it never spends money.
+async function checkKeywordPlanner(id) {
+  const secret = await storedSecret(id);
+  if (!secret?.apiKey || !secret.accountId) return null;
+  let error = null;
+  try {
+    await googleKeywordIdeas(googleInput(secret), { seeds: ['real estate'] });
+  } catch (caught) {
+    error = caught;
+  }
+  const status = plannerStatus(error);
+  await repo.saveCredential(id, encryptJson({
+    ...secret,
+    keywordPlanner: status,
+    keywordPlannerNote: status === 'failed' ? String(error?.message || '').slice(0, 200) : '',
+    keywordPlannerCheckedAt: new Date().toISOString()
+  }));
+  return status;
+}
+
+export async function recheckKeywordPlanner(auth, req, id) {
+  await googleSecret(auth, id);
+  const status = await checkKeywordPlanner(id);
+  await recordAudit(req, { action: 'connection.keyword_planner_checked', resource: 'connection', resourceId: id, metadata: { status } });
+  const saved = await detail(auth, id);
+  saved.notice = PLANNER_NOTE[status] || PLANNER_NOTE.failed;
+  return saved;
+}
+
 export async function chooseGoogleAccount(auth, req) {
   const { id, token: refreshToken, previousAccountId } = await oauthRow(auth, 'google_ads', req.body.connectionId);
   const wanted = req.body.customerId.replace(/-/g, '');
@@ -996,9 +1039,14 @@ export async function chooseGoogleAccount(auth, req) {
   const synced = await sync(auth, req, id);
   const failed = synced.jobs?.[0]?.status === 'failed' ? synced.jobs[0].summary : '';
   const campaigns = (synced.records || []).filter((row) => row.type === 'campaign').length;
+  const planner = await checkKeywordPlanner(id).catch(() => null);
   synced.notice = failed
     ? `Google Ads is connected. Sync failed: ${failed}`
     : (campaigns ? `Google Ads is connected. ${campaigns} campaigns came back from Google.` : 'Google Ads is connected. Google returned no campaigns.');
+  if (planner) {
+    synced.notice += ` ${PLANNER_NOTE[planner]}`;
+    synced.keywordPlanner = { status: planner, checkedAt: new Date().toISOString() };
+  }
   synced.linked = true;
   return synced;
 }

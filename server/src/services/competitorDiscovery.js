@@ -33,9 +33,12 @@ const NOT_COMPETITORS = [
 ];
 
 export function domainOf(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
   try {
-    const url = new URL(/^https?:\/\//i.test(String(raw || '')) ? raw : `https://${raw}`);
-    return url.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    const host = url.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
+    return host.includes('.') ? host : '';
   } catch {
     return '';
   }

@@ -964,6 +964,9 @@ test('a project suggestion that is already tracked is linked, not added twice', 
   assert.equal(trackedMatch({ name: 'Skyline', website: 'https://skyline.example/lp' }, known)?.id, 4);
   assert.equal(trackedMatch({ name: 'metro homes', website: '' }, known)?.id, 5);
   assert.equal(trackedMatch({ name: 'New Co', website: 'https://new.example' }, known), null);
+  assert.equal(domainOf(null), '');
+  assert.equal(domainOf(undefined), '');
+  assert.equal(trackedMatch({ name: 'Just Abode', website: null }, [{ id: 1, name: 'R-Tech Group', website: null }]), null);
   const parse = (body) => competitorSchema.safeParse({ body, query: {}, params: {} });
   assert.deepEqual(parse({ name: 'Skyline', offeringIds: ['3', 4] }).data.body.offeringIds, [3, 4]);
   assert.equal(parse({ name: 'Skyline' }).data.body.offeringIds, undefined);

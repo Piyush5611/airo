@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { migrate } from './db/migrate.js';
 import { refreshAll } from './services/intelligenceService.js';
 import { startAgentJobs } from './services/adsAgent/jobs.js';
+import { closeInterruptedSearches } from './services/competitorDiscovery.js';
 
 const app = createApp();
 
@@ -19,6 +20,7 @@ async function start() {
   refreshAll().catch((error) => {
     console.error('Insight refresh skipped:', error.message);
   });
+  await closeInterruptedSearches();
   startAgentJobs();
 }
 

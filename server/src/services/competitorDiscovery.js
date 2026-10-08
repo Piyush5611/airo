@@ -488,7 +488,7 @@ export async function startDiscovery(auth, req, offeringId = 0) {
   if (running.has(scopeKey(auth.organizationId, offeringId))) return suggestionList(auth, offeringId);
   const last = await repo.latestRun(auth.organizationId, offeringId);
   if (last?.status === 'running' && Date.now() - utcTime(last.startedAt) < 20 * 60 * 1000) return suggestionList(auth, offeringId);
-  if (last && Date.now() - utcTime(last.startedAt) < MANUAL_COOLDOWN_MS) {
+  if (last && last.status !== 'failed' && Date.now() - utcTime(last.startedAt) < MANUAL_COOLDOWN_MS) {
     throw new ApiError(429, 'AIRO searched less than 30 minutes ago. Try again a little later.', 'rate_limited');
   }
   await recordAudit(req, { action: 'competitor.discovery_started', resource: 'competitor', metadata: offeringId ? { offeringId } : undefined });
@@ -590,6 +590,11 @@ export function dueScopes({ businesses = [], projects = [], cap = WEEKLY_PROJECT
     if (rank <= cap && !Number(row.searchedRecently)) due.push({ organizationId: org, offeringId: Number(row.offeringId) });
   }
   return due.slice(0, limit);
+}
+
+// Searches run inside this process, so any still marked running at start-up were cut off by a restart.
+export function closeInterruptedSearches() {
+  return repo.closeInterruptedRuns().catch(() => {});
 }
 
 export async function discoverDue() {

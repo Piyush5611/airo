@@ -174,6 +174,13 @@ export function latestRun(organizationId, offeringId = 0) {
   );
 }
 
+export function closeInterruptedRuns() {
+  return run(
+    `UPDATE competitor_discovery_runs SET status = 'failed', notes = JSON_ARRAY('AIRO restarted while this search was running. Press Find competitors again.'), finished_at = UTC_TIMESTAMP()
+     WHERE status = 'running'`
+  );
+}
+
 export function closeStaleRuns() {
   return run(
     `UPDATE competitor_discovery_runs SET status = 'failed', notes = JSON_ARRAY('The search was stopped before it finished.'), finished_at = UTC_TIMESTAMP()

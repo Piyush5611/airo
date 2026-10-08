@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
@@ -34,11 +34,25 @@ function ThreatBadge({ value }) {
   return <span className={`badge ${tone}`}>{text}</span>;
 }
 
-function CompetitorForm({ item, onDone, onCancel }) {
-  const [form, setForm] = useState(item ? Object.fromEntries(Object.keys(EMPTY).map((key) => [key, item[key] || EMPTY[key]])) : EMPTY);
+function ProjectChips({ ids, projects }) {
+  const names = (ids || []).map((id) => projects.find((row) => row.id === id)?.name).filter(Boolean);
+  if (!names.length) return null;
+  return <div className="comp-chips">{names.map((name) => <span key={name} className="channel-pill">{name}</span>)}</div>;
+}
+
+function CompetitorForm({ item, projects, scope, onDone, onCancel }) {
+  const [form, setForm] = useState(() => ({
+    ...(item ? Object.fromEntries(Object.keys(EMPTY).map((key) => [key, item[key] || EMPTY[key]])) : EMPTY),
+    offeringIds: item ? item.offeringIds || [] : scope ? [scope] : []
+  }));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
+  const toggle = (id) => setForm((current) => ({
+    ...current,
+    offeringIds: current.offeringIds.includes(id) ? current.offeringIds.filter((value) => value !== id) : [...current.offeringIds, id]
+  }));
+  const choices = projects.filter((row) => row.status !== 'archived' || form.offeringIds.includes(row.id));
 
   async function save(event) {
     event.preventDefault();
@@ -74,6 +88,20 @@ function CompetitorForm({ item, onDone, onCancel }) {
         </label>
       ) : null}
       <label className="stack-field comp-notes">WHAT YOU KNOW ABOUT THEM<textarea value={form.notes} onChange={set('notes')} maxLength={1000} placeholder="Optional. For example: they run discount ads every month, their sales team calls fast." /></label>
+      {choices.length ? (
+        <fieldset className="stack-field comp-notes comp-projects">
+          <legend>WHICH OF YOUR PRODUCTS OR PROJECTS DO THEY COMPETE WITH?</legend>
+          <div className="comp-project-picks">
+            {choices.map((row) => (
+              <label key={row.id} className="check-row">
+                <input type="checkbox" checked={form.offeringIds.includes(row.id)} onChange={() => toggle(row.id)} />
+                <span><strong>{row.name}</strong>{row.locations || row.priceText ? <small>{[row.locations, row.priceText].filter(Boolean).join(' · ')}</small> : null}</span>
+              </label>
+            ))}
+          </div>
+          <small className="quiet">Leave all empty if they compete with your whole business. AIRO compares them only with the ones you tick.</small>
+        </fieldset>
+      ) : null}
       <div className="page-actions">
         <button className="btn-primary" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Save'}</button>
         <button className="btn" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
@@ -238,8 +266,9 @@ function Sources({ report }) {
 const FIT = { direct: ['bad', 'Direct competitor'], indirect: ['warn', 'Indirect'], unclear: ['', 'Check yourself'] };
 const SOURCE = { google_ad: 'Google ad', google_search: 'Google search', meta_ad: 'Meta ads', maps: 'Google Maps' };
 
-function Suggestions({ canManage, onAdded }) {
-  const { data, loading, error, reload } = useResource('/api/competitors/suggestions');
+function Suggestions({ canManage, project, onAdded }) {
+  const scope = project?.id || 0;
+  const { data, loading, error, reload } = useResource(`/api/competitors/suggestions${scope ? `?offeringId=${scope}` : ''}`);
   const [busy, setBusy] = useState(0);
   const [message, setMessage] = useState('');
   const [showIgnored, setShowIgnored] = useState(false);
@@ -251,13 +280,13 @@ function Suggestions({ canManage, onAdded }) {
     return () => clearInterval(timer);
   }, [running, reload]);
 
-  async function act(path, id = -1) {
+  async function act(path, id = -1, payload = {}) {
     setBusy(id);
     setMessage('');
     try {
-      const result = await api.post(path, {});
+      const result = await api.post(path, payload);
       if (result.competitorId) {
-        setMessage(result.analysing ? 'Added. AIRO is reading their website now.' : 'Added to your competitors.');
+        setMessage(result.linked ? `Linked to ${project?.name || 'this project'}.` : result.analysing ? 'Added. AIRO is reading their website now.' : 'Added to your competitors.');
         onAdded(result.competitorId);
       }
       reload({ silent: true });
@@ -279,14 +308,16 @@ function Suggestions({ canManage, onAdded }) {
     <section className="panel comp-suggest">
       <header className="comp-head">
         <div>
-          <h2>Suggested by AIRO</h2>
+          <h2>{project ? `Suggested for ${project.name}` : 'Suggested by AIRO'}</h2>
           <p className="quiet">
-            AIRO searches Google, Meta ads and Google Maps for what you sell, removes portals and directories, reads each website and asks AI whether they really compete with you. Every week, and whenever you press Find competitors.
+            {project
+              ? `AIRO searches Google, Meta ads and Google Maps for what competes with ${project.name}: the same kind of thing${project.locations ? ` in ${project.locations}` : ''}${project.priceText ? ` around ${project.priceText}` : ''}. It removes portals and directories, reads each website and asks AI whether they really compete with this project. Every week, and whenever you press Find competitors.`
+              : 'AIRO searches Google, Meta ads and Google Maps for what you sell, removes portals and directories, reads each website and asks AI whether they really compete with you. Every week, and whenever you press Find competitors.'}
           </p>
         </div>
         {canManage && data.apify ? (
-          <button className="btn-primary" type="button" onClick={() => act('/api/competitors/discover')} disabled={running || busy !== 0}>
-            {running ? 'Searching...' : 'Find competitors'}
+          <button className="btn-primary" type="button" onClick={() => act('/api/competitors/discover', -1, { offeringId: scope })} disabled={running || busy !== 0}>
+            {running ? 'Searching...' : project ? 'Find competitors for this project' : 'Find competitors'}
           </button>
         ) : null}
       </header>
@@ -326,6 +357,7 @@ function Suggestions({ canManage, onAdded }) {
                   <span className={`badge ${tone}`}>{text}</span>
                 </header>
                 <p className="quiet">{[row.website ? host(row.website) : '', row.city, row.category].filter(Boolean).join(' · ') || 'No website found'}</p>
+                {row.trackedId ? <p className="quiet">Already in your competitors, not yet linked to this project.</p> : null}
                 {row.reason ? <p>{row.reason}</p> : null}
                 <div className="comp-chips">
                   {row.sources.slice(0, 5).map((source, index) => (
@@ -336,7 +368,7 @@ function Suggestions({ canManage, onAdded }) {
                 </div>
                 {canManage ? (
                   <div className="page-actions">
-                    {row.status === 'new' ? <button className="btn-primary" type="button" disabled={busy !== 0} onClick={() => act(`/api/competitors/suggestions/${row.id}/add`, row.id)}>{busy === row.id ? 'Adding...' : 'Add'}</button> : null}
+                    {row.status === 'new' ? <button className="btn-primary" type="button" disabled={busy !== 0} onClick={() => act(`/api/competitors/suggestions/${row.id}/add`, row.id)}>{busy === row.id ? 'Adding...' : row.trackedId ? 'Link to this project' : 'Add'}</button> : null}
                     <button className="btn" type="button" disabled={busy !== 0} onClick={() => act(`/api/competitors/suggestions/${row.id}/ignore`, row.id)}>{row.status === 'ignored' ? 'Bring back' : 'Ignore'}</button>
                     {row.website ? <a className="btn-ghost" href={row.website} target="_blank" rel="noreferrer">Website</a> : row.facebook ? <a className="btn-ghost" href={row.facebook} target="_blank" rel="noreferrer">Facebook</a> : null}
                   </div>
@@ -355,7 +387,7 @@ function Suggestions({ canManage, onAdded }) {
   );
 }
 
-function Detail({ id, canManage, onChanged, onEdit }) {
+function Detail({ id, canManage, projects, onChanged, onEdit }) {
   const { data, loading, error, reload } = useResource(`/api/competitors/${id}`);
   const [tab, setTab] = useState('overview');
   const [busy, setBusy] = useState(false);
@@ -396,6 +428,7 @@ function Detail({ id, canManage, onChanged, onEdit }) {
                 {[data.city, data.website ? host(data.website) : 'No website'].filter(Boolean).join(' · ')}
                 {data.lastAnalyzedAt ? ` · analysed ${when(data.lastAnalyzedAt)}` : ''}
               </p>
+              {data.offeringIds?.length ? <ProjectChips ids={data.offeringIds} projects={projects} /> : <p className="quiet">Competes with your whole business.</p>}
             </div>
             <div className="page-actions">
               <ThreatBadge value={data.report?.status === 'ready' ? data.report.analysis?.threat : null} />
@@ -450,15 +483,32 @@ export function Competitors() {
   const canManage = can('campaigns.update');
   const navigate = useNavigate();
   const { id } = useParams();
+  const [params, setParams] = useSearchParams();
   const { data, loading, error, reload } = useResource('/api/competitors');
+  const { data: catalog, reload: reloadCatalog } = useResource('/api/offerings');
   const [editing, setEditing] = useState(null);
   const [note, setNote] = useState('');
   const [version, setVersion] = useState(0);
-  const items = data?.items || [];
+  const projects = catalog?.items || [];
+  const activeProjects = projects.filter((row) => row.status !== 'archived');
+  const scope = Number(params.get('project')) || 0;
+  const project = scope ? projects.find((row) => row.id === scope) || null : null;
+  const all = data?.items || [];
+  const items = project ? all.filter((row) => row.offeringIds?.includes(project.id)) : all;
   const selected = id ? Number(id) : null;
+  const query = project ? `?project=${project.id}` : '';
+  const choose = (value) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set('project', String(value));
+    else next.delete('project');
+    setParams(next, { replace: true });
+  };
   const analysed = items.filter((row) => row.summary).length;
   const high = items.filter((row) => row.threat === 'high').length;
-  const refresh = () => reload({ silent: true });
+  const refresh = () => {
+    reload({ silent: true });
+    reloadCatalog({ silent: true });
+  };
 
   async function importProfile() {
     setNote('');
@@ -475,7 +525,7 @@ export function Competitors() {
     if (!window.confirm(`Remove ${item.name} and all its analysis?`)) return;
     try {
       await api.del(`/api/competitors/${item.id}`);
-      if (selected === item.id) navigate('/app/growth/competitors');
+      if (selected === item.id) navigate(`/app/growth/competitors${query}`);
       refresh();
     } catch (err) {
       setNote(err.message);
@@ -486,8 +536,10 @@ export function Competitors() {
     setEditing(null);
     setVersion((value) => value + 1);
     refresh();
-    if (saved?.id) navigate(`/app/growth/competitors/${saved.id}`);
+    if (saved?.id) navigate(`/app/growth/competitors/${saved.id}${saved.offeringIds?.includes(scope) ? query : ''}`);
   }
+
+  const open = (competitorId) => navigate(`/app/growth/competitors/${competitorId}${query}`);
 
   return (
     <Page
@@ -504,13 +556,23 @@ export function Competitors() {
       <State loading={loading} error={error} onRetry={reload}>
         {data && !data.ready ? <p className="quiet">{data.note}</p> : (
           <div className="stack">
+            {activeProjects.length || project ? (
+              <div className="chip-tabs comp-scope" role="tablist" aria-label="Competitors for">
+                <button type="button" className={!project ? 'is-on' : ''} onClick={() => choose(0)}>Whole business</button>
+                {(project && project.status === 'archived' ? [...activeProjects, project] : activeProjects).map((row) => (
+                  <button key={row.id} type="button" className={project?.id === row.id ? 'is-on' : ''} onClick={() => choose(row.id)}>
+                    {row.name}{row.competitorCount ? ` (${row.competitorCount})` : ''}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="metric-strip offer-metrics">
-              <div className="metric"><span>Tracked</span><strong>{num(items.filter((row) => row.status === 'active').length)}</strong><em>{num(items.length)} saved</em></div>
+              <div className="metric"><span>Tracked</span><strong>{num(items.filter((row) => row.status === 'active').length)}</strong><em>{project ? `For ${project.name}` : `${num(items.length)} saved`}</em></div>
               <div className="metric"><span>Analysed</span><strong>{num(analysed)}</strong><em>Have a report</em></div>
               <div className="metric"><span>High threat</span><strong>{num(high)}</strong><em>Same market, similar or better deal</em></div>
             </div>
-            {editing !== null ? <CompetitorForm key={editing?.id || 'new'} item={editing || null} onDone={done} onCancel={() => setEditing(null)} /> : null}
-            <Suggestions canManage={canManage} onAdded={(competitorId) => { refresh(); navigate(`/app/growth/competitors/${competitorId}`); }} />
+            {editing !== null ? <CompetitorForm key={editing?.id || `new-${scope}`} item={editing || null} projects={projects} scope={scope} onDone={done} onCancel={() => setEditing(null)} /> : null}
+            <Suggestions key={scope} canManage={canManage} project={project} onAdded={(competitorId) => { refresh(); open(competitorId); }} />
             {note ? <p className="quiet">{note}</p> : null}
             {items.length ? (
               <div className="comp-layout">
@@ -519,8 +581,8 @@ export function Competitors() {
                     <article
                       key={item.id}
                       className={`comp-card${selected === item.id ? ' is-on' : ''}${item.status === 'archived' ? ' is-archived' : ''}`}
-                      onClick={() => navigate(`/app/growth/competitors/${item.id}`)}
-                      onKeyDown={(event) => { if (event.key === 'Enter') navigate(`/app/growth/competitors/${item.id}`); }}
+                      onClick={() => open(item.id)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') open(item.id); }}
                       tabIndex={0}
                     >
                       <header>
@@ -528,6 +590,7 @@ export function Competitors() {
                         <ThreatBadge value={item.threat} />
                       </header>
                       <p className="quiet">{[item.city, item.website ? host(item.website) : 'No website', item.status === 'archived' ? 'archived' : ''].filter(Boolean).join(' · ')}</p>
+                      {!project ? <ProjectChips ids={item.offeringIds} projects={projects} /> : null}
                       {item.summary ? <p className="comp-card-summary">{item.summary}</p> : null}
                       <footer>
                         <small>{item.running ? 'Analysing...' : item.lastAnalyzedAt ? `Analysed ${when(item.lastAnalyzedAt)}` : 'Not analysed yet'}</small>
@@ -538,7 +601,7 @@ export function Competitors() {
                 </div>
                 <div>
                   {selected ? (
-                    <Detail key={`${selected}-${version}`} id={selected} canManage={canManage} onChanged={refresh} onEdit={(row) => { setEditing(row); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+                    <Detail key={`${selected}-${version}`} id={selected} canManage={canManage} projects={projects} onChanged={refresh} onEdit={(row) => { setEditing(row); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
                   ) : (
                     <div className="offer-empty"><strong>Pick a competitor</strong><p className="quiet">Open one to see the analysis, or press Analyse now.</p></div>
                   )}
@@ -546,8 +609,12 @@ export function Competitors() {
               </div>
             ) : (
               <div className="offer-empty">
-                <strong>No competitors yet</strong>
-                <p className="quiet">Add a competitor with their website. AIRO reads it and compares it with your products and projects. No paid tool is needed.</p>
+                <strong>{project ? `No competitors linked to ${project.name} yet` : 'No competitors yet'}</strong>
+                <p className="quiet">
+                  {project
+                    ? 'Add one from the suggestions above, or add a competitor and tick this project.'
+                    : 'Add a competitor with their website. AIRO reads it and compares it with your products and projects. No paid tool is needed.'}
+                </p>
                 {canManage && editing === null ? <button className="btn-primary" type="button" onClick={() => setEditing(false)}>Add competitor</button> : null}
               </div>
             )}

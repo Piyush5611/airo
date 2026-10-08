@@ -13,7 +13,10 @@ import { ApiError } from '../utils/errors.js';
 
 const MANUAL_COOLDOWN_MS = 30 * 60 * 1000;
 const CHECK_TOP = 15;
+export const WEEKLY_PROJECTS = 10;
+const RUNS_PER_TICK = 6;
 const running = new Set();
+const scopeKey = (organizationId, offeringId) => `${organizationId}:${offeringId || 0}`;
 
 // Portals, directories, news and social sites list businesses; they are not competitors themselves.
 const NOT_COMPETITORS = [
@@ -74,20 +77,31 @@ searches: up to 4 Google searches, 2 to 6 words each, with the area (for example
 adKeywords: up to 3 short words people would see in Facebook or Instagram ads for this kind of offer (for example "3 bhk noida", "invisible braces").
 places: up to 2 Google Maps business categories (for example "real estate developer", "dental clinic").
 location: the main city and state or "City, India".
+When a PROJECT TO MATCH is given, search only for what competes with that one item: the same type of thing, in its area, at a similar price. Use its location, not other areas of the business.
 Never use the business's own name or its project or product names. Use only the facts given.`;
 
 const VERDICT_BRIEF = `You check which businesses found online compete with the owner's business. Use only the facts given.
+When the owner's facts name one PROJECT TO MATCH, judge against that project only: direct means the same type of thing in the same area at a similar price.
 direct: sells the same kind of thing to the same kind of customer in the same area. indirect: overlapping offer or area but not the same. not_competitor: a portal, directory, agent listing site, supplier, news site, the owner's own business, or something unrelated. unclear: not enough facts.
 reason: one short sentence that names the evidence (where they appeared and what their site says). name: the clean business name. city: their city if the facts show it.`;
 
-async function planSearch(organizationId, { profile, items, sector, orgName }) {
-  const facts = [
-    `Business: ${orgName || 'not set'}. Sector: ${sector || 'not set'}. Office city: ${profile?.officeCity || 'not set'}.`,
+export function planFacts({ profile, items, sector, orgName, project }) {
+  const business = `Business: ${orgName || 'not set'}. Sector: ${sector || 'not set'}. Office city: ${profile?.officeCity || 'not set'}.`;
+  if (project) {
+    return [business, profile?.category ? `Category: ${profile.category}` : '', `PROJECT TO MATCH:\n${catalogFacts([project]).split('\n').slice(1).join('\n')}`]
+      .filter(Boolean).join('\n');
+  }
+  return [
+    business,
     profile?.category ? `Category: ${profile.category}` : '',
     profile?.offering ? `Main offering: ${profile.offering}` : '',
     Array.isArray(profile?.locations) && profile.locations.length ? `Target areas: ${profile.locations.join(', ')}` : '',
     catalogFacts(items)
   ].filter(Boolean).join('\n');
+}
+
+async function planSearch(organizationId, { profile, items, sector, orgName, project }) {
+  const facts = planFacts({ profile, items, sector, orgName, project });
   try {
     const { data } = await structuredLlm({
       organizationId,
@@ -101,12 +115,13 @@ async function planSearch(organizationId, { profile, items, sector, orgName }) {
     return { ...data, searches: data.searches.filter(Boolean), adKeywords: data.adKeywords.filter(Boolean), places: data.places.filter(Boolean), by: 'ai' };
   } catch (error) {
     if (error?.code !== 'llm_missing') throw error;
-    return fallbackPlan({ profile, sector });
+    return fallbackPlan({ profile, sector, project });
   }
 }
 
-export function fallbackPlan({ profile, sector }) {
-  const city = profile?.officeCity || (Array.isArray(profile?.locations) ? profile.locations[0] : '') || '';
+export function fallbackPlan({ profile, sector, project }) {
+  const projectCity = String(project?.locations || '').split(/[,;\n]/)[0].trim();
+  const city = projectCity || profile?.officeCity || (Array.isArray(profile?.locations) ? profile.locations[0] : '') || '';
   const what = String(profile?.category || profile?.offering || sector || '').trim();
   if (!what) return null;
   const search = `${what} ${city}`.trim().toLowerCase();
@@ -253,19 +268,30 @@ async function judge(organizationId, { candidates, homes, ourFacts }) {
   return new Map(data.items.map((item) => [item.id, item]));
 }
 
-async function discover(organizationId, trigger, runId) {
+const splitIds = (value) => String(value || '').split(',').map(Number).filter(Boolean);
+
+async function projectFor(organizationId, offeringId) {
+  if (!offeringId) return null;
+  const project = await offeringRepo.byId(organizationId, offeringId);
+  if (!project) throw new ApiError(404, 'Product or project not found.', 'not_found');
+  if (project.status === 'archived') throw new ApiError(422, 'This product or project is archived. Make it active to search its competitors.', 'validation_error');
+  return project;
+}
+
+async function discover(organizationId, offeringId, runId) {
   const notes = [];
   const apiKey = await token();
   if (!apiKey) throw new ApiError(422, NOT_READY, 'apify_missing');
-  const [profile, items, org, known] = await Promise.all([
+  const [profile, items, org, known, project] = await Promise.all([
     businessProfile(organizationId).catch(() => null),
     offeringRepo.list(organizationId, { limit: 30 }).catch(() => []),
     repo.organizationName(organizationId),
-    repo.knownCompetitors(organizationId)
+    repo.knownCompetitors(organizationId),
+    projectFor(organizationId, offeringId)
   ]);
   const active = items.filter((item) => item.status !== 'archived');
   const sector = sectorOf(profile?.sector)?.label || '';
-  const plan = await planSearch(organizationId, { profile, items: active, sector, orgName: org?.name });
+  const plan = await planSearch(organizationId, { profile, items: active, sector, orgName: org?.name, project });
   if (!plan) throw new ApiError(422, 'Add your products or projects first, so AIRO knows what to search for.', 'validation_error');
 
   const [google, meta, maps] = await Promise.all([
@@ -275,18 +301,22 @@ async function discover(organizationId, trigger, runId) {
   ]);
   if (!google.length && !meta.length && !maps.length && notes.length) throw new ApiError(502, notes.join(' '), 'apify_failed');
 
+  const skipKnown = project ? known.filter((row) => splitIds(row.offeringIds).includes(project.id)) : known;
   const ownDomains = [...active.map((item) => domainOf(item.website)), domainOf(profile?.website)];
   const candidates = collectCandidates({
     google, meta, maps, ownDomains,
-    knownDomains: known.map((row) => domainOf(row.website)),
-    knownNames: [...known.map((row) => row.name), profile?.businessName || ''],
+    knownDomains: skipKnown.map((row) => domainOf(row.website)),
+    knownNames: [...skipKnown.map((row) => row.name), profile?.businessName || ''],
     orgName: org?.name
   }).slice(0, CHECK_TOP);
 
   let verdicts = new Map();
   if (candidates.length) {
     const homes = await inBatches(candidates, 5, readHome);
-    const ourFacts = [`OWNER: ${org?.name || 'the business'}. Sector: ${sector || 'not set'}. Office city: ${profile?.officeCity || 'not set'}.`, catalogFacts(active)].join('\n');
+    const owner = `OWNER: ${org?.name || 'the business'}. Sector: ${sector || 'not set'}. Office city: ${profile?.officeCity || 'not set'}.`;
+    const ourFacts = project
+      ? [owner, `PROJECT TO MATCH:\n${catalogFacts([project]).split('\n').slice(1).join('\n')}`].join('\n')
+      : [owner, catalogFacts(active)].join('\n');
     try {
       verdicts = await judge(organizationId, { candidates, homes, ourFacts });
     } catch (error) {
@@ -302,7 +332,7 @@ async function discover(organizationId, trigger, runId) {
       dropped += 1;
       continue;
     }
-    await repo.saveSuggestion(organizationId, {
+    await repo.saveSuggestion(organizationId, offeringId, {
       matchKey: row.key.slice(0, 200),
       name: (verdict?.name || row.name).slice(0, 160),
       website: row.website,
@@ -321,17 +351,18 @@ async function discover(organizationId, trigger, runId) {
   return counts;
 }
 
-async function begin(organizationId, trigger) {
+async function begin(organizationId, offeringId, trigger) {
   await repo.closeStaleRuns().catch(() => {});
-  const runId = await repo.startRun(organizationId, trigger);
-  running.add(organizationId);
+  const key = scopeKey(organizationId, offeringId);
+  const runId = await repo.startRun(organizationId, offeringId, trigger);
+  running.add(key);
   try {
-    return await discover(organizationId, trigger, runId);
+    return await discover(organizationId, offeringId, runId);
   } catch (error) {
     await repo.finishRun(runId, { status: 'failed', notes: [String(error?.message || 'The search failed.').slice(0, 300)] }).catch(() => {});
     throw error;
   } finally {
-    running.delete(organizationId);
+    running.delete(key);
   }
 }
 
@@ -339,18 +370,19 @@ function utcTime(value) {
   return value ? Date.parse(`${String(value).replace(' ', 'T')}Z`) : 0;
 }
 
-export async function startDiscovery(auth, req) {
+export async function startDiscovery(auth, req, offeringId = 0) {
   if (!(await token())) throw new ApiError(422, NOT_READY, 'apify_missing');
-  if (running.has(auth.organizationId)) return suggestionList(auth);
-  const last = await repo.latestRun(auth.organizationId);
-  if (last?.status === 'running' && Date.now() - utcTime(last.startedAt) < 20 * 60 * 1000) return suggestionList(auth);
+  await projectFor(auth.organizationId, offeringId);
+  if (running.has(scopeKey(auth.organizationId, offeringId))) return suggestionList(auth, offeringId);
+  const last = await repo.latestRun(auth.organizationId, offeringId);
+  if (last?.status === 'running' && Date.now() - utcTime(last.startedAt) < 20 * 60 * 1000) return suggestionList(auth, offeringId);
   if (last && Date.now() - utcTime(last.startedAt) < MANUAL_COOLDOWN_MS) {
     throw new ApiError(429, 'AIRO searched less than 30 minutes ago. Try again a little later.', 'rate_limited');
   }
-  await recordAudit(req, { action: 'competitor.discovery_started', resource: 'competitor' });
-  begin(auth.organizationId, 'manual').catch((error) => console.error('Competitor discovery failed:', String(error?.message || error).slice(0, 200)));
+  await recordAudit(req, { action: 'competitor.discovery_started', resource: 'competitor', metadata: offeringId ? { offeringId } : undefined });
+  begin(auth.organizationId, offeringId, 'manual').catch((error) => console.error('Competitor discovery failed:', String(error?.message || error).slice(0, 200)));
   await new Promise((resolve) => setTimeout(resolve, 300));
-  return suggestionList(auth);
+  return suggestionList(auth, offeringId);
 }
 
 function parse(value, fallback) {
@@ -363,18 +395,34 @@ function parse(value, fallback) {
   }
 }
 
-export async function suggestionList(auth) {
+// A suggestion for a project can be a business already tracked for another project; the owner then only links it.
+export function trackedMatch(row, known) {
+  const domain = domainOf(row.website);
+  const key = nameKey(row.name);
+  return known.find((item) => (domain && domainOf(item.website) === domain) || (key && nameKey(item.name) === key)) || null;
+}
+
+export async function suggestionList(auth, offeringId = 0) {
   try {
-    const [connected, run, rows] = await Promise.all([token(), repo.latestRun(auth.organizationId), repo.suggestions(auth.organizationId)]);
+    const [connected, run, rows, known] = await Promise.all([
+      token(),
+      repo.latestRun(auth.organizationId, offeringId),
+      repo.suggestions(auth.organizationId, offeringId),
+      offeringId ? repo.knownCompetitors(auth.organizationId) : []
+    ]);
     return {
       ready: true,
       apify: Boolean(connected),
-      running: running.has(auth.organizationId) || (run?.status === 'running' && Date.now() - utcTime(run.startedAt) < 20 * 60 * 1000),
+      offeringId,
+      running: running.has(scopeKey(auth.organizationId, offeringId)) || (run?.status === 'running' && Date.now() - utcTime(run.startedAt) < 20 * 60 * 1000),
       run: run ? { ...run, plan: parse(run.plan, null), counts: parse(run.counts, null), notes: parse(run.notes, []) } : null,
-      items: rows.map((row) => ({ ...row, sources: parse(row.sources, []) }))
+      items: rows.map((row) => {
+        const tracked = row.status === 'new' ? trackedMatch(row, known) : null;
+        return { ...row, sources: parse(row.sources, []), trackedId: tracked?.id || null };
+      })
     };
   } catch (error) {
-    if (error?.cause?.code === 'ER_NO_SUCH_TABLE' || error?.code === 'ER_NO_SUCH_TABLE') return { ready: false, apify: false, items: [] };
+    if (error?.cause?.code === 'ER_NO_SUCH_TABLE' || error?.code === 'ER_NO_SUCH_TABLE' || error?.cause?.code === 'ER_BAD_FIELD_ERROR') return { ready: false, apify: false, items: [] };
     throw error;
   }
 }
@@ -383,11 +431,19 @@ export async function addSuggestion(auth, req, id) {
   const row = await repo.suggestionById(auth.organizationId, id);
   if (!row) throw new ApiError(404, 'Suggestion not found.', 'not_found');
   if (row.status === 'added') throw new ApiError(409, 'This one is already in your competitors.', 'conflict');
+  const offeringId = Number(row.offeringId) || 0;
   const name = String(row.name).slice(0, 160);
-  const existing = await repo.byName(auth.organizationId, name);
+  const known = await repo.knownCompetitors(auth.organizationId);
+  const existing = (await repo.byName(auth.organizationId, name)) || trackedMatch(row, known);
   const competitorId = existing?.id || await repo.create(auth.organizationId, { name, website: row.website || '', facebook: row.facebook || '', city: row.city || '' });
+  if (offeringId) await repo.linkOffering(auth.organizationId, competitorId, offeringId);
   await repo.setSuggestionStatus(auth.organizationId, id, 'added', competitorId);
-  await recordAudit(req, { action: 'competitor.suggestion_added', resource: 'competitor', resourceId: competitorId });
+  await recordAudit(req, {
+    action: existing ? 'competitor.suggestion_linked' : 'competitor.suggestion_added',
+    resource: 'competitor',
+    resourceId: competitorId,
+    metadata: offeringId ? { offeringId } : undefined
+  });
   let analysing = false;
   if (row.website && !existing) {
     try {
@@ -397,29 +453,42 @@ export async function addSuggestion(auth, req, id) {
       analysing = false;
     }
   }
-  return { competitorId, analysing, ...(await suggestionList(auth)) };
+  return { competitorId, linked: Boolean(existing), analysing, ...(await suggestionList(auth, offeringId)) };
 }
 
 export async function ignoreSuggestion(auth, req, id) {
   const row = await repo.suggestionById(auth.organizationId, id);
   if (!row) throw new ApiError(404, 'Suggestion not found.', 'not_found');
   await repo.setSuggestionStatus(auth.organizationId, id, row.status === 'ignored' ? 'new' : 'ignored');
-  return suggestionList(auth);
+  return suggestionList(auth, Number(row.offeringId) || 0);
+}
+
+// Business-wide searches first, then each business's most used active projects, capped per business.
+export function dueScopes({ businesses = [], projects = [], cap = WEEKLY_PROJECTS, limit = RUNS_PER_TICK }) {
+  const perOrg = new Map();
+  const due = [...businesses.map((row) => ({ organizationId: Number(row.organizationId), offeringId: 0 }))];
+  for (const row of projects) {
+    const org = Number(row.organizationId);
+    const rank = (perOrg.get(org) || 0) + 1;
+    perOrg.set(org, rank);
+    if (rank <= cap && !Number(row.searchedRecently)) due.push({ organizationId: org, offeringId: Number(row.offeringId) });
+  }
+  return due.slice(0, limit);
 }
 
 export async function discoverDue() {
-  const result = { organizations: 0, suggested: 0, notes: [] };
+  const result = { searches: 0, suggested: 0, notes: [] };
   if (!(await token())) return result;
   await repo.closeStaleRuns().catch(() => {});
-  const rows = await repo.dueForDiscovery(3);
-  for (const row of rows) {
-    if (running.has(row.organizationId)) continue;
+  const [businesses, projects] = await Promise.all([repo.businessesDue(), repo.activeProjects()]);
+  for (const scope of dueScopes({ businesses, projects })) {
+    if (running.has(scopeKey(scope.organizationId, scope.offeringId))) continue;
     try {
-      const counts = await begin(row.organizationId, 'weekly');
-      result.organizations += 1;
+      const counts = await begin(scope.organizationId, scope.offeringId, 'weekly');
+      result.searches += 1;
       result.suggested += counts.suggested;
     } catch (error) {
-      result.notes.push(`Org ${row.organizationId}: ${String(error?.message || 'failed').slice(0, 120)}`);
+      result.notes.push(`Org ${scope.organizationId}${scope.offeringId ? ` project ${scope.offeringId}` : ''}: ${String(error?.message || 'failed').slice(0, 120)}`);
     }
   }
   return result;

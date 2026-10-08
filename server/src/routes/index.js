@@ -175,9 +175,12 @@ client.get('/competitors', requirePermission('campaigns.view'), asyncHandler(asy
 client.post('/competitors', requirePermission('campaigns.update'), validate(schemas.competitorSchema), asyncHandler(async (req, res) => {
   ok(res, await competitors.createCompetitor(req.auth, req), 201);
 }));
-client.get('/competitors/suggestions', requirePermission('campaigns.view'), asyncHandler(async (req, res) => ok(res, await discovery.suggestionList(req.auth))));
-client.post('/competitors/discover', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
-  ok(res, await discovery.startDiscovery(req.auth, req));
+client.get('/competitors/suggestions', requirePermission('campaigns.view'), asyncHandler(async (req, res) => {
+  const offeringId = Math.max(0, Math.trunc(Number(req.query.offeringId) || 0));
+  ok(res, await discovery.suggestionList(req.auth, offeringId));
+}));
+client.post('/competitors/discover', requirePermission('campaigns.update'), validate(schemas.discoverSchema), asyncHandler(async (req, res) => {
+  ok(res, await discovery.startDiscovery(req.auth, req, req.body.offeringId));
 }));
 client.post('/competitors/suggestions/:id/add', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await discovery.addSuggestion(req.auth, req, req.params.id));

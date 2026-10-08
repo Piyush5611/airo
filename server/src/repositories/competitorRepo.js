@@ -1,7 +1,8 @@
 import { insert, many, one, run } from '../db/sql.js';
 
 const FIELDS = `id, name, website, facebook, instagram, city, notes, status, last_analyzed_at AS lastAnalyzedAt,
-  created_at AS createdAt, updated_at AS updatedAt`;
+  created_at AS createdAt, updated_at AS updatedAt,
+  (SELECT GROUP_CONCAT(co.offering_id ORDER BY co.offering_id) FROM competitor_offerings co WHERE co.competitor_id = competitors.id) AS offeringIds`;
 
 export function list(organizationId) {
   return many(
@@ -79,7 +80,7 @@ export function reportHistory(organizationId, competitorId) {
   );
 }
 
-export function readyReports(organizationId, limit = 5) {
+export function readyReports(organizationId, limit = 5, offeringId = 0) {
   return many(
     `SELECT c.name, c.city, r.analysis, r.created_at AS createdAt
      FROM competitors c
@@ -87,9 +88,9 @@ export function readyReports(organizationId, limit = 5) {
        SELECT MAX(x.id) FROM competitor_reports x WHERE x.competitor_id = c.id AND x.status = 'ready'
      )
      WHERE c.organization_id = ? AND c.status = 'active'
-     ORDER BY r.created_at DESC
+     ORDER BY EXISTS (SELECT 1 FROM competitor_offerings co WHERE co.competitor_id = c.id AND co.offering_id = ?) DESC, r.created_at DESC
      LIMIT ?`,
-    [organizationId, limit]
+    [organizationId, offeringId, limit]
   );
 }
 
@@ -98,11 +99,56 @@ export function organizationName(organizationId) {
 }
 
 export function knownCompetitors(organizationId) {
-  return many(`SELECT id, name, website FROM competitors WHERE organization_id = ?`, [organizationId]);
+  return many(
+    `SELECT id, name, website,
+       (SELECT GROUP_CONCAT(co.offering_id) FROM competitor_offerings co WHERE co.competitor_id = competitors.id) AS offeringIds
+     FROM competitors WHERE organization_id = ?`,
+    [organizationId]
+  );
 }
 
-export function startRun(organizationId, trigger) {
-  return insert(`INSERT INTO competitor_discovery_runs (organization_id, trigger_type) VALUES (?, ?)`, [organizationId, trigger]);
+export async function setOfferings(organizationId, competitorId, offeringIds) {
+  await run(`DELETE FROM competitor_offerings WHERE organization_id = ? AND competitor_id = ?`, [organizationId, competitorId]);
+  if (!offeringIds.length) return null;
+  return run(
+    `INSERT IGNORE INTO competitor_offerings (competitor_id, offering_id, organization_id)
+     SELECT ?, id, organization_id FROM offerings WHERE organization_id = ? AND id IN (?)`,
+    [competitorId, organizationId, offeringIds]
+  );
+}
+
+export function linkOffering(organizationId, competitorId, offeringId) {
+  return run(
+    `INSERT IGNORE INTO competitor_offerings (competitor_id, offering_id, organization_id)
+     SELECT ?, id, organization_id FROM offerings WHERE organization_id = ? AND id = ?`,
+    [competitorId, organizationId, offeringId]
+  );
+}
+
+export function linkedOfferings(organizationId, competitorId) {
+  return many(
+    `SELECT f.id, f.kind, f.name, f.details, f.usps, f.offer, f.price_text AS priceText, f.locations, f.website
+     FROM competitor_offerings co JOIN offerings f ON f.id = co.offering_id
+     WHERE co.organization_id = ? AND co.competitor_id = ?
+     ORDER BY f.name`,
+    [organizationId, competitorId]
+  );
+}
+
+export function linkCounts(organizationId) {
+  return many(
+    `SELECT co.offering_id AS offeringId, COUNT(*) AS total
+     FROM competitor_offerings co JOIN competitors c ON c.id = co.competitor_id AND c.status = 'active'
+     WHERE co.organization_id = ? GROUP BY co.offering_id`,
+    [organizationId]
+  );
+}
+
+export function startRun(organizationId, offeringId, trigger) {
+  return insert(
+    `INSERT INTO competitor_discovery_runs (organization_id, offering_id, trigger_type) VALUES (?, ?, ?)`,
+    [organizationId, offeringId, trigger]
+  );
 }
 
 export function finishRun(id, { status, plan, counts, notes }) {
@@ -112,11 +158,11 @@ export function finishRun(id, { status, plan, counts, notes }) {
   );
 }
 
-export function latestRun(organizationId) {
+export function latestRun(organizationId, offeringId = 0) {
   return one(
-    `SELECT id, trigger_type AS triggerType, status, plan, counts, notes, started_at AS startedAt, finished_at AS finishedAt
-     FROM competitor_discovery_runs WHERE organization_id = ? ORDER BY id DESC LIMIT 1`,
-    [organizationId]
+    `SELECT id, offering_id AS offeringId, trigger_type AS triggerType, status, plan, counts, notes, started_at AS startedAt, finished_at AS finishedAt
+     FROM competitor_discovery_runs WHERE organization_id = ? AND offering_id = ? ORDER BY id DESC LIMIT 1`,
+    [organizationId, offeringId]
   );
 }
 
@@ -127,56 +173,62 @@ export function closeStaleRuns() {
   );
 }
 
-export function dueForDiscovery(limit = 3) {
+const RECENT_RUN = `SELECT 1 FROM competitor_discovery_runs r
+  WHERE r.organization_id = o.id AND r.offering_id = %s AND r.started_at > UTC_TIMESTAMP() - INTERVAL 7 DAY`;
+
+export function businessesDue() {
   return many(
-    `SELECT o.id AS organizationId
+    `SELECT o.id AS organizationId, 0 AS offeringId
      FROM organizations o
      WHERE o.status IN ('active', 'onboarding')
        AND (
          EXISTS (SELECT 1 FROM offerings f WHERE f.organization_id = o.id AND f.status = 'active')
          OR EXISTS (SELECT 1 FROM business_profiles b WHERE b.organization_id = o.id)
        )
-       AND NOT EXISTS (
-         SELECT 1 FROM competitor_discovery_runs r
-         WHERE r.organization_id = o.id AND r.started_at > UTC_TIMESTAMP() - INTERVAL 7 DAY
-       )
+       AND NOT EXISTS (${RECENT_RUN.replace('%s', '0')})
      ORDER BY o.id
-     LIMIT ?`,
-    [limit]
+     LIMIT 50`
   );
 }
 
-export function suggestionByKey(organizationId, matchKey) {
-  return one(`SELECT id, status FROM competitor_suggestions WHERE organization_id = ? AND match_key = ?`, [organizationId, matchKey]);
+export function activeProjects() {
+  return many(
+    `SELECT f.organization_id AS organizationId, f.id AS offeringId,
+       EXISTS (${RECENT_RUN.replace('%s', 'f.id')}) AS searchedRecently
+     FROM offerings f JOIN organizations o ON o.id = f.organization_id
+     WHERE f.status = 'active' AND o.status IN ('active', 'onboarding')
+     ORDER BY f.organization_id, f.last_used_at IS NULL, f.last_used_at DESC, f.updated_at DESC
+     LIMIT 2000`
+  );
 }
 
-export function saveSuggestion(organizationId, row) {
+export function saveSuggestion(organizationId, offeringId, row) {
   return run(
-    `INSERT INTO competitor_suggestions (organization_id, match_key, name, website, facebook, city, category, sources, score, verdict, reason)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO competitor_suggestions (organization_id, offering_id, match_key, name, website, facebook, city, category, sources, score, verdict, reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE name = VALUES(name), website = COALESCE(VALUES(website), website), facebook = COALESCE(VALUES(facebook), facebook),
        city = COALESCE(VALUES(city), city), category = COALESCE(VALUES(category), category), sources = VALUES(sources),
        score = VALUES(score), verdict = VALUES(verdict), reason = VALUES(reason), last_seen_at = UTC_TIMESTAMP()`,
-    [organizationId, row.matchKey, row.name, row.website || null, row.facebook || null, row.city || null, row.category || null,
+    [organizationId, offeringId, row.matchKey, row.name, row.website || null, row.facebook || null, row.city || null, row.category || null,
       JSON.stringify(row.sources || []), row.score, row.verdict, row.reason || null]
   );
 }
 
-export function suggestions(organizationId) {
+export function suggestions(organizationId, offeringId = 0) {
   return many(
-    `SELECT id, name, website, facebook, city, category, sources, score, verdict, reason, status, competitor_id AS competitorId,
+    `SELECT id, offering_id AS offeringId, name, website, facebook, city, category, sources, score, verdict, reason, status, competitor_id AS competitorId,
        first_seen_at AS firstSeenAt, last_seen_at AS lastSeenAt
      FROM competitor_suggestions
-     WHERE organization_id = ?
+     WHERE organization_id = ? AND offering_id = ?
      ORDER BY status = 'new' DESC, verdict = 'direct' DESC, score DESC
      LIMIT 60`,
-    [organizationId]
+    [organizationId, offeringId]
   );
 }
 
 export function suggestionById(organizationId, id) {
   return one(
-    `SELECT id, name, website, facebook, city, category, status FROM competitor_suggestions WHERE organization_id = ? AND id = ?`,
+    `SELECT id, offering_id AS offeringId, name, website, facebook, city, category, status FROM competitor_suggestions WHERE organization_id = ? AND id = ?`,
     [organizationId, id]
   );
 }

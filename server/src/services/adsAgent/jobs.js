@@ -50,7 +50,7 @@ export const JOBS = [
     run: async () => {
       const result = await discoverDue();
       return {
-        summary: `${result.suggested} competitor suggestions across ${result.organizations} organizations.`,
+        summary: `${result.suggested} competitor suggestions from ${result.searches} searches.`,
         error: result.notes.length ? result.notes.join(' | ') : null
       };
     }

@@ -24,10 +24,10 @@ import { attribution, codeState, flattenFields, pickContact, scriptSources } fro
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
 import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts, sectorOf } from '../domain/sectors.js';
-import { competitorSchema, imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
+import { competitorSchema, discoverSchema, imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
 import { pageText, pricesIn, samePageLinks } from '../integrations/webPage.js';
 import { analysisFacts, analysisSchema } from '../services/competitorService.js';
-import { collectCandidates, domainOf, fallbackPlan, notCompetitor, planSchema, verdictSchema } from '../services/competitorDiscovery.js';
+import { collectCandidates, domainOf, dueScopes, fallbackPlan, notCompetitor, planFacts, planSchema, trackedMatch, verdictSchema } from '../services/competitorDiscovery.js';
 import { adLibraryUrl } from '../integrations/apify.js';
 import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
@@ -921,4 +921,39 @@ test('discovery plan and AI verdicts are checked before use', () => {
   assert.equal(verdicts.items[1].verdict, 'unclear');
   assert.deepEqual(fallbackPlan({ profile: { category: 'Real estate', officeCity: 'Noida' } }).searches, ['real estate noida']);
   assert.equal(fallbackPlan({ profile: {} }), null);
+});
+test('project discovery searches only around the chosen project', () => {
+  const project = { id: 7, kind: 'project', name: 'Green Heights', locations: 'Wakad, Pune', priceText: '80 lakh', details: '2 BHK flats' };
+  const facts = planFacts({ profile: { officeCity: 'Noida', locations: ['Noida', 'Pune'] }, items: SAVED, sector: 'Real estate', orgName: 'Green Builders', project });
+  assert.ok(facts.includes('PROJECT TO MATCH'));
+  assert.ok(facts.includes('Wakad, Pune'));
+  assert.ok(!facts.includes('Target areas'));
+  assert.ok(planFacts({ profile: {}, items: SAVED, sector: '', orgName: 'X' }).includes('Saved products'));
+  assert.deepEqual(fallbackPlan({ profile: { category: 'Real estate', officeCity: 'Noida' }, project }).searches, ['real estate wakad']);
+});
+
+test('weekly search takes the business first and at most ten projects per business', () => {
+  const projects = [
+    ...Array.from({ length: 12 }, (_, i) => ({ organizationId: 1, offeringId: i + 1, searchedRecently: i === 0 ? 1 : 0 })),
+    { organizationId: 2, offeringId: 50, searchedRecently: 0 }
+  ];
+  const due = dueScopes({ businesses: [{ organizationId: 3 }], projects, cap: 10, limit: 100 });
+  assert.deepEqual(due[0], { organizationId: 3, offeringId: 0 });
+  const orgOne = due.filter((row) => row.organizationId === 1).map((row) => row.offeringId);
+  assert.deepEqual(orgOne, [2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.ok(due.some((row) => row.offeringId === 50));
+  assert.equal(dueScopes({ businesses: [], projects, limit: 6 }).length, 6);
+});
+
+test('a project suggestion that is already tracked is linked, not added twice', () => {
+  const known = [{ id: 4, name: 'Skyline Group', website: 'https://www.skyline.example' }, { id: 5, name: 'Metro Homes', website: '' }];
+  assert.equal(trackedMatch({ name: 'Skyline', website: 'https://skyline.example/lp' }, known)?.id, 4);
+  assert.equal(trackedMatch({ name: 'metro homes', website: '' }, known)?.id, 5);
+  assert.equal(trackedMatch({ name: 'New Co', website: 'https://new.example' }, known), null);
+  const parse = (body) => competitorSchema.safeParse({ body, query: {}, params: {} });
+  assert.deepEqual(parse({ name: 'Skyline', offeringIds: ['3', 4] }).data.body.offeringIds, [3, 4]);
+  assert.equal(parse({ name: 'Skyline' }).data.body.offeringIds, undefined);
+  assert.equal(parse({ name: 'Skyline', offeringIds: [0] }).success, false);
+  assert.equal(discoverSchema.parse({ body: {}, query: {}, params: {} }).body.offeringId, 0);
+  assert.equal(discoverSchema.parse({ body: { offeringId: '9' }, query: {}, params: {} }).body.offeringId, 9);
 });

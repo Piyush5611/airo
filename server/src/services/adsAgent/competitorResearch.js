@@ -5,6 +5,7 @@ import { googleAccount } from '../googleAdChat.js';
 import { metaAccount } from '../metaAdChat.js';
 import { businessProfile } from './chatPlanner.js';
 import { readyReports } from '../../repositories/competitorRepo.js';
+import { byName as offeringByName } from '../../repositories/offeringRepo.js';
 import { LINE, bullets, card, header, hint, money, section } from './waFormat.js';
 
 const TRIGGER = /\b(competitors?|competition|competitive|rivals?|ad ?library|transparency)\b/i;
@@ -181,8 +182,9 @@ function profileLinks(profile, english) {
   );
 }
 
-export async function trackedSection(organizationId, english) {
-  const rows = await readyReports(organizationId, 4).catch(() => []);
+export async function trackedSection(organizationId, english, product = '') {
+  const project = product ? await offeringByName(organizationId, String(product).slice(0, 160)).catch(() => null) : null;
+  const rows = await readyReports(organizationId, 4, project?.id || 0).catch(() => []);
   if (!rows.length) return '';
   return section(
     say(english, 'TRACKED COMPETITORS (AIRO ANALYSIS)', 'TRACKED COMPETITORS (AIRO ANALYSIS)'),
@@ -205,7 +207,7 @@ export async function competitorReply({ organizationId, conversationId, text, to
   const english = !HINGLISH.test(text);
   const draft = await draftProduct(conversationId);
   const profile = await businessProfile(organizationId);
-  const tracked = await trackedSection(organizationId, english);
+  const tracked = await trackedSection(organizationId, english, draft?.product);
   const topic = competitorTopic(askedTopic) || competitorTopic(text) || competitorTopic(draft?.product) || competitorTopic(profile?.offering || profile?.category || '');
   if (topic.length < 3) {
     if (tracked) {

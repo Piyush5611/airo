@@ -2,6 +2,16 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-08 (Competitors per project)
+
+- **Change:** A competitor can be linked to one or more products or projects through the new `competitor_offerings` table. A competitor with no link competes with the whole business. Create and edit take an optional `offeringIds` list. List and detail return `offeringIds`.
+- **Change:** Discovery takes a scope. `POST /api/competitors/discover` takes `offeringId` (0 means the whole business), and `GET /api/competitors/suggestions?offeringId=` lists suggestions for that scope. For a project, the AI plans the search and judges matches against that one project (type, area, price). Competitors tracked for another project can still be suggested; Add then only links them (`trackedId`, `linked`).
+- **Change:** Analysis compares a linked competitor only with its linked items. Unlinked competitors are still compared with the whole catalog.
+- **Change:** The weekly job searches the business and each active project not searched in 7 days, at most 10 projects per business (most used first), and up to 6 searches per 6-hour run.
+- **Change:** In ad chat, competitors linked to the product being advertised are shown first.
+- **Change (client):** The Competitors page has a chooser for the whole business or one project, with suggestions, the list and the Find button following it. The form has project checkboxes, cards and detail show linked projects, and each Products & Projects card links to its competitors with a count.
+- **Migration/API impact:** `030_project_competitors.sql` adds `competitor_offerings` and an `offering_id` column (0 for the whole business) to `competitor_suggestions` and `competitor_discovery_runs`. The suggestion unique key is now organization, offering and match key.
+
 ### 2026-10-08 (Apify moved to the platform)
 
 - **Change:** Apify is no longer a business connection. One shared token lives in the new `platform_tools` table (encrypted, last 4 shown). It is managed on the new platform page Research Tools (`/platform/research`) through `GET/POST/DELETE /api/admin/research(/apify)`. The token is checked with `GET https://api.apify.com/v2/users/me` before it is saved.

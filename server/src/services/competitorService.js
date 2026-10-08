@@ -92,13 +92,21 @@ function parseJson(value) {
 }
 
 function missingTable(error) {
-  return error?.cause?.code === 'ER_NO_SUCH_TABLE' || error?.code === 'ER_NO_SUCH_TABLE';
+  const code = error?.cause?.code || error?.code;
+  return code === 'ER_NO_SUCH_TABLE' || code === 'ER_BAD_FIELD_ERROR';
+}
+
+const idList = (value) => String(value || '').split(',').map(Number).filter(Boolean);
+
+async function saveLinks(auth, id, offeringIds) {
+  if (!Array.isArray(offeringIds)) return;
+  await repo.setOfferings(auth.organizationId, id, [...new Set(offeringIds.map(Number).filter(Boolean))].slice(0, 50));
 }
 
 export async function listCompetitors(auth) {
   try {
     const items = await repo.list(auth.organizationId);
-    return { ready: true, items: items.map((row) => ({ ...row, running: running.has(row.id) })) };
+    return { ready: true, items: items.map((row) => ({ ...row, offeringIds: idList(row.offeringIds), running: running.has(row.id) })) };
   } catch (error) {
     if (missingTable(error)) return { ready: false, items: [], note: 'Run npm run migrate to set up competitors.' };
     throw error;
@@ -111,6 +119,7 @@ export async function competitorDetail(auth, id) {
   const [report, history] = await Promise.all([repo.latestReport(auth.organizationId, id), repo.reportHistory(auth.organizationId, id)]);
   return {
     ...found,
+    offeringIds: idList(found.offeringIds),
     running: running.has(found.id),
     report: report ? {
       ...report,
@@ -127,6 +136,7 @@ export async function createCompetitor(auth, req) {
   const row = bodyRow(req.body);
   if (await repo.byName(auth.organizationId, row.name)) throw new ApiError(409, 'A competitor with this name is already saved.', 'conflict');
   const id = await repo.create(auth.organizationId, row);
+  await saveLinks(auth, id, req.body.offeringIds);
   await recordAudit(req, { action: 'competitor.created', resource: 'competitor', resourceId: id });
   return competitorDetail(auth, id);
 }
@@ -138,6 +148,7 @@ export async function updateCompetitor(auth, req, id) {
   const clash = await repo.byName(auth.organizationId, row.name);
   if (clash && clash.id !== found.id) throw new ApiError(409, 'A competitor with this name is already saved.', 'conflict');
   await repo.update(auth.organizationId, id, row);
+  await saveLinks(auth, id, req.body.offeringIds);
   await recordAudit(req, { action: 'competitor.updated', resource: 'competitor', resourceId: id });
   return competitorDetail(auth, id);
 }
@@ -249,8 +260,15 @@ async function runAnalysis(organizationId, competitor) {
     await repo.addReport({ organizationId, competitorId: competitor.id, status: 'failed', website, keywords, notes });
     return;
   }
-  const [items, sectorKey] = await Promise.all([offeringRepo.list(organizationId, { limit: 30 }).catch(() => []), organizationSector(organizationId)]);
-  const facts = analysisFacts({ competitor, pages, keywords, ours: catalogFacts(items), sector: sectorOf(sectorKey)?.label || '' });
+  const [items, linked, sectorKey] = await Promise.all([
+    offeringRepo.list(organizationId, { limit: 30 }).catch(() => []),
+    repo.linkedOfferings(organizationId, competitor.id).catch(() => []),
+    organizationSector(organizationId)
+  ]);
+  const ours = linked.length
+    ? `The owner tracks this competitor against these of its own items only; compare with these:\n${catalogFacts(linked)}`
+    : catalogFacts(items);
+  const facts = analysisFacts({ competitor, pages, keywords, ours, sector: sectorOf(sectorKey)?.label || '' });
   try {
     const { data, model } = await structuredLlm({
       organizationId,

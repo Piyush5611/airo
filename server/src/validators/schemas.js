@@ -361,7 +361,12 @@ export const competitorSchema = body({
   instagram: z.string().trim().max(120).optional().default(''),
   city: z.string().trim().max(120).optional().default(''),
   notes: z.string().trim().max(1000).optional().default(''),
-  status: z.enum(['active', 'archived']).optional().default('active')
+  status: z.enum(['active', 'archived']).optional().default('active'),
+  offeringIds: z.array(z.coerce.number().int().positive()).max(50).optional()
+});
+
+export const discoverSchema = body({
+  offeringId: z.coerce.number().int().min(0).optional().default(0)
 });
 
 export const researchKeySchema = body({

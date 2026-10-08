@@ -3,7 +3,7 @@ import { api, currentToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { day, label, num, when } from '../format.js';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Badge, Page, State, Table } from '../ui.jsx';
 
 const FALLBACK = {
@@ -559,6 +559,7 @@ function OfferingCard({ item, catalog, maxPhotos, canManage, onEdit, onDelete, o
           </button>
         ) : null}
         {item.website ? <a className="btn-ghost" href={item.website} target="_blank" rel="noreferrer">Open site</a> : null}
+        {!archived ? <Link className="btn-ghost" to={`/app/growth/competitors?project=${item.id}`}>Competitors{item.competitorCount ? ` (${item.competitorCount})` : ''}</Link> : null}
         {canManage ? (
           <span className="offer-icons">
             <button className="edit-btn" type="button" onClick={() => onEdit(item)} aria-label={`Edit ${item.name}`} title="Edit">

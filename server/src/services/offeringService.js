@@ -6,6 +6,7 @@ import { recordAudit } from './auditService.js';
 import { structuredLlm } from './llmService.js';
 import { catalogFor, sectorOf } from '../domain/sectors.js';
 import { organizationSector } from '../repositories/workspaceRepo.js';
+import { linkCounts } from '../repositories/competitorRepo.js';
 import { card, options } from './adsAgent/waFormat.js';
 
 const KIND = /^[a-z_]{2,40}$/;
@@ -367,20 +368,22 @@ export async function offeringAssets(organizationId, ids) {
 
 export async function listOfferings(auth) {
   try {
-    const [items, media, mark, sector] = await Promise.all([
+    const [items, media, mark, sector, rivals] = await Promise.all([
       repo.list(auth.organizationId, { status: 'all' }),
       repo.photoIds(auth.organizationId),
       repo.logo(auth.organizationId),
-      organizationSector(auth.organizationId)
+      organizationSector(auth.organizationId),
+      linkCounts(auth.organizationId).catch(() => [])
     ]);
     const byItem = {};
     for (const row of media) (byItem[row.offeringId] ||= []).push(row.id);
+    const rivalCount = new Map(rivals.map((row) => [Number(row.offeringId), Number(row.total)]));
     return {
       ready: true,
       catalog: catalogFor(sector),
       logoId: mark?.id || null,
       maxPhotos: MAX_PHOTOS,
-      items: items.map((item) => ({ ...item, photoIds: byItem[item.id] || [] }))
+      items: items.map((item) => ({ ...item, photoIds: byItem[item.id] || [], competitorCount: rivalCount.get(item.id) || 0 }))
     };
   } catch (error) {
     if (missingTable(error)) return { ready: false, items: [], note: 'Run npm run migrate to set up products and projects.' };

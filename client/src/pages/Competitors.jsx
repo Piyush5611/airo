@@ -456,7 +456,7 @@ function AdsPanel({ id, canManage }) {
 }
 
 const FIT = { direct: ['bad', 'Direct competitor'], indirect: ['warn', 'Indirect'], unclear: ['', 'Check yourself'] };
-const SOURCE = { google_ad: 'Google ad', google_search: 'Google search', meta_ad: 'Meta ads', maps: 'Google Maps' };
+const SOURCE = { google_ad: 'Google ad', google_search: 'Google search', meta_ad: 'Meta ads', maps: 'Google Maps', discovery: 'AIRO search' };
 
 function Suggestions({ canManage, project, onAdded }) {
   const scope = project?.id || 0;

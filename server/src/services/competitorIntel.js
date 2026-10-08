@@ -16,6 +16,7 @@ const BATCH = 15;
 const ORG_LIMIT_PER_RUN = 45;
 const PURPOSES = ['competitors', 'ads', 'assistant', 'whatsapp'];
 const analysing = new Set();
+const analyseAgain = new Set();
 
 export const STYLES = ['product', 'lifestyle', 'ugc', 'testimonial', 'educational', 'founder_led', 'offer', 'before_after', 'social_proof', 'announcement', 'comparison'];
 export const OFFERS = ['discount', 'price', 'emi', 'free_trial', 'consultation', 'site_visit', 'limited_time', 'bundle', 'guarantee', 'other', 'none'];
@@ -253,7 +254,10 @@ function blankAnalysis(row) {
 
 export async function analyzePending(organizationId, limit = ORG_LIMIT_PER_RUN) {
   const result = { analysed: 0, reused: 0, skipped: 0, failed: 0, notes: [] };
-  if (analysing.has(organizationId)) return result;
+  if (analysing.has(organizationId)) {
+    analyseAgain.add(organizationId);
+    return { ...result, queued: true };
+  }
   analysing.add(organizationId);
   try {
     const rows = await intelRepo.pendingAnalysis(organizationId, ANALYSIS_VERSION, limit);
@@ -306,6 +310,7 @@ export async function analyzePending(organizationId, limit = ORG_LIMIT_PER_RUN) 
         if (error?.code === 'llm_missing') break;
       }
     }
+    if (rows.length >= limit && result.analysed + result.reused + result.skipped > 0) analyseAgain.add(organizationId);
     if (result.analysed) {
       await recordAudit({ auth: null, ip: null }, { action: 'competitor.ads_analysed', resource: 'competitor_ads', organizationId, metadata: { analysed: result.analysed, reused: result.reused } }).catch(() => {});
     }
@@ -315,6 +320,10 @@ export async function analyzePending(organizationId, limit = ORG_LIMIT_PER_RUN) 
     throw error;
   } finally {
     analysing.delete(organizationId);
+    // A second check that finished during this run stored ads this run did not see.
+    if (analyseAgain.delete(organizationId)) {
+      setImmediate(() => analyzePending(organizationId, limit).catch((error) => console.error('Competitor ad analysis failed:', String(error?.message || error).slice(0, 200))));
+    }
   }
 }
 

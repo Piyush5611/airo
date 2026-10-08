@@ -279,16 +279,16 @@ export function IntelOverview({ canManage, onOpenCompetitor }) {
             { label: 'Live ads observed', value: data.market.ads, hint: 'Meta and Google' },
             { label: 'Ads analysed', value: data.market.analysedAds, hint: 'With readable text' }
           ]} />
-          {data.pendingAnalysis || data.analysing ? (
-            <div className="comp-running">
-              {data.analysing ? <span className="comp-spinner" aria-hidden="true" /> : null}
-              <div>
-                <strong>{data.analysing ? 'Analysing ads...' : `${num(data.pendingAnalysis)} ads wait for AI analysis.`}</strong>
-                <p className="quiet">AIRO analyses new ads every hour. Ads with the same text are analysed once.</p>
-              </div>
-              {canManage && !data.analysing ? <button className="btn" type="button" onClick={analyse} disabled={busy}>Analyse ads now</button> : null}
+          <div className="comp-running">
+            {data.analysing ? <span className="comp-spinner" aria-hidden="true" /> : null}
+            <div>
+              <strong>
+                {data.analysing ? `Analysing ads... ${num(data.pendingAnalysis)} left.` : data.pendingAnalysis ? `${num(data.pendingAnalysis)} ads wait for AI analysis.` : data.market.ads ? 'All stored ads are analysed.' : 'No competitor ads stored yet.'}
+              </strong>
+              <p className="quiet">AIRO analyses new ads every hour and after each ad check. Ads with the same text are analysed once; ads without text are not sent to AI.</p>
             </div>
-          ) : null}
+            {canManage ? <button className="btn" type="button" onClick={analyse} disabled={busy || data.analysing || !data.pendingAnalysis}>Analyse ads now</button> : null}
+          </div>
           {message ? <p className="quiet">{message}</p> : null}
           <div className="comp-block">
             <h3>Competitors</h3>

@@ -905,6 +905,9 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
 .legal-body h2 { font-size: 20px; color: var(--ink); margin: 28px 0 8px; }
 .legal-body ul, .legal-body ol { padding-left: 20px; }
 .legal-body li { margin: 6px 0; }
+.legal-links { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 14px; }
+.login-legal { display: block; margin-top: 10px; letter-spacing: 0; text-transform: none; }
+.login-legal a { color: #d9d2ff; }
 
 @media (max-width: 1200px) {
   .kpi-grid, .triple { grid-template-columns: 1fr 1fr; }

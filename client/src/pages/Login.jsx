@@ -43,7 +43,10 @@ export function Login() {
           <h1>Real estate, read as a business.</h1>
           <p className="login-lead">Campaigns, portals, calls and pipeline in one workspace. The sources stay in Connections.</p>
         </div>
-        <p className="login-foot">NCR desk · Sector 62 to Dwarka Expressway</p>
+        <p className="login-foot">
+          NCR desk · Sector 62 to Dwarka Expressway
+          <span className="login-legal"><Link to="/privacy">Privacy policy</Link> · <Link to="/terms">Terms of service</Link></span>
+        </p>
       </section>
       <section className="login-form">
         <form className="login-card form-grid" onSubmit={submit}>

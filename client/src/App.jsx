@@ -47,6 +47,7 @@ export function preloadPages(realm) {
 }
 
 const Privacy = page('privacy', 'Privacy');
+const Terms = page('privacy', 'Terms');
 const CommandCenter = page('command', 'CommandCenter');
 const Insights = page('command', 'Insights');
 const CampaignDetail = page('growth', 'CampaignDetail');
@@ -124,6 +125,7 @@ export function App() {
         <Route path="/login" element={<Guest><Login /></Guest>} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
         <Route path="/app" element={<Require realm="client"><Shell kicker="Workspace" nav={clientNav} home="/app" /></Require>}>
           <Route index element={<CommandCenter />} />
           <Route path="insights" element={<Insights />} />

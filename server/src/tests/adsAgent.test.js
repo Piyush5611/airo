@@ -27,7 +27,7 @@ import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts,
 import { competitorSchema, discoverSchema, imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
 import { pageText, pricesIn, samePageLinks } from '../integrations/webPage.js';
 import { analysisFacts, analysisSchema } from '../services/competitorService.js';
-import { collectCandidates, domainOf, dueScopes, fallbackPlan, notCompetitor, planFacts, planSchema, trackedMatch, verdictSchema } from '../services/competitorDiscovery.js';
+import { collectCandidates, domainOf, dueScopes, fallbackPlan, notCompetitor, placeParts, planFacts, planSchema, trackedMatch, verdictSchema } from '../services/competitorDiscovery.js';
 import { adLibraryUrl } from '../integrations/apify.js';
 import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
@@ -929,7 +929,21 @@ test('project discovery searches only around the chosen project', () => {
   assert.ok(facts.includes('Wakad, Pune'));
   assert.ok(!facts.includes('Target areas'));
   assert.ok(planFacts({ profile: {}, items: SAVED, sector: '', orgName: 'X' }).includes('Saved products'));
-  assert.deepEqual(fallbackPlan({ profile: { category: 'Real estate', officeCity: 'Noida' }, project }).searches, ['real estate wakad']);
+  const plan = fallbackPlan({ profile: { category: 'Real estate', officeCity: 'Noida' }, project });
+  assert.deepEqual(plan.searches, ['2 bhk flats wakad', '2 bhk flats pune', 'real estate pune']);
+  assert.deepEqual(plan.adKeywords, ['2 bhk flats pune']);
+  assert.equal(plan.location, 'pune, India');
+});
+
+test('without AI each project gets its own search words from its type and address', () => {
+  assert.deepEqual(placeParts('Plot No. 21, Knowledge Park III, Greater Noida, Uttar Pradesh – 201308'), { area: 'Knowledge Park III', city: 'Greater Noida' });
+  assert.deepEqual(placeParts('noida'), { area: '', city: 'noida' });
+  const profile = { category: 'Real estate', officeCity: 'Noida' };
+  const office = fallbackPlan({ profile, project: { kind: 'commercial_project', name: 'Biigtech', locations: 'Plot No. 21, Knowledge Park III, Greater Noida, Uttar Pradesh – 201308' } });
+  const homes = fallbackPlan({ profile, project: { kind: 'residential_project', name: 'Saya', locations: 'Raj Nagar Extension, Ghaziabad' } });
+  assert.deepEqual(office.adKeywords, ['commercial space greater noida']);
+  assert.deepEqual(homes.adKeywords, ['flats ghaziabad']);
+  assert.notDeepEqual(office.searches, homes.searches);
 });
 
 test('weekly search takes the business first and at most ten projects per business', () => {

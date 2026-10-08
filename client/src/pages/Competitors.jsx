@@ -345,6 +345,12 @@ function Suggestions({ canManage, project, onAdded }) {
           {(run.notes || []).join(' ')}
         </p>
       ) : null}
+      {!running && run?.plan?.by === 'rules' ? (
+        <div className="comp-failed">
+          <strong>No AI model was connected for this search.</strong>
+          <span>AIRO used only the project type and city, and could not check whether each business really competes with you, so some results may be unrelated. A platform admin can connect a model for Competitor research in Platform AI, then search again.</span>
+        </div>
+      ) : null}
       {message ? <p className="quiet">{message}</p> : null}
       {shown.length ? (
         <div className="comp-suggest-grid">

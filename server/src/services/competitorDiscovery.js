@@ -119,13 +119,38 @@ async function planSearch(organizationId, { profile, items, sector, orgName, pro
   }
 }
 
+const STATES = /^(andhra pradesh|arunachal pradesh|assam|bihar|chhattisgarh|goa|gujarat|haryana|himachal pradesh|jharkhand|karnataka|kerala|madhya pradesh|maharashtra|manipur|meghalaya|mizoram|nagaland|odisha|punjab|rajasthan|sikkim|tamil nadu|telangana|tripura|uttar pradesh|uttarakhand|west bengal|delhi ncr|ncr|india|jammu and kashmir|ladakh|puducherry|up|mp)$/i;
+
+// Reads the area and city out of a written address, skipping plot numbers, pin codes and states.
+export function placeParts(text) {
+  const parts = String(text || '').split(/[,;\n|]/)
+    .map((part) => part.replace(/[–—-]?\s*\b\d{6}\b/g, '').replace(/\s+/g, ' ').trim())
+    .filter((part) => part && part.length <= 40 && !/\d/.test(part) && !STATES.test(part));
+  return { area: parts.length > 1 ? parts[0] : '', city: parts[parts.length - 1] || '' };
+}
+
+const KIND_WORDS = {
+  residential_project: 'flats', commercial_project: 'commercial space', plots: 'plots', villa: 'villas', resale: 'resale flats', rental: 'property for rent'
+};
+const PLAIN_KINDS = new Set(['product', 'project', 'service', 'course', 'package', 'other']);
+
+function kindWords(project) {
+  const base = KIND_WORDS[project.kind] || (PLAIN_KINDS.has(project.kind) ? '' : String(project.kind || '').replace(/_/g, ' '));
+  const bhk = `${project.name || ''} ${project.details || ''}`.match(/\b([1-6])\s?bhk\b/i);
+  return bhk && (!base || base === 'flats') ? `${bhk[1]} bhk flats` : base;
+}
+
 export function fallbackPlan({ profile, sector, project }) {
-  const projectCity = String(project?.locations || '').split(/[,;\n]/)[0].trim();
-  const city = projectCity || profile?.officeCity || (Array.isArray(profile?.locations) ? profile.locations[0] : '') || '';
-  const what = String(profile?.category || profile?.offering || sector || '').trim();
+  const where = placeParts(project?.locations);
+  const city = String(where.city || profile?.officeCity || (Array.isArray(profile?.locations) ? profile.locations[0] : '') || '').trim().toLowerCase();
+  const area = where.area.toLowerCase();
+  const category = String(profile?.category || profile?.offering || sector || '').trim().toLowerCase();
+  const kind = project ? kindWords(project) : '';
+  const what = kind || category;
   if (!what) return null;
-  const search = `${what} ${city}`.trim().toLowerCase();
-  return { searches: [search], adKeywords: [what.toLowerCase()], places: [what.toLowerCase()], location: city ? `${city}, India` : '', by: 'rules' };
+  const at = (place) => `${what} ${place}`.trim();
+  const searches = [...new Set([area ? at(area) : '', at(city), kind && category && category !== kind ? `${category} ${city}`.trim() : ''].filter(Boolean))];
+  return { searches, adKeywords: [at(city)], places: [category || what], location: city ? `${city}, India` : '', by: 'rules' };
 }
 
 function addSource(map, { key, name, domain, website, facebook, city, category }, source, points) {
@@ -326,12 +351,14 @@ async function discover(organizationId, offeringId, runId) {
 
   let saved = 0;
   let dropped = 0;
+  const keep = [];
   for (const [index, row] of candidates.entries()) {
     const verdict = verdicts.get(index + 1);
     if (verdict?.verdict === 'not_competitor') {
       dropped += 1;
       continue;
     }
+    keep.push(row.key.slice(0, 200));
     await repo.saveSuggestion(organizationId, offeringId, {
       matchKey: row.key.slice(0, 200),
       name: (verdict?.name || row.name).slice(0, 160),
@@ -346,6 +373,7 @@ async function discover(organizationId, offeringId, runId) {
     });
     saved += 1;
   }
+  await repo.dropUnseenSuggestions(organizationId, offeringId, keep);
   const counts = { google: google.length, metaAds: meta.length, places: maps.length, candidates: candidates.length, suggested: saved, dropped };
   await repo.finishRun(runId, { status: 'ready', plan, counts, notes });
   return counts;

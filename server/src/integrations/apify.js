@@ -8,6 +8,9 @@ export const ACTORS = {
   maps: 'compass~crawler-google-places'
 };
 
+// Apify rejects a maxTotalChargeUsd below $0.50; maxItems keeps the real charge far lower.
+const MIN_CHARGE_USD = 0.5;
+
 // maxTotalChargeUsd caps what one run may bill on pay-per-event actors.
 export async function runActor(token, actor, input, { maxItems, maxChargeUsd, timeoutSecs = 180 }) {
   const url = new URL(`${BASE}/acts/${actor}/run-sync-get-dataset-items`);
@@ -15,7 +18,7 @@ export async function runActor(token, actor, input, { maxItems, maxChargeUsd, ti
   url.searchParams.set('format', 'json');
   url.searchParams.set('clean', 'true');
   if (maxItems) url.searchParams.set('maxItems', String(maxItems));
-  if (maxChargeUsd) url.searchParams.set('maxTotalChargeUsd', String(maxChargeUsd));
+  if (maxChargeUsd) url.searchParams.set('maxTotalChargeUsd', String(Math.max(MIN_CHARGE_USD, maxChargeUsd)));
   let response;
   try {
     response = await fetch(url, {

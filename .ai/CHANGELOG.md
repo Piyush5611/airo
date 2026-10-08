@@ -2,6 +2,13 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-08 (Competitor search fixes after the first live runs)
+
+- **Fix:** Apify rejects `maxTotalChargeUsd` below $0.50, so Google search and Maps never ran. `runActor` now sends at least $0.50; `maxItems` still limits what is actually billed.
+- **Fix:** Without an AI model every project searched the same words ("real estate"). The rules plan now uses the project type (flats, commercial space, plots, villas, BHK from the name or details) and the area and city read from its address, skipping plot numbers, pin codes and states.
+- **Change:** After each search, suggestions the owner never acted on that were not found again are removed. Added and ignored ones stay.
+- **Change (client):** The suggestions panel warns when no AI model checked the results.
+
 ### 2026-10-08 (Competitors per project)
 
 - **Change:** A competitor can be linked to one or more products or projects through the new `competitor_offerings` table. A competitor with no link competes with the whole business. Create and edit take an optional `offeringIds` list. List and detail return `offeringIds`.

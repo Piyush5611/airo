@@ -214,6 +214,14 @@ export function saveSuggestion(organizationId, offeringId, row) {
   );
 }
 
+// Suggestions the owner never acted on are replaced by the latest search; added and ignored ones stay.
+export function dropUnseenSuggestions(organizationId, offeringId, keepKeys) {
+  return run(
+    `DELETE FROM competitor_suggestions WHERE organization_id = ? AND offering_id = ? AND status = 'new'${keepKeys.length ? ' AND match_key NOT IN (?)' : ''}`,
+    keepKeys.length ? [organizationId, offeringId, keepKeys] : [organizationId, offeringId]
+  );
+}
+
 export function suggestions(organizationId, offeringId = 0) {
   return many(
     `SELECT id, offering_id AS offeringId, name, website, facebook, city, category, sources, score, verdict, reason, status, competitor_id AS competitorId,

@@ -308,6 +308,16 @@ async function adModels(purposes = ['ads', 'whatsapp', 'assistant']) {
   return attempts;
 }
 
+const BUSY_RETRIES = 2;
+const BUSY_WAIT_MS = 6000;
+
+// Providers answer "high demand", "overloaded" or 429/503 for short spikes; those are worth waiting out.
+export function modelBusy(error) {
+  const status = Number(error?.status || error?.statusCode || error?.details?.status || 0);
+  return [429, 503, 529].includes(status)
+    || /high demand|overloaded|temporarily unavailable|try again later|too many requests|rate limit/i.test(String(error?.message || ''));
+}
+
 export async function structuredLlm({ organizationId = null, schema, system, facts, task, maxTokens = 4096, purposes }) {
   const attempts = await adModels(purposes);
   if (!attempts.length) throw new ApiError(422, 'Connect an AI model for Ad writing on Platform AI first.', 'llm_missing');
@@ -315,6 +325,7 @@ export async function structuredLlm({ organizationId = null, schema, system, fac
   let lastError = null;
   for (const attempt of attempts) {
     let messages = [{ role: 'user', content: task }];
+    let busyWaits = 0;
     for (let tries = 0; tries < 2; tries += 1) {
       let text;
       try {
@@ -331,6 +342,12 @@ export async function structuredLlm({ organizationId = null, schema, system, fac
         });
       } catch (error) {
         lastError = error;
+        if (busyWaits < BUSY_RETRIES && modelBusy(error)) {
+          busyWaits += 1;
+          tries -= 1;
+          await new Promise((resolve) => setTimeout(resolve, busyWaits * BUSY_WAIT_MS));
+          continue;
+        }
         break;
       }
       const parsed = schema.safeParse(modelJson(text));

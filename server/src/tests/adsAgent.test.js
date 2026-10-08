@@ -19,7 +19,7 @@ import {
 import { demandSection } from '../services/googleAdChat.js';
 import { usableInterest } from '../services/adsAgent/chatPlanner.js';
 import { menuMessage, messageParts } from '../services/whatsappService.js';
-import { catalogFacts } from '../services/llmService.js';
+import { catalogFacts, modelBusy } from '../services/llmService.js';
 import { attribution, codeState, flattenFields, pickContact, scriptSources } from '../services/websiteFormService.js';
 import { creativePoints, creativeSvg, ctaLabel, fitText, variantCreatives, wrapText } from '../services/adsAgent/adCreative.js';
 import { budgetPlan, businessProfileSchema, googleCreativeSchema, metaCreativeSchema, strategySchemaFor } from '../domain/adsAgent.js';
@@ -993,4 +993,11 @@ test('Google and Maps finds are not crowded out by Meta advertisers', () => {
   assert.equal(top.length, 15);
   assert.ok(['g1', 'p1', 'p2'].every((key) => top.some((item) => item.key === key)));
   assert.equal(top[0].key, 'm0');
+});
+test('a busy AI model is waited out, other failures are not', () => {
+  assert.equal(modelBusy(new Error('This model is currently experiencing high demand. Spikes in demand are usually temporary.')), true);
+  assert.equal(modelBusy({ status: 503, message: 'x' }), true);
+  assert.equal(modelBusy({ status: 429, message: 'x' }), true);
+  assert.equal(modelBusy(new Error('API key not valid')), false);
+  assert.equal(notCompetitor('realtyassistant.in'), true);
 });

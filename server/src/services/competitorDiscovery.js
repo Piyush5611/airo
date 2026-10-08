@@ -29,6 +29,7 @@ const NOT_COMPETITORS = [
   'wikipedia.org', 'google.com', 'google.co.in', 'goo.gl', 'g.co', 'g.page', 'wa.me', 'whatsapp.com', 'medium.com', 'blogspot.com',
   'wordpress.com', 'timesofindia.indiatimes.com', 'indiatimes.com', 'hindustantimes.com', 'ndtv.com', 'livemint.com', 'moneycontrol.com',
   'business-standard.com', 'economictimes.com', 'news18.com', 'indiatoday.in', 'thehindu.com', 'financialexpress.com', 'gov.in', 'nic.in',
+  'realtyassistant.in', 'propsoch.com', 'anarock.com', 'roofandfloor.com', 'nobroker.com', 'housing.co.in',
   'linktr.ee', 'bit.ly', 'apple.com', 'play.google.com', 'yellowpages.in', 'asklaila.com', 'grotal.com', 'nobrokerhood.com'
 ];
 

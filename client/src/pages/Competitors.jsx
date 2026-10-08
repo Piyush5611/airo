@@ -286,7 +286,11 @@ function Suggestions({ canManage, project, onAdded }) {
     try {
       const result = await api.post(path, payload);
       if (result.competitorId) {
-        setMessage(result.linked ? `Linked to ${project?.name || 'this project'}.` : result.analysing ? 'Added. AIRO is reading their website now.' : 'Added to your competitors.');
+        const start = result.linked ? `Linked to ${project?.name || 'this project'}.` : 'Added to your competitors.';
+        const next = result.analysing
+          ? ' AIRO is reading their website and comparing it with this project now.'
+          : !result.hasWebsite ? ' No website was found for them, so there is no report yet. Open them, press Edit and add their website.' : '';
+        setMessage(`${start}${next}`);
         onAdded(result.competitorId);
       }
       reload({ silent: true });

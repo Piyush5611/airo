@@ -41,6 +41,14 @@ export function update(organizationId, id, row) {
   );
 }
 
+export function fillMissing(organizationId, id, { website, facebook, city }) {
+  return run(
+    `UPDATE competitors SET website = COALESCE(NULLIF(website, ''), ?), facebook = COALESCE(NULLIF(facebook, ''), ?), city = COALESCE(NULLIF(city, ''), ?)
+     WHERE organization_id = ? AND id = ?`,
+    [website || null, facebook || null, city || null, organizationId, id]
+  );
+}
+
 export function remove(organizationId, id) {
   return run(`DELETE FROM competitors WHERE organization_id = ? AND id = ?`, [organizationId, id]);
 }

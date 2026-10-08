@@ -464,6 +464,7 @@ export async function addSuggestion(auth, req, id) {
   const known = await repo.knownCompetitors(auth.organizationId);
   const existing = (await repo.byName(auth.organizationId, name)) || trackedMatch(row, known);
   const competitorId = existing?.id || await repo.create(auth.organizationId, { name, website: row.website || '', facebook: row.facebook || '', city: row.city || '' });
+  if (existing) await repo.fillMissing(auth.organizationId, competitorId, { website: row.website, facebook: row.facebook, city: row.city });
   if (offeringId) await repo.linkOffering(auth.organizationId, competitorId, offeringId);
   await repo.setSuggestionStatus(auth.organizationId, id, 'added', competitorId);
   await recordAudit(req, {
@@ -473,7 +474,8 @@ export async function addSuggestion(auth, req, id) {
     metadata: offeringId ? { offeringId } : undefined
   });
   let analysing = false;
-  if (row.website && !existing) {
+  const current = await repo.byId(auth.organizationId, competitorId);
+  if (current?.website && (!existing || offeringId)) {
     try {
       await analyzeCompetitor(auth, req, competitorId);
       analysing = true;
@@ -481,7 +483,7 @@ export async function addSuggestion(auth, req, id) {
       analysing = false;
     }
   }
-  return { competitorId, linked: Boolean(existing), analysing, ...(await suggestionList(auth, offeringId)) };
+  return { competitorId, linked: Boolean(existing), analysing, hasWebsite: Boolean(current?.website), ...(await suggestionList(auth, offeringId)) };
 }
 
 export async function ignoreSuggestion(auth, req, id) {

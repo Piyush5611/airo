@@ -114,7 +114,7 @@ async function planSearch(organizationId, { profile, items, sector, orgName, pro
       facts,
       task: 'Reply as JSON with searches[], adKeywords[], places[], location.',
       maxTokens: 600,
-      purposes: ['competitors', 'ads', 'assistant']
+      purposes: ['competitors', 'ads', 'assistant', 'whatsapp']
     });
     return { ...data, searches: data.searches.filter(Boolean), adKeywords: data.adKeywords.filter(Boolean), places: data.places.filter(Boolean), by: 'ai' };
   } catch (error) {
@@ -306,7 +306,7 @@ async function judge(organizationId, { candidates, homes, ourFacts }) {
     facts: `${ourFacts}\n\n${lines.join('\n\n')}`,
     task: `Reply as JSON: {"items":[{"id":<candidate number>,"verdict":"direct|indirect|not_competitor|unclear","reason":"","name":"","city":""}]} for all ${candidates.length} candidates.`,
     maxTokens: 2500,
-    purposes: ['competitors', 'ads', 'assistant']
+    purposes: ['competitors', 'ads', 'assistant', 'whatsapp']
   });
   return new Map(data.items.map((item) => [item.id, item]));
 }

@@ -279,7 +279,7 @@ async function runAnalysis(organizationId, competitor) {
       facts,
       task: 'Analyse this competitor and reply as JSON with: summary, positioning, audience, priceRange, offerings[{name,type,location,price,offer,highlights[],source}], strengths[], weaknesses[], messaging[], leadCapture[], comparison[{ours,theirs,verdict,note}], actions[{title,detail}], threat, threatWhy, gaps[].',
       maxTokens: 3500,
-      purposes: ['competitors', 'ads', 'assistant']
+      purposes: ['competitors', 'ads', 'assistant', 'whatsapp']
     });
     const seen = new Set(pages.map((page) => page.url));
     data.offerings = data.offerings.filter((item) => item.name).map((item) => ({ ...item, source: seen.has(item.source) ? item.source : '' }));

@@ -295,6 +295,63 @@ async function judge(organizationId, { candidates, homes, ourFacts }) {
 
 const splitIds = (value) => String(value || '').split(',').map(Number).filter(Boolean);
 
+const LOOKUP_MAX = 8;
+const LOOKUP_COOLDOWN_MS = 10 * 60 * 1000;
+const lookedUp = new Map();
+const GENERIC_WORDS = new Set([
+  'real', 'estate', 'group', 'builders', 'builder', 'homes', 'home', 'developers', 'developer', 'pvt', 'ltd', 'private', 'limited',
+  'infra', 'infratech', 'properties', 'property', 'realty', 'realtors', 'realtor', 'the', 'and', 'india', 'investment', 'investments',
+  'consultants', 'consultant', 'services', 'company', 'projects', 'project', 'housing', 'construction', 'constructions', 'official'
+]);
+
+// Takes a search result as their website only when every distinctive word of the name is in its domain or title.
+export function websiteFor(name, results) {
+  const words = nameKey(name).split(' ').filter((word) => word.length >= 3 && !GENERIC_WORDS.has(word));
+  if (!words.length) return '';
+  for (const row of (results || []).slice(0, 5)) {
+    const domain = domainOf(row?.url);
+    if (!domain || notCompetitor(domain)) continue;
+    const compact = domain.replace(/[^a-z0-9]/g, '');
+    const title = nameKey(row.title);
+    if (words.every((word) => compact.includes(word) || title.includes(word))) return `https://${domain}`;
+  }
+  return '';
+}
+
+async function lookupWebsites(apiKey, rows) {
+  const queries = rows.map((row) => `${row.name} ${row.city || ''}`.replace(/\s+/g, ' ').trim().slice(0, 80));
+  const pages = await googleSearch(apiKey, queries).catch(() => []);
+  const byQuery = new Map(pages.map((page) => [String(page?.searchQuery?.term || '').toLowerCase(), page?.organicResults || []]));
+  return rows.map((row, index) => websiteFor(row.name, byQuery.get(queries[index].toLowerCase())));
+}
+
+export async function findWebsite(auth, req, id) {
+  const apiKey = await token();
+  if (!apiKey) throw new ApiError(422, NOT_READY, 'apify_missing');
+  const found = await repo.byId(auth.organizationId, id);
+  if (!found) throw new ApiError(404, 'Competitor not found.', 'not_found');
+  if (found.website) return { website: found.website, analysing: false };
+  const key = scopeKey(auth.organizationId, `c${id}`);
+  if (Date.now() - (lookedUp.get(key) || 0) < LOOKUP_COOLDOWN_MS) {
+    throw new ApiError(429, 'AIRO looked for this website a few minutes ago. Add it yourself with Edit, or try again in 10 minutes.', 'rate_limited');
+  }
+  lookedUp.set(key, Date.now());
+  const [website] = await lookupWebsites(apiKey, [found]);
+  if (!website) {
+    throw new ApiError(422, `AIRO could not find a website that clearly belongs to ${found.name}. Add it yourself with Edit.`, 'website_not_found');
+  }
+  await repo.fillMissing(auth.organizationId, id, { website });
+  await recordAudit(req, { action: 'competitor.website_found', resource: 'competitor', resourceId: id });
+  let analysing = false;
+  try {
+    await analyzeCompetitor(auth, req, id);
+    analysing = true;
+  } catch {
+    analysing = false;
+  }
+  return { website, analysing };
+}
+
 async function projectFor(organizationId, offeringId) {
   if (!offeringId) return null;
   const project = await offeringRepo.byId(organizationId, offeringId);
@@ -334,6 +391,16 @@ async function discover(organizationId, offeringId, runId) {
     knownNames: [...skipKnown.map((row) => row.name), profile?.businessName || ''],
     orgName: org?.name
   }).slice(0, CHECK_TOP);
+
+  const own = new Set(ownDomains.filter(Boolean));
+  const missing = candidates.filter((row) => !row.website).slice(0, LOOKUP_MAX);
+  if (missing.length) {
+    const found = await lookupWebsites(apiKey, missing);
+    missing.forEach((row, index) => {
+      const domain = domainOf(found[index]);
+      if (domain && !own.has(domain)) Object.assign(row, { website: found[index], domain });
+    });
+  }
 
   let verdicts = new Map();
   if (candidates.length) {
@@ -483,7 +550,9 @@ export async function addSuggestion(auth, req, id) {
       analysing = false;
     }
   }
-  return { competitorId, linked: Boolean(existing), analysing, hasWebsite: Boolean(current?.website), ...(await suggestionList(auth, offeringId)) };
+  const findingWebsite = Boolean(current && !current.website);
+  if (findingWebsite) findWebsite(auth, req, competitorId).catch(() => {});
+  return { competitorId, linked: Boolean(existing), analysing, hasWebsite: Boolean(current?.website), findingWebsite, ...(await suggestionList(auth, offeringId)) };
 }
 
 export async function ignoreSuggestion(auth, req, id) {

@@ -27,7 +27,7 @@ import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts,
 import { competitorSchema, discoverSchema, imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
 import { pageText, pricesIn, samePageLinks } from '../integrations/webPage.js';
 import { analysisFacts, analysisSchema } from '../services/competitorService.js';
-import { collectCandidates, domainOf, dueScopes, fallbackPlan, notCompetitor, placeParts, planFacts, planSchema, trackedMatch, verdictSchema } from '../services/competitorDiscovery.js';
+import { collectCandidates, domainOf, dueScopes, fallbackPlan, notCompetitor, placeParts, planFacts, planSchema, trackedMatch, verdictSchema, websiteFor } from '../services/competitorDiscovery.js';
 import { adLibraryUrl } from '../integrations/apify.js';
 import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
@@ -970,4 +970,15 @@ test('a project suggestion that is already tracked is linked, not added twice', 
   assert.equal(parse({ name: 'Skyline', offeringIds: [0] }).success, false);
   assert.equal(discoverSchema.parse({ body: {}, query: {}, params: {} }).body.offeringId, 0);
   assert.equal(discoverSchema.parse({ body: { offeringId: '9' }, query: {}, params: {} }).body.offeringId, 9);
+});
+test('a website is taken only when the result clearly belongs to that business', () => {
+  const results = [
+    { url: 'https://www.facebook.com/rtechgroup', title: 'R-Tech Group | Facebook' },
+    { url: 'https://www.99acres.com/r-tech', title: 'R Tech Capital Highstreet' },
+    { url: 'https://www.rtechgroup.in/', title: 'R-Tech Group - Commercial Projects Ghaziabad' }
+  ];
+  assert.equal(websiteFor('TRS Tamara', [{ url: 'https://trstamara.com', title: 'Luxury apartments' }]), 'https://trstamara.com');
+  assert.equal(websiteFor('R-Tech Group', results), 'https://rtechgroup.in');
+  assert.equal(websiteFor('Real Estate Investment', [{ url: 'https://realestateinvestment.example', title: 'Real estate investment' }]), '');
+  assert.equal(websiteFor('Metro Homes', [{ url: 'https://other.example', title: 'Best flats' }]), '');
 });

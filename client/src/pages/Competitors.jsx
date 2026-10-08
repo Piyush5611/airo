@@ -289,7 +289,7 @@ function Suggestions({ canManage, project, onAdded }) {
         const start = result.linked ? `Linked to ${project?.name || 'this project'}.` : 'Added to your competitors.';
         const next = result.analysing
           ? ' AIRO is reading their website and comparing it with this project now.'
-          : !result.hasWebsite ? ' No website was found for them, so there is no report yet. Open them, press Edit and add their website.' : '';
+          : result.findingWebsite ? ' AIRO is looking for their website on Google. If it finds one, the report starts by itself in about a minute.' : '';
         setMessage(`${start}${next}`);
         onAdded(result.competitorId);
       }
@@ -414,6 +414,21 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
     if (data && !running) onChanged();
   }, [data?.report?.id, running]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function findWebsite() {
+    setBusy(true);
+    setMessage('Looking for their website on Google. This takes up to a minute...');
+    try {
+      const result = await api.post(`/api/competitors/${id}/find-website`, {});
+      setMessage(`Found ${host(result.website)}.${result.analysing ? ' AIRO is reading it now.' : ''}`);
+      reload({ silent: true });
+      onChanged();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function analyze() {
     setBusy(true);
     setMessage('');
@@ -452,7 +467,13 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
             </div>
           </header>
           {message ? <p className="quiet">{message}</p> : null}
-          {!data.website ? <p className="quiet">Add their website so AIRO can read it.</p> : null}
+          {!data.website ? (
+            <div className="comp-failed">
+              <strong>No website yet.</strong>
+              <span>AIRO needs their website to make a report. It can look for it on Google by their name{data.city ? ` and ${data.city}` : ''}, or you can add it with Edit.</span>
+              {canManage ? <div><button className="btn-primary" type="button" onClick={findWebsite} disabled={busy}>{busy ? 'Looking...' : 'Find website'}</button></div> : null}
+            </div>
+          ) : null}
           {running ? (
             <div className="comp-running">
               <span className="comp-spinner" aria-hidden="true" />

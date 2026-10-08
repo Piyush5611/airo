@@ -200,6 +200,9 @@ client.patch('/competitors/:id', requirePermission('campaigns.update'), validate
 client.delete('/competitors/:id', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await competitors.deleteCompetitor(req.auth, req, req.params.id));
 }));
+client.post('/competitors/:id/find-website', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await discovery.findWebsite(req.auth, req, req.params.id));
+}));
 client.post('/competitors/:id/analyze', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await competitors.analyzeCompetitor(req.auth, req, req.params.id));
 }));

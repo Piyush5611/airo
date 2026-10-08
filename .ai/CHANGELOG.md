@@ -2,6 +2,12 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-08 (Competitor websites found automatically)
+
+- **Change:** Discovery looks up a website for up to 8 top candidates that have none (one Google search run with "name city" per candidate). A result is taken only when every distinctive word of the name is in its domain or title; portals and social sites are never taken.
+- **Change:** New `POST /api/competitors/:id/find-website` (10 minute cooldown per competitor) fills a missing website and starts the analysis. Adding or linking a suggestion without a website runs it in the background.
+- **Change (client):** A competitor with no website shows a Find website button.
+
 ### 2026-10-08 (Competitor search fixes after the first live runs)
 
 - **Fix:** Apify rejects `maxTotalChargeUsd` below $0.50, so Google search and Maps never ran. `runActor` now sends at least $0.50; `maxItems` still limits what is actually billed.

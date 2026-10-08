@@ -201,7 +201,12 @@ async function completeLlm({ provider, model, apiKey, baseUrl, system, turns, ma
   if (!parts.length && data?.promptFeedback?.blockReason) {
     throw new ApiError(422, `The model declined this message (${data.promptFeedback.blockReason}).`, 'validation_error');
   }
-  return parts.map((part) => part.text || '').join('');
+  const text = parts.filter((part) => !part.thought).map((part) => part.text || '').join('');
+  const reason = data?.candidates?.[0]?.finishReason;
+  if (!text.trim() && reason && reason !== 'STOP') {
+    throw new ApiError(502, `The model returned an empty reply (finish reason ${String(reason).slice(0, 40)}).`, 'llm_empty');
+  }
+  return text;
 }
 
 export async function replyLlm({ provider, model, apiKey, baseUrl, messages, facts, system, maxTokens, maxChars }) {

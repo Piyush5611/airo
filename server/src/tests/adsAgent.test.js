@@ -1000,6 +1000,7 @@ test('a busy AI model is waited out, other failures are not', () => {
   assert.equal(modelBusy({ status: 503, message: 'x' }), true);
   assert.equal(modelBusy({ status: 429, message: 'x' }), true);
   assert.equal(modelBusy(new Error('API key not valid')), false);
+  assert.equal(modelBusy({ status: 502, code: 'llm_empty', message: 'The model returned an empty reply.' }), true);
   assert.equal(notCompetitor('realtyassistant.in'), true);
 });
 test('Keyword Planner access is read from the Google answer', async () => {

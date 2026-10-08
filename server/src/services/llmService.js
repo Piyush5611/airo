@@ -311,10 +311,11 @@ async function adModels(purposes = ['ads', 'whatsapp', 'assistant']) {
 const BUSY_RETRIES = 2;
 const BUSY_WAIT_MS = 6000;
 
-// Providers answer "high demand", "overloaded" or 429/503 for short spikes; those are worth waiting out.
+// Providers answer "high demand", "overloaded", 429/503 or an empty reply for short spikes; those are worth waiting out.
 export function modelBusy(error) {
   const status = Number(error?.status || error?.statusCode || error?.details?.status || 0);
-  return [429, 503, 529].includes(status)
+  return error?.code === 'llm_empty'
+    || [429, 503, 529].includes(status)
     || /high demand|overloaded|temporarily unavailable|try again later|too many requests|rate limit/i.test(String(error?.message || ''));
 }
 

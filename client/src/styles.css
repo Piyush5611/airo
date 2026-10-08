@@ -1144,3 +1144,23 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
 .comp-suggest .comp-offer .page-actions { margin-top: 4px; }
 .comp-suggest > .btn-ghost { justify-self: start; }
 .comp-failed span { color: var(--ink-soft); font-size: 13px; }
+.intel-views { flex-wrap: wrap; justify-self: start; max-width: 100%; }
+.intel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.intel-bars { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; align-content: start; }
+.intel-bar { display: grid; grid-template-columns: minmax(80px, 1fr) 2fr 40px; gap: 8px; align-items: center; font-size: 12px; }
+.intel-bar > div { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.intel-bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+.intel-bar strong { text-align: right; font-variant-numeric: tabular-nums; }
+.intel-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; align-items: end; }
+.intel-ads { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.intel-ad { cursor: pointer; }
+.intel-ad:hover { border-color: var(--line-strong); }
+.intel-detail { display: grid; gap: 14px; }
+.intel-image { max-width: 100%; max-height: 280px; border-radius: 10px; object-fit: contain; background: var(--surface-2); }
+.intel-copy { white-space: pre-wrap; font-size: 13px; }
+.intel-gaps { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.intel-gaps li { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.intel-timeline { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 13px; }
+.intel-timeline li { display: grid; gap: 2px; }
+.intel-strategy { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.intel-verified { margin-left: 6px; }

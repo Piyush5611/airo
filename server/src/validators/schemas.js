@@ -362,11 +362,38 @@ export const competitorSchema = body({
   city: z.string().trim().max(120).optional().default(''),
   notes: z.string().trim().max(1000).optional().default(''),
   status: z.enum(['active', 'archived']).optional().default('active'),
+  competitorType: z.enum(['direct', 'indirect', 'market', 'emerging', '']).optional(),
   offeringIds: z.array(z.coerce.number().int().positive()).max(50).optional()
 });
 
 export const discoverSchema = body({
   offeringId: z.coerce.number().int().min(0).optional().default(0)
+});
+
+export const competitorVerifySchema = body({
+  verified: z.boolean()
+});
+
+const optionalText = (max) => z.string().trim().max(max).optional();
+
+export const competitorAdFilterSchema = z.object({
+  body: z.any(),
+  params: z.any(),
+  query: z.object({
+    competitorId: z.coerce.number().int().positive().optional(),
+    platform: z.enum(['meta', 'google']).optional(),
+    format: optionalText(20),
+    status: z.enum(['active', 'inactive']).optional(),
+    cta: optionalText(40),
+    offer: optionalText(40),
+    theme: optionalText(40),
+    style: optionalText(40),
+    confidence: z.enum(['high', 'medium', 'low']).optional(),
+    competitorType: z.enum(['direct', 'indirect', 'market', 'emerging']).optional(),
+    city: optionalText(120),
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+  })
 });
 
 export const researchKeySchema = body({

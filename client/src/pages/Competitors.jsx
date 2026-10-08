@@ -5,8 +5,10 @@ import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { inr, num, when } from '../format.js';
 import { Page, State } from '../ui.jsx';
+import { AdLibrary, CompetitorInsights, IntelOverview, MarketGaps, TypeBadge } from './CompetitorIntel.jsx';
 
-const EMPTY = { name: '', website: '', facebook: '', instagram: '', city: '', notes: '', status: 'active' };
+const EMPTY = { name: '', website: '', facebook: '', instagram: '', city: '', notes: '', status: 'active', competitorType: '' };
+const VIEWS = [['list', 'Competitors'], ['overview', 'Overview'], ['ads', 'Ads'], ['gaps', 'Market gaps']];
 const THREAT = { high: ['bad', 'High threat'], medium: ['warn', 'Medium threat'], low: ['good', 'Low threat'], unknown: ['', 'Threat unclear'] };
 const VERDICT = { we_lead: ['good', 'We lead'], they_lead: ['bad', 'They lead'], even: ['info', 'Even'], unclear: ['', 'Unclear'] };
 const TABS = [['overview', 'Overview'], ['offers', 'Website & offers'], ['compare', 'Compare with us'], ['keywords', 'Search demand'], ['sources', 'Sources']];
@@ -79,6 +81,15 @@ function CompetitorForm({ item, projects, scope, onDone, onCancel }) {
       <label className="stack-field">CITY OR AREA<input value={form.city} onChange={set('city')} maxLength={120} placeholder="Where they compete with you" /></label>
       <label className="stack-field">FACEBOOK PAGE<input value={form.facebook} onChange={set('facebook')} maxLength={300} placeholder="facebook.com/their-page (optional)" /></label>
       <label className="stack-field">INSTAGRAM<input value={form.instagram} onChange={set('instagram')} maxLength={120} placeholder="@handle (optional)" /></label>
+      <label className="stack-field">TYPE
+        <select value={form.competitorType} onChange={set('competitorType')}>
+          <option value="">Not set</option>
+          <option value="direct">Direct (same thing, same buyers)</option>
+          <option value="indirect">Indirect (different thing, same need)</option>
+          <option value="market">Market (portal or big player in your market)</option>
+          <option value="emerging">Emerging (new or growing fast)</option>
+        </select>
+      </label>
       {item ? (
         <label className="stack-field">STATUS
           <select value={form.status} onChange={set('status')}>
@@ -610,6 +621,20 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
     }
   }
 
+  async function verify() {
+    setBusy(true);
+    setMessage('');
+    try {
+      await api.post(`/api/competitors/${id}/verify`, { verified: !data.verifiedAt });
+      reload({ silent: true });
+      onChanged();
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function analyze() {
     setBusy(true);
     setMessage('');
@@ -635,9 +660,17 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
                 {data.lastAnalyzedAt ? ` · analysed ${when(data.lastAnalyzedAt)}` : ''}
               </p>
               {data.offeringIds?.length ? <ProjectChips ids={data.offeringIds} projects={projects} /> : <p className="quiet">Competes with your whole business.</p>}
+              {data.source && data.source !== 'manual' ? (
+                <p className="quiet comp-note">
+                  Found by AIRO ({data.source.split(',').map((key) => SOURCE[key] || key).join(', ')}){data.confidence ? `, match confidence ${data.confidence}%` : ''}.{data.reason ? ` ${data.reason}` : ''}
+                </p>
+              ) : null}
             </div>
             <div className="page-actions">
+              <TypeBadge value={data.competitorType} />
+              {data.verifiedAt ? <span className="badge good">Verified</span> : null}
               <ThreatBadge value={data.report?.status === 'ready' ? data.report.analysis?.threat : null} />
+              {canManage ? <button className="btn" type="button" onClick={verify} disabled={busy}>{data.verifiedAt ? 'Unverify' : 'Verify'}</button> : null}
               {data.website ? <a className="btn" href={data.website} target="_blank" rel="noreferrer">Open website</a> : null}
               {canManage ? <button className="btn" type="button" onClick={() => onEdit(data)}>Edit</button> : null}
               {canManage ? (
@@ -685,6 +718,7 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
             </>
           ) : null}
           <AdsPanel key={data.id} id={data.id} canManage={canManage} />
+          <CompetitorInsights key={`insights-${data.id}`} id={data.id} canManage={canManage} />
         </section>
       ) : null}
     </State>
@@ -705,6 +739,13 @@ export function Competitors() {
   const projects = catalog?.items || [];
   const activeProjects = projects.filter((row) => row.status !== 'archived');
   const scope = Number(params.get('project')) || 0;
+  const view = VIEWS.some(([key]) => key === params.get('view')) ? params.get('view') : 'list';
+  const show = (value) => {
+    const next = new URLSearchParams(params);
+    if (value === 'list') next.delete('view');
+    else next.set('view', value);
+    setParams(next, { replace: true });
+  };
   const project = scope ? projects.find((row) => row.id === scope) || null : null;
   const all = data?.items || [];
   const items = project ? all.filter((row) => row.offeringIds?.includes(project.id)) : all;
@@ -769,6 +810,13 @@ export function Competitors() {
       <State loading={loading} error={error} onRetry={reload}>
         {data && !data.ready ? <p className="quiet">{data.note}</p> : (
           <div className="stack">
+            <div className="chip-tabs intel-views" role="tablist" aria-label="Competitor views">
+              {VIEWS.map(([key, text]) => <button key={key} type="button" className={view === key ? 'is-on' : ''} onClick={() => show(key)}>{text}</button>)}
+            </div>
+            {view === 'overview' ? <IntelOverview canManage={canManage} onOpenCompetitor={(competitorId) => navigate(`/app/growth/competitors/${competitorId}`)} /> : null}
+            {view === 'ads' ? <AdLibrary competitors={all.filter((row) => row.status === 'active')} /> : null}
+            {view === 'gaps' ? <MarketGaps canManage={canManage} /> : null}
+            {view !== 'list' ? null : (<>
             {activeProjects.length || project ? (
               <div className="chip-tabs comp-scope" role="tablist" aria-label="Competitors for">
                 <button type="button" className={!project ? 'is-on' : ''} onClick={() => choose(0)}>Whole business</button>
@@ -804,7 +852,7 @@ export function Competitors() {
                     >
                       <header>
                         <strong>{item.name}</strong>
-                        <ThreatBadge value={item.threat} />
+                        <span className="comp-chips"><TypeBadge value={item.competitorType} /><ThreatBadge value={item.threat} /></span>
                       </header>
                       <p className="quiet">{[item.city, item.website ? host(item.website) : 'No website', item.status === 'archived' ? 'archived' : ''].filter(Boolean).join(' · ')}</p>
                       {!project ? <ProjectChips ids={item.offeringIds} projects={projects} /> : null}
@@ -835,6 +883,7 @@ export function Competitors() {
                 {canManage && editing === null ? <button className="btn-primary" type="button" onClick={() => setEditing(false)}>Add competitor</button> : null}
               </div>
             )}
+            </>)}
           </div>
         )}
       </State>

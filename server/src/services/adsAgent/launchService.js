@@ -5,6 +5,7 @@ import * as repo from '../../repositories/adsAgentRepo.js';
 import { ApiError } from '../../utils/errors.js';
 import { recordAudit } from '../auditService.js';
 import { structuredLlm } from '../llmService.js';
+import { competitorContext } from '../competitorIntel.js';
 import { checkLaunch, normalizeSettings } from './guardrails.js';
 import { adConnections } from './metricsSync.js';
 
@@ -135,7 +136,7 @@ export async function createLaunch(auth, req) {
     organizationId: auth.organizationId,
     schema: platform === 'meta' ? metaCreativeSchema : googleCreativeSchema,
     system: platform === 'meta' ? META_BRIEF : GOOGLE_BRIEF,
-    facts: creativeFacts(profile, strategy, platform),
+    facts: [creativeFacts(profile, strategy, platform), await competitorContext(auth.organizationId)].filter(Boolean).join('\n'),
     task: `Write the ${PLATFORM_NAME[platform]} ad copy as JSON.`
   });
   const daily = budgetPlan(profile, strategy)?.platforms.find((item) => item.platform === platform)?.daily || null;

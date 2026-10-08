@@ -77,9 +77,12 @@ function bodyRow(body) {
     instagram: String(body.instagram || '').trim().replace(/^@/, '').slice(0, 120),
     city: String(body.city || '').trim().slice(0, 120),
     notes: String(body.notes || '').trim().slice(0, 1000),
-    status: body.status === 'archived' ? 'archived' : 'active'
+    status: body.status === 'archived' ? 'archived' : 'active',
+    competitorType: COMPETITOR_TYPES.includes(body.competitorType) ? body.competitorType : null
   };
 }
+
+const COMPETITOR_TYPES = ['direct', 'indirect', 'market', 'emerging'];
 
 function parseJson(value) {
   if (value == null) return null;
@@ -132,9 +135,24 @@ export async function competitorDetail(auth, id) {
   };
 }
 
+export function siteKey(url) {
+  try {
+    return new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname.toLowerCase().replace(/^(www|m)\./, '');
+  } catch {
+    return '';
+  }
+}
+
+export function duplicateOf(row, known) {
+  const site = row.website ? siteKey(row.website) : '';
+  const name = row.name.toLowerCase().trim();
+  return known.find((item) => (item.name || '').toLowerCase().trim() === name || (site && item.website && siteKey(item.website) === site)) || null;
+}
+
 export async function createCompetitor(auth, req) {
   const row = bodyRow(req.body);
-  if (await repo.byName(auth.organizationId, row.name)) throw new ApiError(409, 'A competitor with this name is already saved.', 'conflict');
+  const duplicate = duplicateOf(row, await repo.knownCompetitors(auth.organizationId));
+  if (duplicate) throw new ApiError(409, `This competitor is already saved as ${duplicate.name}.`, 'conflict');
   const id = await repo.create(auth.organizationId, row);
   await saveLinks(auth, id, req.body.offeringIds);
   await recordAudit(req, { action: 'competitor.created', resource: 'competitor', resourceId: id });
@@ -145,6 +163,7 @@ export async function updateCompetitor(auth, req, id) {
   const found = await repo.byId(auth.organizationId, id);
   if (!found) throw new ApiError(404, 'Competitor not found.', 'not_found');
   const row = bodyRow(req.body);
+  if (req.body.competitorType === undefined) row.competitorType = found.competitorType || null;
   const clash = await repo.byName(auth.organizationId, row.name);
   if (clash && clash.id !== found.id) throw new ApiError(409, 'A competitor with this name is already saved.', 'conflict');
   await repo.update(auth.organizationId, id, row);

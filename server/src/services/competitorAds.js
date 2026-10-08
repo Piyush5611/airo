@@ -3,6 +3,7 @@ import { adLibraryUrl, googleTransparencyAds, metaAdsFrom } from '../integration
 import { apifyToken } from './researchTools.js';
 import { distinctWords, domainOf } from './competitorDiscovery.js';
 import { recordAudit } from './auditService.js';
+import { analyzePending, storeCheckAds } from './competitorIntel.js';
 import { ApiError } from '../utils/errors.js';
 
 const DAY_MS = 86400000;
@@ -171,6 +172,15 @@ async function runCheck(organizationId, competitor, checkId) {
     readGoogle(apiKey, competitor, notes).catch((error) => { notes.push(`Google ads could not be read: ${clip(error?.message, 160)}`); return null; })
   ]);
   await repo.finishAdCheck(checkId, { status: meta || google ? 'ready' : 'failed', meta, google, notes });
+  if (!meta && !google) return;
+  try {
+    const stored = await storeCheckAds(organizationId, competitor.id, checkId, { meta, google });
+    console.log(`Competitor ${competitor.id} ads stored: ${JSON.stringify(stored)}`);
+    const analysed = await analyzePending(organizationId);
+    if (analysed.notes.length) console.error(`Competitor ad analysis: ${analysed.notes.join(' | ').slice(0, 300)}`);
+  } catch (error) {
+    console.error(`Competitor ${competitor.id} ads could not be stored or analysed:`, clip(error?.message || error, 200));
+  }
 }
 
 function ourSummary(rows) {

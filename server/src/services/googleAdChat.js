@@ -201,10 +201,10 @@ function fallbackCopy(payload) {
   return { headlines, descriptions };
 }
 
-async function writeCopy(payload, english) {
+async function writeCopy(payload, english, organizationId = null) {
   let written = null;
   try {
-    written = await writeGoogleAdPlan({ intake: payload, english });
+    written = await writeGoogleAdPlan({ intake: { ...payload, organizationId }, english });
   } catch {
     written = null;
   }
@@ -683,7 +683,7 @@ async function buildPlan(organizationId, conversationId, payload, english) {
     await saveDraft(organizationId, conversationId, 'review', { ...payload, headlines: [], descriptions: [] });
     return { text: say(english, 'I could not find keywords. Send them as: keywords: word one, word two', 'Keywords nahi mile. Aise bhejo: keywords: word one, word two') };
   }
-  const copy = await writeCopy(payload, english);
+  const copy = await writeCopy(payload, english, organizationId);
   payload.headlines = copy.headlines;
   payload.descriptions = copy.descriptions;
   payload.strategy = copy.strategy;
@@ -749,7 +749,7 @@ async function reviewPlan(organizationId, conversationId, payload, text, english
         // Fall back to the simple writer below.
       }
     }
-    const copy = await writeCopy(payload, english);
+    const copy = await writeCopy(payload, english, organizationId);
     if (!copy.fromModel) {
       await saveDraft(organizationId, conversationId, 'review', payload);
       return {

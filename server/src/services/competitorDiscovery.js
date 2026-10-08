@@ -9,6 +9,7 @@ import { sectorOf } from '../domain/sectors.js';
 import { apifyToken } from './researchTools.js';
 import { recordAudit } from './auditService.js';
 import { analyzeCompetitor } from './competitorService.js';
+import { discoveryFields } from './competitorIntel.js';
 import { ApiError } from '../utils/errors.js';
 
 const MANUAL_COOLDOWN_MS = 30 * 60 * 1000;
@@ -552,8 +553,12 @@ export async function addSuggestion(auth, req, id) {
   const name = String(row.name).slice(0, 160);
   const known = await repo.knownCompetitors(auth.organizationId);
   const existing = (await repo.byName(auth.organizationId, name)) || trackedMatch(row, known);
-  const competitorId = existing?.id || await repo.create(auth.organizationId, { name, website: row.website || '', facebook: row.facebook || '', city: row.city || '' });
-  if (existing) await repo.fillMissing(auth.organizationId, competitorId, { website: row.website, facebook: row.facebook, city: row.city });
+  const found = discoveryFields(row);
+  const competitorId = existing?.id || await repo.create(auth.organizationId, { name, website: row.website || '', facebook: row.facebook || '', city: row.city || '', ...found });
+  if (existing) {
+    await repo.fillMissing(auth.organizationId, competitorId, { website: row.website, facebook: row.facebook, city: row.city });
+    await repo.fillDiscovery(auth.organizationId, competitorId, found).catch(() => {});
+  }
   if (offeringId) await repo.linkOffering(auth.organizationId, competitorId, offeringId);
   await repo.setSuggestionStatus(auth.organizationId, id, 'added', competitorId);
   await recordAudit(req, {

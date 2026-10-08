@@ -1,6 +1,7 @@
 import { insert, many, one, run } from '../db/sql.js';
 
 const FIELDS = `id, name, website, facebook, instagram, city, notes, status, last_analyzed_at AS lastAnalyzedAt,
+  competitor_type AS competitorType, confidence, source, reason, verified_at AS verifiedAt,
   created_at AS createdAt, updated_at AS updatedAt,
   (SELECT GROUP_CONCAT(co.offering_id ORDER BY co.offering_id) FROM competitor_offerings co WHERE co.competitor_id = competitors.id) AS offeringIds`;
 
@@ -28,16 +29,35 @@ export function byName(organizationId, name) {
 
 export function create(organizationId, row) {
   return insert(
-    `INSERT INTO competitors (organization_id, name, website, facebook, instagram, city, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [organizationId, row.name, row.website || null, row.facebook || null, row.instagram || null, row.city || null, row.notes || null]
+    `INSERT INTO competitors (organization_id, name, website, facebook, instagram, city, notes, competitor_type, confidence, source, reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [organizationId, row.name, row.website || null, row.facebook || null, row.instagram || null, row.city || null, row.notes || null,
+      row.competitorType || null, row.confidence ?? null, row.source || 'manual', row.reason || null]
   );
 }
 
 export function update(organizationId, id, row) {
   return run(
-    `UPDATE competitors SET name = ?, website = ?, facebook = ?, instagram = ?, city = ?, notes = ?, status = ?
+    `UPDATE competitors SET name = ?, website = ?, facebook = ?, instagram = ?, city = ?, notes = ?, status = ?, competitor_type = ?
      WHERE organization_id = ? AND id = ?`,
-    [row.name, row.website || null, row.facebook || null, row.instagram || null, row.city || null, row.notes || null, row.status, organizationId, id]
+    [row.name, row.website || null, row.facebook || null, row.instagram || null, row.city || null, row.notes || null, row.status,
+      row.competitorType || null, organizationId, id]
+  );
+}
+
+export function setVerified(organizationId, id, verified) {
+  return run(
+    `UPDATE competitors SET verified_at = ${verified ? 'UTC_TIMESTAMP()' : 'NULL'} WHERE organization_id = ? AND id = ?`,
+    [organizationId, id]
+  );
+}
+
+export function fillDiscovery(organizationId, id, { competitorType, confidence, source, reason }) {
+  return run(
+    `UPDATE competitors SET competitor_type = COALESCE(competitor_type, ?), confidence = COALESCE(confidence, ?),
+       source = COALESCE(NULLIF(source, 'manual'), ?), reason = COALESCE(NULLIF(reason, ''), ?)
+     WHERE organization_id = ? AND id = ?`,
+    [competitorType || null, confidence ?? null, source || null, reason || null, organizationId, id]
   );
 }
 
@@ -251,7 +271,8 @@ export function suggestions(organizationId, offeringId = 0) {
 
 export function suggestionById(organizationId, id) {
   return one(
-    `SELECT id, offering_id AS offeringId, name, website, facebook, city, category, status FROM competitor_suggestions WHERE organization_id = ? AND id = ?`,
+    `SELECT id, offering_id AS offeringId, name, website, facebook, city, category, status, sources, score, verdict, reason
+     FROM competitor_suggestions WHERE organization_id = ? AND id = ?`,
     [organizationId, id]
   );
 }

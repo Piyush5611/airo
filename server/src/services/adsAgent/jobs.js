@@ -3,6 +3,7 @@ import { importAll } from './leadImport.js';
 import { syncAll } from './metricsSync.js';
 import { monitorAll } from './monitorService.js';
 import { discoverDue } from '../competitorDiscovery.js';
+import { analyzeDue } from '../competitorIntel.js';
 
 const TICK_MS = 10 * 60 * 1000;
 
@@ -52,6 +53,18 @@ export const JOBS = [
       return {
         summary: `${result.suggested} competitor suggestions from ${result.searches} searches.`,
         error: result.notes.length ? result.notes.join(' | ') : null
+      };
+    }
+  },
+  {
+    key: 'competitors.ad_analysis',
+    everyMinutes: 60,
+    lockMinutes: 30,
+    run: async () => {
+      const result = await analyzeDue();
+      return {
+        summary: `${result.analysed} competitor ads analysed, ${result.reused} reused from identical copy, across ${result.organizations} organizations.`,
+        error: result.notes.length ? [...new Set(result.notes)].join(' | ').slice(0, 900) : null
       };
     }
   }

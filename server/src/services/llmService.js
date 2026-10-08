@@ -377,6 +377,13 @@ export async function structuredLlm({ organizationId = null, schema, system, fac
   throw lastError;
 }
 
+// Loaded lazily: competitorIntel itself calls structuredLlm from this module.
+async function marketContext(organizationId) {
+  if (!organizationId) return '';
+  const { competitorContext } = await import('./competitorIntel.js');
+  return competitorContext(organizationId);
+}
+
 export async function writeGoogleAdPlan({ intake, english }) {
   const attempts = await adModels();
   if (!attempts.length) return null;
@@ -387,8 +394,9 @@ export async function writeGoogleAdPlan({ intake, english }) {
     `Location: ${intake.region}`,
     `Daily budget: ${intake.dailyBudget}`,
     `Keywords: ${(intake.keywords || []).map((item) => item.text).join(', ') || 'none yet'}`,
-    intake.idea ? `Owner idea: ${intake.idea}` : 'Owner idea: none'
-  ].join('\n');
+    intake.idea ? `Owner idea: ${intake.idea}` : 'Owner idea: none',
+    await marketContext(intake.organizationId)
+  ].filter(Boolean).join('\n');
   let lastError = null;
   for (const attempt of attempts) {
     try {
@@ -430,8 +438,9 @@ export async function writeAdPlan({ intake, publicAds, english }) {
     `Special category: ${intake.specialCategory || 'none'}`,
     publicAds.length
       ? `Public ads:\n${publicAds.map((ad) => `- ${[ad.page, ad.title, ad.text].filter(Boolean).join(' · ')}`).join('\n')}`
-      : 'Public ads: none returned.'
-  ].join('\n');
+      : 'Public ads: none returned.',
+    await marketContext(intake.organizationId)
+  ].filter(Boolean).join('\n');
   let lastError = null;
   for (const attempt of attempts) {
     try {

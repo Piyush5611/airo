@@ -5,6 +5,7 @@ import * as repo from '../../repositories/adsAgentRepo.js';
 import { organizationBasics } from '../../repositories/workspaceRepo.js';
 import { sectorFacts } from '../../domain/sectors.js';
 import { structuredLlm } from '../llmService.js';
+import { competitorContext } from '../competitorIntel.js';
 
 const text = (min, max) => z.string().trim().min(min).max(max);
 
@@ -393,7 +394,8 @@ export async function writeGoogleCopy({ organizationId, payload, profile, candid
   const facts = [
     ...intakeFacts(payload, profile),
     payload.sellingPoints?.length ? `Selling points: ${payload.sellingPoints.join('; ')}` : '',
-    `Keyword ideas (text · monthly searches):\n${candidates.map((item) => `- ${item.text} · ${item.searches ?? 'unknown'}`).join('\n')}`
+    `Keyword ideas (text · monthly searches):\n${candidates.map((item) => `- ${item.text} · ${item.searches ?? 'unknown'}`).join('\n')}`,
+    await competitorContext(organizationId)
   ].filter(Boolean).join('\n');
   const { data } = await structuredLlm({
     organizationId,
@@ -424,7 +426,8 @@ export async function writeMetaCopy({ organizationId, payload, profile, publicAd
     `Special category: ${payload.specialCategory || 'none'}`,
     payload.interests?.length ? `Audience interests chosen: ${payload.interests.map((item) => item.name).join(', ')}` : '',
     payload.objectiveLabel ? `Where leads go: ${payload.conversion === 'messenger' ? 'Messenger chat (no website)' : payload.conversion === 'instant_form' ? 'Meta instant form' : 'website'}` : '',
-    publicAds?.length ? `Public ads from others:\n${publicAds.map((ad) => `- ${[ad.page, ad.title, ad.text].filter(Boolean).join(' · ')}`).join('\n')}` : 'Public ads: none returned.'
+    publicAds?.length ? `Public ads from others:\n${publicAds.map((ad) => `- ${[ad.page, ad.title, ad.text].filter(Boolean).join(' · ')}`).join('\n')}` : 'Public ads: none returned.',
+    await competitorContext(organizationId)
   ].filter(Boolean).join('\n');
   const { data } = await structuredLlm({
     organizationId,

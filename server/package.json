@@ -12,7 +12,7 @@
     "seed": "node src/db/seed.js",
     "check:logins": "node src/scripts/checkLogins.js",
     "create:reviewer": "node src/scripts/createReviewer.js",
-    "test": "node --test src/tests/isolation.test.js src/tests/adsAgent.test.js",
+    "test": "node --test src/tests/isolation.test.js src/tests/adsAgent.test.js src/tests/competitorIntel.test.js",
     "test:unit": "node --test src/tests/adsAgent.test.js"
   },
   "dependencies": {

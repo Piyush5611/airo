@@ -5,6 +5,7 @@ import { sectorFacts, sectorOf } from '../../domain/sectors.js';
 import { ApiError } from '../../utils/errors.js';
 import { recordAudit } from '../auditService.js';
 import { structuredLlm } from '../llmService.js';
+import { competitorContext } from '../competitorIntel.js';
 
 const STRATEGY_BRIEF = `You are the AIRO ads strategist. Plan paid ads for one business from the profile and the past results in the status.
 Rules:
@@ -125,7 +126,7 @@ export async function generateStrategy(auth, req) {
     organizationId: auth.organizationId,
     schema: strategySchemaFor(profile),
     system: STRATEGY_BRIEF,
-    facts: factsFor(profile, metrics, await organizationSector(auth.organizationId)),
+    facts: [factsFor(profile, metrics, await organizationSector(auth.organizationId)), await competitorContext(auth.organizationId)].filter(Boolean).join('\n'),
     task: 'Write the ads strategy for this business as JSON.'
   });
   const created = await repo.addStrategy({

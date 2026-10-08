@@ -2,6 +2,16 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-08 (Competitor intelligence)
+
+- **Change:** Migration 032 adds `competitors.competitor_type` (direct, indirect, market, emerging), `confidence`, `source`, `reason`, `verified_at`, and new tables `competitor_ads` (one row per public ad, content hash, AI analysis), `competitor_ad_snapshots` (new, changed, stopped, restarted per check) and `competitor_insights` (cached AI strategies by input hash). Every query filters on `organization_id`.
+- **Change:** Each ad check now stores its ads in `competitor_ads` (`competitorIntel.storeCheckAds`). Ads not returned again are marked inactive with a snapshot.
+- **Change:** AI ad analysis (`analyzePending`) classifies ad text into fixed labels (style, hook, message, value proposition, offer, button, tone, intent, themes, urgency, scarcity, social proof, trust signal, confidence), validated with zod. Ads with the same content hash are analysed once; ads without text are not sent to the model. New job `competitors.ad_analysis` runs every hour, and `POST /api/competitors/intelligence/analyze` runs it now. Images and videos are not analysed (text-only model layer).
+- **Change:** `GET /api/competitors/intelligence` (market overview, distributions, rule-based gaps with confidence), `GET /api/competitors/intelligence/ads` (filters), `GET /api/competitors/ads/:id` (with snapshots and the list of metrics that are not public), `GET /api/competitors/:id/insights` (messaging, offers, creatives, timeline), `POST /api/competitors/intelligence/strategy` and `POST /api/competitors/:id/strategy` (AI differentiation strategy, reused when the input has not changed), `POST /api/competitors/:id/verify`.
+- **Change:** Discovery carries the AI verdict, sources and reason into the competitor's type, confidence, source and reason. Adding a competitor with a name or website that is already saved returns 409.
+- **Change:** The ad writers (strategy, launch creatives, WhatsApp Meta and Google copy) get a short market summary from stored analysis with the rule: use competitor intelligence to understand the market, but do not copy competitor wording, creatives, trademarks, or claims.
+- **Change (client):** Competitors page has Competitors, Overview, Ads and Market gaps tabs, an ad detail view, a "What their ads say" section in the competitor detail, a type field, and Verify.
+
 ### 2026-10-08 (Competitor ads on Meta and Google)
 
 - **Change:** New table `competitor_ad_checks` (migration 031). `POST /api/competitors/:id/ads/check` reads a competitor's ads in the background with Apify: Meta from their saved Facebook page (or the Ad Library by name, kept only when the page name or landing site matches), Google from the Ads Transparency Center by website domain (India, last 90 days, actor `scrapesage~google-ads-transparency-scraper`). Up to 30 ads each, cost capped per run, 30 minute cooldown after a finished check. Runs only when the owner presses the button.

@@ -139,6 +139,15 @@ export function adById(organizationId, id) {
   );
 }
 
+export async function sameCopyCount(organizationId, competitorId, contentHash) {
+  const row = await one(
+    `SELECT COUNT(*) AS total, SUM(status = 'active') AS active FROM competitor_ads
+     WHERE organization_id = ? AND competitor_id = ? AND content_hash = ?`,
+    [organizationId, competitorId, contentHash]
+  );
+  return { total: Number(row?.total || 0), active: Number(row?.active || 0) };
+}
+
 export function adSnapshots(organizationId, adId) {
   return many(
     `SELECT id, change_type AS changeType, content_hash AS contentHash, status, payload, observed_at AS observedAt

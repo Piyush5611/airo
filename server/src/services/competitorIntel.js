@@ -651,12 +651,39 @@ export async function adList(auth, filters) {
   }
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Only what the public ad libraries show. Running time is the usual public hint that an ad works for its owner.
+export function publicSignals(row, sameCopy = { total: 1, active: 0 }, now = Date.now()) {
+  const start = Date.parse(row.firstShown || '');
+  const end = row.status === 'active' ? now : Date.parse(row.lastShown || row.lastObservedAt || '');
+  const days = Number.isFinite(start) && Number.isFinite(end) && end >= start ? Math.floor((end - start) / DAY_MS) + 1 : null;
+  return {
+    status: row.status,
+    days,
+    longRunning: days != null && days >= 30,
+    firstShown: row.firstShown || null,
+    lastShown: row.lastShown || null,
+    versions: Number(row.versions || 1),
+    sameCopyAds: Math.max(1, sameCopy.total),
+    sameCopyActive: sameCopy.active,
+    placements: parseJson(row.placements, []),
+    landing: row.link ? domainOf(row.link) : null,
+    cta: row.cta || null,
+    source: row.source
+  };
+}
+
 export async function adDetail(auth, id) {
   const row = await intelRepo.adById(auth.organizationId, id);
   if (!row) throw new ApiError(404, 'Ad not found.', 'not_found');
-  const snapshots = await intelRepo.adSnapshots(auth.organizationId, id);
+  const [snapshots, sameCopy] = await Promise.all([
+    intelRepo.adSnapshots(auth.organizationId, id),
+    intelRepo.sameCopyCount(auth.organizationId, row.competitorId, row.contentHash)
+  ]);
   return {
     ...adRow(row),
+    signals: publicSignals(row, sameCopy),
     snapshots: snapshots.map((item) => ({ ...item, payload: parseJson(item.payload, {}) })),
     notAvailable: ['spend', 'impressions', 'reach', 'targeting', 'clicks', 'conversions', 'roas'],
     note: 'Spend, reach, targeting and results of another business are not public and are not shown.'

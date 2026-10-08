@@ -161,6 +161,36 @@ function AdTile({ ad, onOpen }) {
   );
 }
 
+const PLACEMENT = { facebook: 'Facebook', instagram: 'Instagram', messenger: 'Messenger', audience_network: 'Audience Network', threads: 'Threads' };
+
+function PublicSignals({ signals }) {
+  const running = signals.days == null ? '—' : `${num(signals.days)} ${signals.days === 1 ? 'day' : 'days'}`;
+  return (
+    <div className="comp-block">
+      <h3>Public signals</h3>
+      <div className="rival-stats">
+        <div><span>Status</span><strong>{signals.status === 'active' ? 'Running' : 'Stopped'}</strong></div>
+        <div><span>{signals.status === 'active' ? 'Running for' : 'Ran for'}</span><strong>{running}</strong></div>
+        <div><span>Versions</span><strong>{num(signals.versions)}</strong></div>
+        <div><span>Same copy in</span><strong>{`${num(signals.sameCopyAds)} ${signals.sameCopyAds === 1 ? 'ad' : 'ads'}`}</strong></div>
+      </div>
+      <div className="comp-facts">
+        <div><span>First shown</span><strong>{signals.firstShown || 'Not given by the source'}</strong></div>
+        <div><span>Last shown</span><strong>{signals.status === 'active' ? 'Still running' : signals.lastShown || 'Not given by the source'}</strong></div>
+        <div><span>Shown on</span><strong>{signals.placements.length ? signals.placements.map((key) => PLACEMENT[key] || key).join(', ') : 'Not given by the source'}</strong></div>
+        <div><span>Sends people to</span><strong>{signals.landing || 'Not given by the source'}</strong></div>
+        {signals.cta ? <div><span>Button</span><strong>{signals.cta}</strong></div> : null}
+      </div>
+      <p className="quiet comp-note">
+        {signals.longRunning
+          ? 'This ad has run for 30 days or more. Businesses usually keep paying only for ads that bring them results, so this is likely one that works for them.'
+          : 'An ad that keeps running for 30 days or more is usually one that works for its owner.'}
+        {signals.sameCopyAds > 1 ? ` The same text runs in ${num(signals.sameCopyAds)} ads (${num(signals.sameCopyActive)} live), often a sign they are scaling it.` : ''}
+      </p>
+    </div>
+  );
+}
+
 export function AdDetail({ id, onClose }) {
   const { data, loading, error, reload } = useResource(`/api/competitors/creatives/${id}`);
   const analysis = data?.analysis;
@@ -214,6 +244,7 @@ export function AdDetail({ id, onClose }) {
                 )}
               </div>
             </div>
+            {data.signals ? <PublicSignals signals={data.signals} /> : null}
             <div className="comp-block">
               <h3>Not available</h3>
               <div className="comp-chips">{(data.notAvailable || []).map((key) => <span key={key} className="badge">{key}</span>)}</div>

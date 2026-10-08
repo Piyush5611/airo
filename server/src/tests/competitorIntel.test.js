@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   COPY_RULE, NOT_AVAILABLE, adAnalysisSchema, competitorSummary, confidenceFor, contentHash, creativeFormat, discoveryFields,
-  marketGaps, normalizeAd, strategySchema, timeline
+  marketGaps, normalizeAd, publicSignals, strategySchema, timeline
 } from '../services/competitorIntel.js';
 import { duplicateOf, siteKey } from '../services/competitorService.js';
 import { competitorAdFilterSchema, competitorSchema, competitorVerifySchema } from '../validators/schemas.js';
@@ -182,6 +182,22 @@ test('competitor intelligence routes require permissions', () => {
   assert.equal(lines.length, 10);
   for (const line of lines) assert.match(line, /requirePermission\('campaigns\.(view|update)'\)/);
   for (const line of lines.filter((item) => item.includes('client.post'))) assert.match(line, /campaigns\.update/);
+});
+
+test('publicSignals uses only public dates, versions and placements', () => {
+  const now = Date.parse('2026-10-08T12:00:00Z');
+  const live = publicSignals({ status: 'active', firstShown: '2026-09-01', versions: 3, placements: '["facebook","instagram"]', link: 'https://www.rival.example/x?utm=1', source: 'meta_ad_library' }, { total: 4, active: 2 }, now);
+  assert.equal(live.days, 38);
+  assert.equal(live.longRunning, true);
+  assert.equal(live.sameCopyAds, 4);
+  assert.deepEqual(live.placements, ['facebook', 'instagram']);
+  assert.equal(live.landing, 'rival.example');
+  assert.ok(!('spend' in live) && !('impressions' in live));
+  const stopped = publicSignals({ status: 'inactive', firstShown: '2026-10-01', lastShown: '2026-10-05', placements: [] }, { total: 0, active: 0 }, now);
+  assert.equal(stopped.days, 5);
+  assert.equal(stopped.longRunning, false);
+  assert.equal(stopped.sameCopyAds, 1);
+  assert.equal(publicSignals({ status: 'active', firstShown: null }, undefined, now).days, null);
 });
 
 test('the copy rule and missing-metric marker are fixed strings', () => {

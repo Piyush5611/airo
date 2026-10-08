@@ -5,7 +5,8 @@ const BASE = 'https://api.apify.com/v2';
 export const ACTORS = {
   google: 'apify~google-search-scraper',
   meta: 'apify~facebook-ads-scraper',
-  maps: 'compass~crawler-google-places'
+  maps: 'compass~crawler-google-places',
+  googleAds: 'scrapesage~google-ads-transparency-scraper'
 };
 
 // Apify rejects a maxTotalChargeUsd below $0.50; maxItems keeps the real charge far lower.
@@ -74,6 +75,26 @@ export function metaKeywordAds(token, keywords, perKeyword = 20) {
     startUrls: keywords.map((keyword) => ({ url: adLibraryUrl(keyword) })),
     resultsLimit: perKeyword
   }, { maxItems: keywords.length * perKeyword, maxChargeUsd: 0.4 });
+}
+
+// Accepts a Facebook page URL or an Ad Library URL.
+export function metaAdsFrom(token, url, limit = 30) {
+  return runActor(token, ACTORS.meta, {
+    startUrls: [{ url }],
+    resultsLimit: limit
+  }, { maxItems: limit, maxChargeUsd: 0.2 });
+}
+
+export function googleTransparencyAds(token, { domain = '', name = '' }, limit = 30) {
+  const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  return runActor(token, ACTORS.googleAds, {
+    ...(domain ? { domains: [domain] } : { queries: [name], maxAdvertisersPerQuery: 1 }),
+    resultType: 'ads',
+    region: 'IN',
+    startDate: since,
+    maxAdsPerSearch: limit,
+    includeDetails: false
+  }, { maxItems: limit, maxChargeUsd: 0.2, timeoutSecs: 240 });
 }
 
 export function mapsPlaces(token, searches, location, perSearch = 15) {

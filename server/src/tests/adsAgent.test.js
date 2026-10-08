@@ -29,6 +29,7 @@ import { pageText, pricesIn, samePageLinks } from '../integrations/webPage.js';
 import { analysisFacts, analysisSchema } from '../services/competitorService.js';
 import { balancedTop, collectCandidates, domainOf, dueScopes, fallbackPlan, notCompetitor, placeParts, planFacts, planSchema, trackedMatch, verdictSchema, websiteFor } from '../services/competitorDiscovery.js';
 import { adLibraryUrl } from '../integrations/apify.js';
+import { adStats, facebookPage, googleAd, metaAd, ownAd } from '../services/competitorAds.js';
 import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
 } from '../services/offeringService.js';
@@ -1006,4 +1007,45 @@ test('Keyword Planner access is read from the Google answer', async () => {
   assert.equal(plannerStatus(null), 'ready');
   assert.equal(plannerStatus(new Error('This method is not allowed for use with explorer access. Please apply for basic or standard access.')), 'needs_basic');
   assert.equal(plannerStatus(new Error('Request had invalid authentication credentials.')), 'failed');
+});
+test('competitor ads: Meta and Google items are read into one shape with age and versions', () => {
+  const now = Date.parse('2026-10-08T00:00:00Z');
+  const meta = metaAd({
+    adArchiveID: '111', pageName: 'Biigtech', pageID: '9', startDateFormatted: '2026-08-29T07:00:00.000Z', isActive: true,
+    publisherPlatform: ['FACEBOOK', 'INSTAGRAM'], collationCount: 3,
+    snapshot: { body: { text: 'Shops from {{product.price}} 25 Lakh' }, title: 'Greater Noida shops', ctaText: 'Learn more', linkUrl: 'https://www.biigtech.com/shops', images: [{ resizedImageUrl: 'https://img/1.jpg' }] }
+  }, now);
+  assert.equal(meta.days, 39);
+  assert.equal(meta.versions, 3);
+  assert.equal(meta.text, 'Shops from 25 Lakh');
+  assert.deepEqual(meta.platforms, ['facebook', 'instagram']);
+  assert.equal(meta.format, 'image');
+  assert.equal(meta.url, 'https://www.facebook.com/ads/library/?id=111');
+
+  const google = googleAd({ creativeId: 'CR1', advertiserName: 'Biigtech Pvt Ltd', format: 'TEXT', firstShown: '2026-10-03T00:00:00Z', lastShown: '2026-10-07T00:00:00Z', shownForDays: 4 }, now);
+  assert.equal(google.active, true);
+  assert.equal(google.days, 4);
+  assert.equal(google.age, 5);
+  const old = googleAd({ creativeId: 'CR2', firstShown: '2026-06-01T00:00:00Z', lastShown: '2026-07-01T00:00:00Z' }, now);
+  assert.equal(old.active, false);
+  assert.equal(old.days, 30);
+
+  const stats = adStats([meta, { ...meta, id: '112', days: 3, age: 3, versions: 1 }, { ...meta, id: '113', active: false }]);
+  assert.equal(stats.total, 3);
+  assert.equal(stats.live, 2);
+  assert.equal(stats.longRunning, 1);
+  assert.equal(stats.newThisWeek, 1);
+  assert.equal(stats.withVersions, 1);
+  assert.equal(stats.averageDays, 21);
+  assert.equal(stats.landing[0].key, 'biigtech.com');
+});
+
+test('competitor ads: name searches keep only the competitor own ads', () => {
+  const competitor = { name: 'Biigtech Group', website: 'https://biigtech.com' };
+  assert.equal(ownAd(competitor, { name: 'Some Broker', link: 'https://www.biigtech.com/x' }), true);
+  assert.equal(ownAd(competitor, { name: 'BiigTech Official', link: '' }), true);
+  assert.equal(ownAd(competitor, { name: 'Realty Assistant', link: 'https://realtyassistant.in' }), false);
+  assert.equal(ownAd({ name: 'Real Estate Group', website: '' }, { name: 'Any Real Estate', link: '' }), false);
+  assert.equal(facebookPage('https://www.facebook.com/biigtech'), 'https://www.facebook.com/biigtech');
+  assert.equal(facebookPage('https://instagram.com/biigtech'), '');
 });

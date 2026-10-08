@@ -25,6 +25,7 @@ import * as offerings from '../services/offeringService.js';
 import * as websiteForms from '../services/websiteFormService.js';
 import * as competitors from '../services/competitorService.js';
 import * as discovery from '../services/competitorDiscovery.js';
+import * as competitorAds from '../services/competitorAds.js';
 import * as research from '../services/researchTools.js';
 import { pingDatabase } from '../config/db.js';
 
@@ -205,6 +206,12 @@ client.post('/competitors/:id/find-website', requirePermission('campaigns.update
 }));
 client.post('/competitors/:id/analyze', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await competitors.analyzeCompetitor(req.auth, req, req.params.id));
+}));
+client.get('/competitors/:id/ads', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await competitorAds.competitorAds(req.auth, req.params.id));
+}));
+client.post('/competitors/:id/ads/check', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await competitorAds.checkCompetitorAds(req.auth, req, req.params.id));
 }));
 client.post('/offerings/:id/photos', requirePermission('campaigns.update'), validate(schemas.idParams.merge(schemas.imageUploadSchema)), asyncHandler(async (req, res) => {
   ok(res, await offerings.addPhoto(req.auth, req, req.params.id), 201);

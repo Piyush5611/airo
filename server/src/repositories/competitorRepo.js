@@ -256,6 +256,43 @@ export function suggestionById(organizationId, id) {
   );
 }
 
+export function startAdCheck(organizationId, competitorId) {
+  return insert(`INSERT INTO competitor_ad_checks (organization_id, competitor_id) VALUES (?, ?)`, [organizationId, competitorId]);
+}
+
+export function finishAdCheck(id, { status, meta, google, notes }) {
+  return run(
+    `UPDATE competitor_ad_checks SET status = ?, meta = ?, google = ?, notes = ?, finished_at = UTC_TIMESTAMP() WHERE id = ?`,
+    [status, meta ? JSON.stringify(meta) : null, google ? JSON.stringify(google) : null, JSON.stringify(notes || []), id]
+  );
+}
+
+export function latestAdCheck(organizationId, competitorId) {
+  return one(
+    `SELECT id, status, meta, google, notes, started_at AS startedAt, finished_at AS finishedAt
+     FROM competitor_ad_checks WHERE organization_id = ? AND competitor_id = ? ORDER BY id DESC LIMIT 1`,
+    [organizationId, competitorId]
+  );
+}
+
+export function closeInterruptedAdChecks() {
+  return run(
+    `UPDATE competitor_ad_checks SET status = 'failed', notes = JSON_ARRAY('AIRO restarted while this check was running. Press Check ads again.'), finished_at = UTC_TIMESTAMP()
+     WHERE status = 'running'`
+  );
+}
+
+export function ourAdTotals(organizationId, days = 30) {
+  return many(
+    `SELECT platform, currency, COUNT(DISTINCT CASE WHEN spend > 0 THEN external_id END) AS campaigns,
+            SUM(spend) AS spend, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(leads) AS leads, SUM(conversions) AS conversions
+     FROM ad_metrics_daily
+     WHERE organization_id = ? AND level = 'campaign' AND metric_date >= (UTC_DATE() - INTERVAL ? DAY)
+     GROUP BY platform, currency`,
+    [organizationId, days]
+  );
+}
+
 export function setSuggestionStatus(organizationId, id, status, competitorId = null) {
   return run(
     `UPDATE competitor_suggestions SET status = ?, competitor_id = COALESCE(?, competitor_id) WHERE organization_id = ? AND id = ?`,

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
-import { num, when } from '../format.js';
+import { inr, num, when } from '../format.js';
 import { Page, State } from '../ui.jsx';
 
 const EMPTY = { name: '', website: '', facebook: '', instagram: '', city: '', notes: '', status: 'active' };
@@ -263,6 +263,187 @@ function Sources({ report }) {
   );
 }
 
+const PLATFORM_LABEL = { facebook: 'Facebook', instagram: 'Instagram', messenger: 'Messenger', audience_network: 'Audience Network', threads: 'Threads' };
+const AD_PREVIEW = 6;
+
+function money(value, currency) {
+  if (value == null) return '—';
+  if (!currency || currency === 'INR') return inr(value);
+  return `${currency} ${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+}
+
+function days(value) {
+  if (value == null) return '';
+  return value === 1 ? '1 day' : `${num(value)} days`;
+}
+
+function AdStats({ stats, versions }) {
+  return (
+    <div className="ads-stats">
+      <div><span>Live now</span><strong>{num(stats.live)}</strong></div>
+      <div><span>Running 30+ days</span><strong>{num(stats.longRunning)}</strong></div>
+      <div><span>New this week</span><strong>{num(stats.newThisWeek)}</strong></div>
+      <div><span>Average age</span><strong>{stats.averageDays == null ? '—' : days(stats.averageDays)}</strong></div>
+      {versions ? <div><span>With several versions</span><strong>{num(stats.withVersions)}</strong></div> : null}
+    </div>
+  );
+}
+
+function AdCard({ ad, google }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <article className="ads-card">
+      {ad.image && !broken ? <img src={ad.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} /> : <div className="ads-noimage">{ad.format || 'ad'}</div>}
+      <div className="ads-body">
+        <div className="comp-chips">
+          {ad.active ? <span className={`badge ${ad.days >= 30 ? 'good' : 'info'}`}>{google ? 'Shown for' : 'Running'} {days(ad.days) || '—'}</span> : <span className="badge">Stopped</span>}
+          {ad.format ? <span className="channel-pill">{ad.format}</span> : null}
+          {ad.versions > 1 ? <span className="channel-pill">{ad.versions} versions</span> : null}
+        </div>
+        {ad.title ? <strong>{ad.title}</strong> : null}
+        {ad.text ? <p>{ad.text}</p> : null}
+        {google && !ad.text ? <p className="quiet">{ad.advertiser}{ad.lastShown ? ` · last shown ${when(ad.lastShown)}` : ''}</p> : null}
+        <small className="quiet">
+          {[ad.cta, ad.link ? host(ad.link) : '', (ad.platforms || []).map((name) => PLATFORM_LABEL[name] || name).join(', ')].filter(Boolean).join(' · ')}
+        </small>
+        {ad.url ? <a className="comp-source" href={ad.url} target="_blank" rel="noreferrer">{google ? 'View on Google Ads Transparency' : 'View in Meta Ad Library'}</a> : null}
+      </div>
+    </article>
+  );
+}
+
+function AdColumn({ title, data, google }) {
+  const [all, setAll] = useState(false);
+  if (!data) return <div className="ads-column"><h3>{title}</h3><p className="quiet">Could not be read this time.</p></div>;
+  const ads = all ? data.ads : data.ads.slice(0, AD_PREVIEW);
+  const chips = [...(data.stats.platforms || []).map((row) => `${PLATFORM_LABEL[row.key] || row.key} ${row.total}`), ...(data.stats.formats || []).map((row) => `${row.key} ${row.total}`)];
+  return (
+    <div className="ads-column">
+      <h3>{title}</h3>
+      {google && data.advertisers?.length ? <p className="quiet">Advertiser: {data.advertisers.join(', ')}</p> : null}
+      {!google && data.page ? <p className="quiet">Page: {data.page}</p> : null}
+      {data.stats.total ? (
+        <>
+          <AdStats stats={data.stats} versions={!google} />
+          {chips.length ? <div className="comp-chips">{chips.map((text) => <span key={text} className="channel-pill">{text}</span>)}</div> : null}
+          {data.stats.ctas?.length ? <p className="quiet">Buttons used: {data.stats.ctas.map((row) => `${row.key} (${row.total})`).join(', ')}</p> : null}
+          {data.stats.landing?.length ? <p className="quiet">Ads send people to: {data.stats.landing.map((row) => row.key).join(', ')}</p> : null}
+          <div className="ads-grid">{ads.map((ad) => <AdCard key={ad.id} ad={ad} google={google} />)}</div>
+          {data.ads.length > AD_PREVIEW ? <button className="btn" type="button" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${data.ads.length}`}</button> : null}
+        </>
+      ) : <p className="quiet">{google ? 'No Google ads found in India in the last 90 days.' : 'No active Meta ads found.'}</p>}
+    </div>
+  );
+}
+
+function Versus({ ours, check }) {
+  const rows = [['meta', 'Meta', check?.meta], ['google', 'Google', check?.google]];
+  return (
+    <div className="comp-block">
+      <h3>You vs them</h3>
+      <div className="table-wrap">
+        <table className="responsive">
+          <thead><tr><th>Platform</th><th>Your campaigns (30 days)</th><th>Your spend</th><th>Your leads</th><th>Your cost per lead</th><th>Their live ads</th><th>Theirs running 30+ days</th></tr></thead>
+          <tbody>
+            {rows.map(([key, name, theirs]) => {
+              const mine = ours.filter((row) => row.platform === key);
+              const row = mine[0];
+              return (
+                <tr key={key}>
+                  <td data-label="Platform">{name}</td>
+                  <td data-label="Your campaigns (30 days)">{row ? num(mine.reduce((sum, item) => sum + item.campaigns, 0)) : 'No data'}</td>
+                  <td data-label="Your spend">{mine.length ? mine.map((item) => money(item.spend, item.currency)).join(' + ') : '—'}</td>
+                  <td data-label="Your leads">{row ? num(mine.reduce((sum, item) => sum + item.leads, 0)) : '—'}</td>
+                  <td data-label="Your cost per lead">{mine.length === 1 && row.cpl != null ? money(row.cpl, row.currency) : '—'}</td>
+                  <td data-label="Their live ads">{theirs ? num(theirs.stats.live) : '—'}</td>
+                  <td data-label="Theirs running 30+ days">{theirs ? num(theirs.stats.longRunning) : '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="quiet comp-note">Your numbers come from your connected ad accounts. Meta and Google do not make another business's spend, clicks or leads public, so for them AIRO shows what is public: how many ads are live and how long each has run. An ad that keeps running for a month or more is usually one that works for them.</p>
+    </div>
+  );
+}
+
+function AdsPanel({ id, canManage }) {
+  const { data, error, reload } = useResource(`/api/competitors/${id}/ads`);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const running = Boolean(data?.running);
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setInterval(() => reload({ silent: true }), 5000);
+    return () => clearInterval(timer);
+  }, [running, reload]);
+
+  async function check() {
+    setBusy(true);
+    setMessage('');
+    try {
+      await api.post(`/api/competitors/${id}/ads/check`, {});
+      reload({ silent: true });
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) return <p className="quiet">Their ads could not be loaded: {error}</p>;
+  if (!data) return null;
+  const latest = data.check;
+  return (
+    <section className="ads-panel">
+      <header className="comp-head">
+        <div>
+          <h3>Their ads on Meta and Google</h3>
+          <p className="quiet">
+            From the public Meta Ad Library and Google Ads Transparency Center.
+            {latest?.finishedAt && latest.status === 'ready' ? ` Checked ${when(latest.finishedAt)}.` : ''}
+          </p>
+        </div>
+        {canManage ? (
+          <button className="btn-primary" type="button" onClick={check} disabled={busy || running || !data.ready}>
+            {running ? 'Checking...' : latest ? 'Check again' : 'Check ads'}
+          </button>
+        ) : null}
+      </header>
+      {!data.ready ? <p className="quiet">Ad checks are not turned on yet. The AIRO team connects Apify on the platform.</p> : null}
+      {message ? <p className="quiet">{message}</p> : null}
+      {running ? (
+        <div className="comp-running">
+          <span className="comp-spinner" aria-hidden="true" />
+          <div>
+            <strong>Reading their Meta and Google ads...</strong>
+            <p className="quiet">This takes one to three minutes. You can leave this page; the result is saved.</p>
+          </div>
+        </div>
+      ) : null}
+      {!running && latest?.status === 'failed' ? (
+        <div className="comp-failed">
+          <strong>The last ad check did not finish.</strong>
+          <ul className="comp-list">{(latest.notes || []).map((note) => <li key={note}>{note}</li>)}</ul>
+        </div>
+      ) : null}
+      {!running && !latest && data.ready ? <p className="quiet">Not checked yet. Press Check ads to see what they are running. Each check uses a little Apify credit.</p> : null}
+      {latest?.status === 'ready' ? (
+        <>
+          <div className="comp-two">
+            <AdColumn title="Meta (Facebook and Instagram)" data={latest.meta} />
+            <AdColumn title="Google (Search, YouTube, Display)" data={latest.google} google />
+          </div>
+          {latest.notes?.length ? <p className="quiet comp-note">{latest.notes.join(' ')}</p> : null}
+        </>
+      ) : null}
+      <Versus ours={data.ours || []} check={latest?.status === 'ready' ? latest : null} />
+    </section>
+  );
+}
+
 const FIT = { direct: ['bad', 'Direct competitor'], indirect: ['warn', 'Indirect'], unclear: ['', 'Check yourself'] };
 const SOURCE = { google_ad: 'Google ad', google_search: 'Google search', meta_ad: 'Meta ads', maps: 'Google Maps' };
 
@@ -503,6 +684,7 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
               {data.report.notes?.length && tab !== 'keywords' ? <p className="quiet comp-note">{data.report.notes.join(' ')}</p> : null}
             </>
           ) : null}
+          <AdsPanel key={data.id} id={data.id} canManage={canManage} />
         </section>
       ) : null}
     </State>

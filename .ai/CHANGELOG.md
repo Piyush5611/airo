@@ -2,6 +2,12 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-08 (Competitor ads on Meta and Google)
+
+- **Change:** New table `competitor_ad_checks` (migration 031). `POST /api/competitors/:id/ads/check` reads a competitor's ads in the background with Apify: Meta from their saved Facebook page (or the Ad Library by name, kept only when the page name or landing site matches), Google from the Ads Transparency Center by website domain (India, last 90 days, actor `scrapesage~google-ads-transparency-scraper`). Up to 30 ads each, cost capped per run, 30 minute cooldown after a finished check. Runs only when the owner presses the button.
+- **Change:** `GET /api/competitors/:id/ads` returns the latest check (live ads, running 30+ days, new this week, average age, versions, formats, platforms, buttons, landing sites, ad previews) and the business's own 30-day totals per platform from `ad_metrics_daily`. Checks cut off by a restart are closed at start-up.
+- **Change (client):** The competitor detail shows "Their ads on Meta and Google" with Check ads, ad cards, and a You vs them table. Competitor spend, clicks and leads are not public, so only public signals are shown for them.
+
 ### 2026-10-08 (Keyword Planner check on Google Ads connect)
 
 - **Change:** Choosing a Google Ads account now also sends one read-only keyword idea request and saves the Keyword Planner status (`ready`, `needs_basic` when the developer token has Explorer access, or `failed`) in the encrypted credential. Connection detail returns `keywordPlanner`, and `POST /api/connections/:id/google/keyword-check` checks again.

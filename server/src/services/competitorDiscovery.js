@@ -322,9 +322,13 @@ const GENERIC_WORDS = new Set([
   'consultants', 'consultant', 'services', 'company', 'projects', 'project', 'housing', 'construction', 'constructions', 'official'
 ]);
 
+export function distinctWords(name) {
+  return nameKey(name).split(' ').filter((word) => word.length >= 3 && !GENERIC_WORDS.has(word));
+}
+
 // Takes a search result as their website only when every distinctive word of the name is in its domain or title.
 export function websiteFor(name, results) {
-  const words = nameKey(name).split(' ').filter((word) => word.length >= 3 && !GENERIC_WORDS.has(word));
+  const words = distinctWords(name);
   if (!words.length) return '';
   for (const row of (results || []).slice(0, 5)) {
     const domain = domainOf(row?.url);

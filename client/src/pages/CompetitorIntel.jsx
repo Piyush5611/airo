@@ -238,7 +238,22 @@ export function IntelOverview({ canManage, onOpenCompetitor }) {
   const { data, loading, error, reload } = useResource('/api/competitors/intelligence');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [checking, setChecking] = useState(0);
   usePoll(Boolean(data?.analysing), reload);
+
+  async function checkAds(event, row) {
+    event.stopPropagation();
+    setChecking(row.id);
+    setMessage('');
+    try {
+      await api.post(`/api/competitors/${row.id}/ads/check`, {});
+      setMessage(`Reading ${row.name}'s Meta and Google ads. This takes one to three minutes; open the competitor to see the result.`);
+    } catch (err) {
+      setMessage(`${row.name}: ${err.message}`);
+    } finally {
+      setChecking(0);
+    }
+  }
 
   async function analyse() {
     setBusy(true);
@@ -279,7 +294,7 @@ export function IntelOverview({ canManage, onOpenCompetitor }) {
             <h3>Competitors</h3>
             <div className="table-wrap">
               <table className="responsive">
-                <thead><tr><th>Competitor</th><th>Type</th><th>Live ads</th><th>Platforms</th><th>Main themes</th><th>Ads checked</th></tr></thead>
+                <thead><tr><th>Competitor</th><th>Type</th><th>Live ads</th><th>Platforms</th><th>Main themes</th><th>Ads checked</th>{canManage ? <th>Ads</th> : null}</tr></thead>
                 <tbody>
                   {data.competitors.length ? data.competitors.map((row) => (
                     <tr key={row.id} className="is-clickable" onClick={() => onOpenCompetitor(row.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') onOpenCompetitor(row.id); }}>
@@ -289,8 +304,15 @@ export function IntelOverview({ canManage, onOpenCompetitor }) {
                       <td data-label="Platforms">{row.platforms.map((key) => PLATFORM[key] || key).join(', ') || '—'}</td>
                       <td data-label="Main themes">{row.topThemes.join(', ') || '—'}</td>
                       <td data-label="Ads checked">{row.adsCheckedAt ? when(row.adsCheckedAt) : 'Never'}</td>
+                      {canManage ? (
+                        <td data-label="Ads">
+                          <button className="btn" type="button" onClick={(event) => checkAds(event, row)} disabled={checking !== 0}>
+                            {checking === row.id ? 'Starting...' : row.adsCheckedAt ? 'Check again' : 'Check ads'}
+                          </button>
+                        </td>
+                      ) : null}
                     </tr>
-                  )) : <tr><td colSpan={6}>No active competitors yet.</td></tr>}
+                  )) : <tr><td colSpan={canManage ? 7 : 6}>No active competitors yet.</td></tr>}
                 </tbody>
               </table>
             </div>

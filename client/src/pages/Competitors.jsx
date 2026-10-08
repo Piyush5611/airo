@@ -681,6 +681,7 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
             </div>
           </header>
           {message ? <p className="quiet">{message}</p> : null}
+          <AdsPanel key={data.id} id={data.id} canManage={canManage} />
           {!data.website ? (
             <div className="comp-failed">
               <strong>No website yet.</strong>
@@ -717,7 +718,6 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
               {data.report.notes?.length && tab !== 'keywords' ? <p className="quiet comp-note">{data.report.notes.join(' ')}</p> : null}
             </>
           ) : null}
-          <AdsPanel key={data.id} id={data.id} canManage={canManage} />
           <CompetitorInsights key={`insights-${data.id}`} id={data.id} canManage={canManage} />
         </section>
       ) : null}

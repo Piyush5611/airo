@@ -196,7 +196,7 @@ client.post('/competitors/import-profile', requirePermission('campaigns.update')
 client.get('/competitors/intelligence', requirePermission('campaigns.view'), asyncHandler(async (req, res) => {
   ok(res, await compIntel.overview(req.auth));
 }));
-client.get('/competitors/intelligence/ads', requirePermission('campaigns.view'), validate(schemas.competitorAdFilterSchema), asyncHandler(async (req, res) => {
+client.get(['/competitors/intelligence/ads', '/competitors/intelligence/creatives'], requirePermission('campaigns.view'), validate(schemas.competitorAdFilterSchema), asyncHandler(async (req, res) => {
   ok(res, await compIntel.adList(req.auth, req.query));
 }));
 client.post('/competitors/intelligence/analyze', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
@@ -205,7 +205,7 @@ client.post('/competitors/intelligence/analyze', requirePermission('campaigns.up
 client.post('/competitors/intelligence/strategy', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
   ok(res, await compIntel.generateStrategy(req.auth, req, 0));
 }));
-client.get('/competitors/ads/:id', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+client.get(['/competitors/ads/:id', '/competitors/creatives/:id'], requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await compIntel.adDetail(req.auth, req.params.id));
 }));
 client.get('/competitors/:id/insights', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
@@ -232,10 +232,10 @@ client.post('/competitors/:id/find-website', requirePermission('campaigns.update
 client.post('/competitors/:id/analyze', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await competitors.analyzeCompetitor(req.auth, req, req.params.id));
 }));
-client.get('/competitors/:id/ads', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+client.get(['/competitors/:id/ads', '/competitors/:id/watch'], requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await competitorAds.competitorAds(req.auth, req.params.id));
 }));
-client.post('/competitors/:id/ads/check', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+client.post(['/competitors/:id/ads/check', '/competitors/:id/watch/check'], requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await competitorAds.checkCompetitorAds(req.auth, req, req.params.id));
 }));
 client.post('/offerings/:id/photos', requirePermission('campaigns.update'), validate(schemas.idParams.merge(schemas.imageUploadSchema)), asyncHandler(async (req, res) => {

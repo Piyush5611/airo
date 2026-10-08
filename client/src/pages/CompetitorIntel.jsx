@@ -143,9 +143,9 @@ function AnalysisChips({ analysis }) {
 function AdTile({ ad, onOpen }) {
   const [broken, setBroken] = useState(false);
   return (
-    <article className="ads-card intel-ad" onClick={() => onOpen(ad.id)} onKeyDown={(event) => { if (event.key === 'Enter') onOpen(ad.id); }} tabIndex={0}>
-      {ad.imageUrl && !broken ? <img src={ad.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} /> : <div className="ads-noimage">{ad.format || 'ad'}</div>}
-      <div className="ads-body">
+    <article className="rival-card rival-tile" onClick={() => onOpen(ad.id)} onKeyDown={(event) => { if (event.key === 'Enter') onOpen(ad.id); }} tabIndex={0}>
+      {ad.imageUrl && !broken ? <img src={ad.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} /> : <div className="rival-noimage">{ad.format || 'ad'}</div>}
+      <div className="rival-body">
         <div className="comp-chips">
           <span className="channel-pill">{PLATFORM[ad.platform] || ad.platform}</span>
           {ad.status === 'active' ? <span className="badge good">Active</span> : <span className="badge">Stopped</span>}
@@ -162,7 +162,7 @@ function AdTile({ ad, onOpen }) {
 }
 
 export function AdDetail({ id, onClose }) {
-  const { data, loading, error, reload } = useResource(`/api/competitors/ads/${id}`);
+  const { data, loading, error, reload } = useResource(`/api/competitors/creatives/${id}`);
   const analysis = data?.analysis;
   const field = (value) => (value && value !== NOT_AVAILABLE ? value : 'Not shown in the ad');
   return (
@@ -246,7 +246,7 @@ export function IntelOverview({ canManage, onOpenCompetitor }) {
     setChecking(row.id);
     setMessage('');
     try {
-      await api.post(`/api/competitors/${row.id}/ads/check`, {});
+      await api.post(`/api/competitors/${row.id}/watch/check`, {});
       setMessage(`Reading ${row.name}'s Meta and Google ads. This takes one to three minutes; open the competitor to see the result.`);
     } catch (err) {
       setMessage(`${row.name}: ${err.message}`);
@@ -370,7 +370,7 @@ export function AdLibrary({ competitors }) {
   const [filters, setFilters] = useState({});
   const [openId, setOpenId] = useState(0);
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value)).toString();
-  const { data, loading, error, reload } = useResource(`/api/competitors/intelligence/ads${query ? `?${query}` : ''}`);
+  const { data, loading, error, reload } = useResource(`/api/competitors/intelligence/creatives${query ? `?${query}` : ''}`);
   const set = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }));
   const items = data?.items || [];
 
@@ -400,7 +400,7 @@ export function AdLibrary({ competitors }) {
         {data && !data.ready ? <p className="quiet">Run the migration to set up competitor ads.</p> : (
           <>
             <p className="quiet">{num(items.length)} ads{items.length >= 300 ? ' (first 300)' : ''}. Active ads first, longest running first.</p>
-            {items.length ? <div className="intel-ads">{items.map((ad) => <AdTile key={ad.id} ad={ad} onOpen={setOpenId} />)}</div> : <p className="quiet">No ads match. Ads appear here after you press Check ads on a competitor.</p>}
+            {items.length ? <div className="rival-grid-wide">{items.map((ad) => <AdTile key={ad.id} ad={ad} onOpen={setOpenId} />)}</div> : <p className="quiet">No ads match. Ads appear here after you press Check ads on a competitor.</p>}
           </>
         )}
       </State>
@@ -417,7 +417,7 @@ export function CompetitorInsights({ id, canManage }) {
   const { summary, timeline } = data;
   if (!summary.ads) return null;
   return (
-    <section className="ads-panel">
+    <section className="rival-panel">
       <header className="comp-head">
         <div>
           <h3>What their ads say</h3>

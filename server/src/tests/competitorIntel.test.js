@@ -178,8 +178,8 @@ test('every competitor intelligence query is scoped to the organization', () => 
 
 test('competitor intelligence routes require permissions', () => {
   const source = fs.readFileSync(path.join(here, '../routes/index.js'), 'utf8');
-  const lines = source.split('\n').filter((line) => /client\.(get|post)\('\/competitors\/(intelligence|ads\/|:id\/(insights|strategy|verify))/.test(line));
-  assert.equal(lines.length, 8);
+  const lines = source.split('\n').filter((line) => /client\.(get|post)\(\[?'\/competitors\/(intelligence|ads\/|:id\/(insights|strategy|verify|ads))/.test(line));
+  assert.equal(lines.length, 10);
   for (const line of lines) assert.match(line, /requirePermission\('campaigns\.(view|update)'\)/);
   for (const line of lines.filter((item) => item.includes('client.post'))) assert.match(line, /campaigns\.update/);
 });

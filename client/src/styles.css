@@ -1117,22 +1117,22 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
   .comp-row { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .comp-spinner { animation: none; } }
-.ads-panel { display: grid; gap: 14px; padding-top: 16px; border-top: 1px solid var(--line); }
-.ads-panel h3 { margin: 0; font-size: 16px; }
-.ads-column { display: grid; gap: 10px; align-content: start; min-width: 0; }
-.ads-column h3 { font-size: 14px; }
-.ads-column .quiet { margin: 0; font-size: 13px; }
-.ads-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
-.ads-stats > div { display: grid; gap: 2px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
-.ads-stats span { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
-.ads-stats strong { font-size: 18px; }
-.ads-grid { display: grid; gap: 10px; }
-.ads-card { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: white; }
-.ads-card img, .ads-noimage { width: 96px; height: 96px; border-radius: 8px; object-fit: cover; background: var(--surface-2); }
-.ads-noimage { display: grid; place-items: center; color: var(--muted); font-size: 11px; text-transform: uppercase; }
-.ads-body { display: grid; gap: 4px; align-content: start; min-width: 0; }
-.ads-body p { margin: 0; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-.ads-body strong { font-size: 13px; }
+.rival-panel { display: grid; gap: 14px; padding-top: 16px; border-top: 1px solid var(--line); }
+.rival-panel h3 { margin: 0; font-size: 16px; }
+.rival-column { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.rival-column h3 { font-size: 14px; }
+.rival-column .quiet { margin: 0; font-size: 13px; }
+.rival-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.rival-stats > div { display: grid; gap: 2px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.rival-stats span { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.rival-stats strong { font-size: 18px; }
+.rival-grid { display: grid; gap: 10px; }
+.rival-card { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.rival-card img, .rival-noimage { width: 96px; height: 96px; border-radius: 8px; object-fit: cover; background: var(--surface-2); }
+.rival-noimage { display: grid; place-items: center; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+.rival-body { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.rival-body p { margin: 0; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.rival-body strong { font-size: 13px; }
 .comp-suggest { display: grid; gap: 12px; }
 .comp-suggest-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .comp-scope { flex-wrap: wrap; justify-self: start; max-width: 100%; }
@@ -1152,9 +1152,9 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
 .intel-bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
 .intel-bar strong { text-align: right; font-variant-numeric: tabular-nums; }
 .intel-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; align-items: end; }
-.intel-ads { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
-.intel-ad { cursor: pointer; }
-.intel-ad:hover { border-color: var(--line-strong); }
+.rival-grid-wide { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.rival-tile { cursor: pointer; }
+.rival-tile:hover { border-color: var(--line-strong); }
 .intel-detail { display: grid; gap: 14px; }
 .intel-image { max-width: 100%; max-height: 280px; border-radius: 10px; object-fit: contain; background: var(--surface-2); }
 .intel-copy { white-space: pre-wrap; font-size: 13px; }

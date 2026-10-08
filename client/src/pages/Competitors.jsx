@@ -290,7 +290,7 @@ function days(value) {
 
 function AdStats({ stats, versions }) {
   return (
-    <div className="ads-stats">
+    <div className="rival-stats">
       <div><span>Live now</span><strong>{num(stats.live)}</strong></div>
       <div><span>Running 30+ days</span><strong>{num(stats.longRunning)}</strong></div>
       <div><span>New this week</span><strong>{num(stats.newThisWeek)}</strong></div>
@@ -303,9 +303,9 @@ function AdStats({ stats, versions }) {
 function AdCard({ ad, google }) {
   const [broken, setBroken] = useState(false);
   return (
-    <article className="ads-card">
-      {ad.image && !broken ? <img src={ad.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} /> : <div className="ads-noimage">{ad.format || 'ad'}</div>}
-      <div className="ads-body">
+    <article className="rival-card">
+      {ad.image && !broken ? <img src={ad.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} /> : <div className="rival-noimage">{ad.format || 'ad'}</div>}
+      <div className="rival-body">
         <div className="comp-chips">
           {ad.active ? <span className={`badge ${ad.days >= 30 ? 'good' : 'info'}`}>{google ? 'Shown for' : 'Running'} {days(ad.days) || '—'}</span> : <span className="badge">Stopped</span>}
           {ad.format ? <span className="channel-pill">{ad.format}</span> : null}
@@ -325,11 +325,11 @@ function AdCard({ ad, google }) {
 
 function AdColumn({ title, data, google }) {
   const [all, setAll] = useState(false);
-  if (!data) return <div className="ads-column"><h3>{title}</h3><p className="quiet">Could not be read this time.</p></div>;
+  if (!data) return <div className="rival-column"><h3>{title}</h3><p className="quiet">Could not be read this time.</p></div>;
   const ads = all ? data.ads : data.ads.slice(0, AD_PREVIEW);
   const chips = [...(data.stats.platforms || []).map((row) => `${PLATFORM_LABEL[row.key] || row.key} ${row.total}`), ...(data.stats.formats || []).map((row) => `${row.key} ${row.total}`)];
   return (
-    <div className="ads-column">
+    <div className="rival-column">
       <h3>{title}</h3>
       {google && data.advertisers?.length ? <p className="quiet">Advertiser: {data.advertisers.join(', ')}</p> : null}
       {!google && data.page ? <p className="quiet">Page: {data.page}</p> : null}
@@ -339,7 +339,7 @@ function AdColumn({ title, data, google }) {
           {chips.length ? <div className="comp-chips">{chips.map((text) => <span key={text} className="channel-pill">{text}</span>)}</div> : null}
           {data.stats.ctas?.length ? <p className="quiet">Buttons used: {data.stats.ctas.map((row) => `${row.key} (${row.total})`).join(', ')}</p> : null}
           {data.stats.landing?.length ? <p className="quiet">Ads send people to: {data.stats.landing.map((row) => row.key).join(', ')}</p> : null}
-          <div className="ads-grid">{ads.map((ad) => <AdCard key={ad.id} ad={ad} google={google} />)}</div>
+          <div className="rival-grid">{ads.map((ad) => <AdCard key={ad.id} ad={ad} google={google} />)}</div>
           {data.ads.length > AD_PREVIEW ? <button className="btn" type="button" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${data.ads.length}`}</button> : null}
         </>
       ) : <p className="quiet">{google ? 'No Google ads found in India in the last 90 days.' : 'No active Meta ads found.'}</p>}
@@ -380,7 +380,7 @@ function Versus({ ours, check }) {
 }
 
 function AdsPanel({ id, canManage }) {
-  const { data, error, reload } = useResource(`/api/competitors/${id}/ads`);
+  const { data, error, reload } = useResource(`/api/competitors/${id}/watch`);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const running = Boolean(data?.running);
@@ -395,7 +395,7 @@ function AdsPanel({ id, canManage }) {
     setBusy(true);
     setMessage('');
     try {
-      await api.post(`/api/competitors/${id}/ads/check`, {});
+      await api.post(`/api/competitors/${id}/watch/check`, {});
       reload({ silent: true });
     } catch (err) {
       setMessage(err.message);
@@ -408,7 +408,7 @@ function AdsPanel({ id, canManage }) {
   if (!data) return null;
   const latest = data.check;
   return (
-    <section className="ads-panel">
+    <section className="rival-panel">
       <header className="comp-head">
         <div>
           <h3>Their ads on Meta and Google</h3>

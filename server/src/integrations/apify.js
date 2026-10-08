@@ -52,10 +52,10 @@ export function googleSearch(token, queries) {
     countryCode: 'in',
     languageCode: 'en',
     maxPagesPerQuery: 1,
-    focusOnPaidAds: true,
+    focusOnPaidAds: false,
     mobileResults: false,
     saveHtml: false
-  }, { maxItems: queries.length, maxChargeUsd: 0.1 });
+  }, { maxItems: queries.length, maxChargeUsd: 0.1, timeoutSecs: 240 });
 }
 
 export function adLibraryUrl(keyword, country = 'IN') {

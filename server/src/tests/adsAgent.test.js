@@ -27,7 +27,7 @@ import { GOAL_LABELS, SECTORS, SECTOR_KEYS, catalogFor, productAsk, sectorFacts,
 import { competitorSchema, discoverSchema, imageUploadSchema, offeringSchema, organizationSchema } from '../validators/schemas.js';
 import { pageText, pricesIn, samePageLinks } from '../integrations/webPage.js';
 import { analysisFacts, analysisSchema } from '../services/competitorService.js';
-import { collectCandidates, domainOf, dueScopes, fallbackPlan, notCompetitor, placeParts, planFacts, planSchema, trackedMatch, verdictSchema, websiteFor } from '../services/competitorDiscovery.js';
+import { balancedTop, collectCandidates, domainOf, dueScopes, fallbackPlan, notCompetitor, placeParts, planFacts, planSchema, trackedMatch, verdictSchema, websiteFor } from '../services/competitorDiscovery.js';
 import { adLibraryUrl } from '../integrations/apify.js';
 import {
   MAX_AD_ITEMS, applyOfferings, cleanText, imageBytes, kindForSector, offeringFacts, offeringMenu, offeringPick, saveAnswer, slimOffering
@@ -984,4 +984,13 @@ test('a website is taken only when the result clearly belongs to that business',
   assert.equal(websiteFor('R-Tech Group', results), 'https://rtechgroup.in');
   assert.equal(websiteFor('Real Estate Investment', [{ url: 'https://realestateinvestment.example', title: 'Real estate investment' }]), '');
   assert.equal(websiteFor('Metro Homes', [{ url: 'https://other.example', title: 'Best flats' }]), '');
+});
+test('Google and Maps finds are not crowded out by Meta advertisers', () => {
+  const row = (key, type, score) => ({ key, score, sources: [{ type }] });
+  const meta = Array.from({ length: 20 }, (_, i) => row(`m${i}`, 'meta_ad', 30 - i));
+  const rows = [...meta, row('g1', 'google_search', 3), row('p1', 'maps', 3), row('p2', 'maps', 2)];
+  const top = balancedTop(rows, 15);
+  assert.equal(top.length, 15);
+  assert.ok(['g1', 'p1', 'p2'].every((key) => top.some((item) => item.key === key)));
+  assert.equal(top[0].key, 'm0');
 });

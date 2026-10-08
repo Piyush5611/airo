@@ -257,6 +257,20 @@ export function collectCandidates({ google = [], meta = [], maps = [], ownDomain
     .sort((a, b) => b.score - a.score);
 }
 
+// Meta advertisers score highest, so each source gets a few places before the rest is filled by score.
+export function balancedTop(candidates, size = CHECK_TOP) {
+  const per = Math.ceil(size / 4);
+  const picked = new Set();
+  for (const type of ['google_ad', 'google_search', 'maps', 'meta_ad']) {
+    candidates.filter((row) => !picked.has(row) && row.sources.some((source) => source.type === type)).slice(0, per).forEach((row) => picked.add(row));
+  }
+  for (const row of candidates) {
+    if (picked.size >= size) break;
+    picked.add(row);
+  }
+  return candidates.filter((row) => picked.has(row)).slice(0, size);
+}
+
 async function readHome(candidate) {
   if (!candidate.website) return null;
   const page = await fetchPublic(candidate.website, 768 * 1024).catch(() => ({ failed: true }));
@@ -388,12 +402,12 @@ async function discover(organizationId, offeringId, runId) {
 
   const skipKnown = project ? known.filter((row) => splitIds(row.offeringIds).includes(project.id)) : known;
   const ownDomains = [...active.map((item) => domainOf(item.website)), domainOf(profile?.website)];
-  const candidates = collectCandidates({
+  const candidates = balancedTop(collectCandidates({
     google, meta, maps, ownDomains,
     knownDomains: skipKnown.map((row) => domainOf(row.website)),
     knownNames: [...skipKnown.map((row) => row.name), profile?.businessName || ''],
     orgName: org?.name
-  }).slice(0, CHECK_TOP);
+  }));
 
   const own = new Set(ownDomains.filter(Boolean));
   const missing = candidates.filter((row) => !row.website).slice(0, LOOKUP_MAX);

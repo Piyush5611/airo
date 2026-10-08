@@ -603,7 +603,11 @@ export function Competitors() {
               <div className="metric"><span>High threat</span><strong>{num(high)}</strong><em>Same market, similar or better deal</em></div>
             </div>
             {editing !== null ? <CompetitorForm key={editing?.id || `new-${scope}`} item={editing || null} projects={projects} scope={scope} onDone={done} onCancel={() => setEditing(null)} /> : null}
-            <Suggestions key={scope} canManage={canManage} project={project} onAdded={(competitorId) => { refresh(); open(competitorId); }} />
+            <Suggestions key={scope} canManage={canManage} project={project} onAdded={(competitorId) => {
+              refresh();
+              open(competitorId);
+              setTimeout(() => document.querySelector('.comp-layout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 600);
+            }} />
             {note ? <p className="quiet">{note}</p> : null}
             {items.length ? (
               <div className="comp-layout">

@@ -195,6 +195,14 @@ export function latestInsight(organizationId, competitorId, kind) {
   );
 }
 
+export function insightById(organizationId, id, kind) {
+  return one(
+    `SELECT id, competitor_id AS competitorId, payload, model, version, created_at AS createdAt FROM competitor_insights
+     WHERE organization_id = ? AND id = ? AND kind = ?`,
+    [organizationId, id, kind]
+  );
+}
+
 export function addInsight(organizationId, { competitorId, kind, inputHash, payload, model, version }) {
   return insert(
     `INSERT INTO competitor_insights (organization_id, competitor_id, kind, input_hash, payload, model, version) VALUES (?, ?, ?, ?, ?, ?, ?)`,

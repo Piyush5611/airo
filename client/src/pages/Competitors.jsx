@@ -5,13 +5,13 @@ import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { inr, num, when } from '../format.js';
 import { Page, State } from '../ui.jsx';
-import { AdInsights, AdLibrary, AdSnapshot, CompetitorStrategy, IntelOverview, MarketGaps, StepGuide, TypeBadge } from './CompetitorIntel.jsx';
+import { AdIdeas, AdInsights, AdLibrary, AdSnapshot, CompetitorStrategy, IntelOverview, MarketGaps, StepGuide, TypeBadge } from './CompetitorIntel.jsx';
 
 const EMPTY = { name: '', website: '', facebook: '', instagram: '', city: '', notes: '', status: 'active', competitorType: '' };
-const VIEWS = [['list', 'Competitors'], ['ads', 'Their ads'], ['overview', 'Market overview'], ['gaps', 'Opportunities']];
+const VIEWS = [['list', 'Competitors'], ['ads', 'Their ads'], ['overview', 'Market overview'], ['gaps', 'Opportunities'], ['ideas', 'Ads for you']];
 const THREAT = { high: ['bad', 'High threat'], medium: ['warn', 'Medium threat'], low: ['good', 'Low threat'], unknown: ['', 'Threat unclear'] };
 const VERDICT = { we_lead: ['good', 'We lead'], they_lead: ['bad', 'They lead'], even: ['info', 'Even'], unclear: ['', 'Unclear'] };
-const TABS = [['summary', 'Summary'], ['website', 'Website & offers'], ['compare', 'Compare with us'], ['ads', 'Their ads'], ['say', 'What their ads say'], ['strategy', 'How to stand apart'], ['more', 'Search & sources']];
+const TABS = [['summary', 'Summary'], ['website', 'Website & offers'], ['compare', 'Compare with us'], ['ads', 'Their ads'], ['say', 'What their ads say'], ['strategy', 'How to stand apart'], ['ideas', 'Ads against them'], ['more', 'Search & sources']];
 const TAB_HINT = {
   summary: 'The short version: their ads, what their website pushes, and what you can do.',
   website: 'What they sell, prices and offers, read from their public website.',
@@ -19,13 +19,15 @@ const TAB_HINT = {
   ads: 'Their live ads on Meta and Google, from the public ad libraries. Press Check ads to read them again.',
   say: 'AI reads the text of each ad: message, topics, offers, buttons and how it changed over time.',
   strategy: 'AI ideas to stand apart from them. It never copies their wording, creatives or claims.',
+  ideas: 'Ready ads and moves AIRO thinks are right against this competitor, from their website and their ads.',
   more: 'Monthly Google searches linked to them, and the website pages AIRO read.'
 };
 const VIEW_HINT = {
   list: 'Everyone you track. Open one to see their website, their ads and ideas against them.',
   ads: 'Every ad of every competitor in one place. Filter, then open an ad to see the AI reading and public signals.',
   overview: 'The whole market at a glance: who advertises, where, and which topics, offers and buttons are common.',
-  gaps: 'What competitors are not doing, and an AI strategy to stand apart. Observations, not predictions.'
+  gaps: 'What competitors are not doing, and an AI strategy to stand apart. Observations, not predictions.',
+  ideas: 'Ready Meta and Google ads, plus the moves AIRO thinks are right, written against all your competitors at once.'
 };
 
 function host(url) {
@@ -714,6 +716,7 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
           {tab === 'ads' ? <AdsPanel key={data.id} id={data.id} canManage={canManage} /> : null}
           {tab === 'say' ? <AdInsights id={data.id} onOpenAds={() => setTab('ads')} /> : null}
           {tab === 'strategy' ? <CompetitorStrategy id={data.id} canManage={canManage} onOpenAds={() => setTab('ads')} /> : null}
+          {tab === 'ideas' ? <AdIdeas key={data.id} competitorId={data.id} canManage={canManage} /> : null}
           {tab === 'more' ? (report ? (
             <div className="stack">
               <h3>Search demand</h3>
@@ -857,6 +860,7 @@ export function Competitors() {
             {view === 'overview' ? <IntelOverview canManage={canManage} onOpenCompetitor={(competitorId) => navigate(`/app/growth/competitors/${competitorId}`)} /> : null}
             {view === 'ads' ? <AdLibrary competitors={all.filter((row) => row.status === 'active')} /> : null}
             {view === 'gaps' ? <MarketGaps canManage={canManage} /> : null}
+            {view === 'ideas' ? <AdIdeas canManage={canManage} /> : null}
             {view !== 'list' ? null : (<>
             {activeProjects.length || project ? (
               <div className="chip-tabs comp-scope" role="tablist" aria-label="Competitors for">

@@ -1183,6 +1183,20 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
 .intel-snapshot span { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 .intel-snapshot strong { font-size: 14px; font-weight: 600; }
 .intel-snapshot > .btn { align-self: center; justify-self: start; }
+.intel-verdict { display: grid; gap: 6px; justify-items: start; padding: 14px; border-left: 4px solid var(--accent); border-radius: 12px; background: #f5f4ff; }
+.intel-verdict span { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.intel-verdict p { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.idea-moves { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
+.idea-moves p { margin: 2px 0; font-size: 13px; }
+.idea-moves small { color: var(--muted); font-size: 12px; }
+.idea-ads { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.idea-ad { display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.idea-ad p { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-line; }
+.idea-ad strong { font-size: 14px; }
+.idea-ad small { color: var(--muted); font-size: 12px; }
+.idea-ad .badge { justify-self: start; }
+.idea-draft { display: inline-grid; gap: 4px; justify-items: end; }
+.idea-draft .error-text { color: var(--bad, #b42318); font-size: 12px; max-width: 320px; text-align: right; }
 @media (max-width: 900px) {
   .intel-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

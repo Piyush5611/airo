@@ -2,6 +2,14 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-09 (Ads written against competitors)
+
+- **Change:** New `generateAdIdeas` in `competitorIntel.js`. From one competitor (website report plus classified public ads) or all of them (market summary plus up to 5 website reports), plus the earlier stand-apart strategy and the owner's profile and Products & Projects, the model returns a verdict, 2-6 suggestions with the observed fact behind each, 2-3 Meta ad variants, one Google responsive search ad and things to avoid. `adIdeasSchemaFor` keeps the copy inside the Launch limits and rejects copy that names a tracked competitor, uses exclamation marks or ALL CAPS words. Same input reuses the saved result; a new run is limited to one a minute per organization.
+- **Change:** Routes `GET/POST /api/competitors/intelligence/ad-ideas` and `GET/POST /api/competitors/:id/ad-ideas` (view `campaigns.view`, make `campaigns.update`).
+- **Change:** `POST /api/ads-agent/launches` accepts `ideaId`. The ad copy then comes from the saved ideas without a second model call, and `strategyId` may be left out to use the latest approved strategy for budget, cities and audience. The draft is still created paused and published only from Launch.
+- **Change (client):** Competitors has an "Ads for you" tab and each competitor an "Ads against them" tab, with Make ads, the verdict, suggestions, ad cards and "Use for Meta/Google in Launch".
+- **Migration/API impact:** Run `npm run migrate` (`034_competitor_ad_ideas.sql` adds `ad_ideas` to `competitor_insights.kind`).
+
 ### 2026-10-09 (Competitors page reorganised)
 
 - **Change (client):** The Competitors page shows a four-step guide (add competitors, check their ads, AI reads the ads, get ideas) with live progress, and tabs Competitors, Their ads, Market overview, Opportunities, each with a one-line explanation. The competitor detail has one tab set: Summary, Website & offers, Compare with us, Their ads, What their ads say, How to stand apart, Search & sources. AIRO suggestions moved below the list.

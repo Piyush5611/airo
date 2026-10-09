@@ -205,6 +205,14 @@ export function approvedStrategy(organizationId, id) {
   );
 }
 
+export function latestApprovedStrategy(organizationId) {
+  return one(
+    `SELECT id, version, status, profile_snapshot AS profileSnapshot, strategy
+     FROM ad_strategies WHERE organization_id = ? AND status = 'approved' ORDER BY id DESC LIMIT 1`,
+    [organizationId]
+  );
+}
+
 export function spendNow(organizationId) {
   return one(
     `SELECT COALESCE(SUM(CASE WHEN metric_date = CURDATE() THEN spend END), 0) AS spendToday,

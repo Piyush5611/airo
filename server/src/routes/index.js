@@ -205,6 +205,12 @@ client.post('/competitors/intelligence/analyze', requirePermission('campaigns.up
 client.post('/competitors/intelligence/strategy', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
   ok(res, await compIntel.generateStrategy(req.auth, req, 0));
 }));
+client.get('/competitors/intelligence/ad-ideas', requirePermission('campaigns.view'), asyncHandler(async (req, res) => {
+  ok(res, await compIntel.latestAdIdeas(req.auth, 0));
+}));
+client.post('/competitors/intelligence/ad-ideas', requirePermission('campaigns.update'), asyncHandler(async (req, res) => {
+  ok(res, await compIntel.generateAdIdeas(req.auth, req, 0));
+}));
 client.get(['/competitors/ads/:id', '/competitors/creatives/:id'], requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await compIntel.adDetail(req.auth, req.params.id));
 }));
@@ -213,6 +219,12 @@ client.get('/competitors/:id/insights', requirePermission('campaigns.view'), val
 }));
 client.post('/competitors/:id/strategy', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
   ok(res, await compIntel.generateStrategy(req.auth, req, req.params.id));
+}));
+client.get('/competitors/:id/ad-ideas', requirePermission('campaigns.view'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await compIntel.latestAdIdeas(req.auth, req.params.id));
+}));
+client.post('/competitors/:id/ad-ideas', requirePermission('campaigns.update'), validate(schemas.idParams), asyncHandler(async (req, res) => {
+  ok(res, await compIntel.generateAdIdeas(req.auth, req, req.params.id));
 }));
 client.post('/competitors/:id/verify', requirePermission('campaigns.update'), validate(schemas.idParams.merge(schemas.competitorVerifySchema)), asyncHandler(async (req, res) => {
   ok(res, await compIntel.setCompetitorVerified(req.auth, req, req.params.id, req.body.verified));

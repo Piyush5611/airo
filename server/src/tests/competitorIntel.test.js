@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  COPY_RULE, NOT_AVAILABLE, adAnalysisSchema, competitorSummary, confidenceFor, contentHash, creativeFormat, discoveryFields,
+  COPY_RULE, NOT_AVAILABLE, adAnalysisSchema, adIdeasSchemaFor, competitorSummary, confidenceFor, contentHash, creativeFormat, discoveryFields,
   marketGaps, normalizeAd, publicSignals, strategySchema, timeline
 } from '../services/competitorIntel.js';
 import { duplicateOf, siteKey } from '../services/competitorService.js';
+import { googleCreativeSchema, metaCreativeSchema } from '../domain/adsAgent.js';
 import { competitorAdFilterSchema, competitorSchema, competitorVerifySchema } from '../validators/schemas.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -178,8 +179,8 @@ test('every competitor intelligence query is scoped to the organization', () => 
 
 test('competitor intelligence routes require permissions', () => {
   const source = fs.readFileSync(path.join(here, '../routes/index.js'), 'utf8');
-  const lines = source.split('\n').filter((line) => /client\.(get|post)\(\[?'\/competitors\/(intelligence|ads\/|:id\/(insights|strategy|verify|ads))/.test(line));
-  assert.equal(lines.length, 10);
+  const lines = source.split('\n').filter((line) => /client\.(get|post)\(\[?'\/competitors\/(intelligence|ads\/|:id\/(insights|strategy|verify|ads|ad-ideas))/.test(line));
+  assert.equal(lines.length, 14);
   for (const line of lines) assert.match(line, /requirePermission\('campaigns\.(view|update)'\)/);
   for (const line of lines.filter((item) => item.includes('client.post'))) assert.match(line, /campaigns\.update/);
 });
@@ -198,6 +199,50 @@ test('publicSignals uses only public dates, versions and placements', () => {
   assert.equal(stopped.longRunning, false);
   assert.equal(stopped.sameCopyAds, 1);
   assert.equal(publicSignals({ status: 'active', firstShown: null }, undefined, now).days, null);
+});
+
+function ideas(overrides = {}) {
+  return {
+    verdict: 'Most rivals push discounts. Lead with the location and the payment plan you really offer.',
+    suggestions: [
+      { title: 'Lead with location', why: 'Few rivals talk about the area.', basedOn: '1 of 8 ads mention location' },
+      { title: 'Use a site visit button', why: 'Rivals mostly say Learn more.', basedOn: '' }
+    ],
+    meta: { variants: [
+      { angle: 'Location', headline: 'Homes 5 minutes from the metro', primaryText: 'Ready to move 2 and 3 BHK homes near the metro. Book a site visit this weekend.', why: 'Rivals talk about price.' },
+      { angle: 'Payment plan', headline: 'Pay in easy stages', primaryText: 'A payment plan that follows construction. Ask us for the full schedule today.', why: 'Rivals do not explain plans.' }
+    ] },
+    google: {
+      headlines: ['Homes Near The Metro', '2 And 3 BHK Homes', 'Book A Site Visit', 'Ready To Move Homes', 'Payment Plan Available', 'Visit Our Sample Flat', 'Homes In Your Budget', 'Talk To Our Team'],
+      descriptions: ['Ready to move 2 and 3 BHK homes near the metro. Book a visit.', 'A payment plan that follows construction. Ask for the schedule.'],
+      why: 'Rivals bid on price words.'
+    },
+    avoid: ['Do not match the same flat discount everyone runs.'],
+    confidence: 'medium',
+    ...overrides
+  };
+}
+
+test('ad ideas schema accepts clean copy that fits the launch limits', () => {
+  const parsed = adIdeasSchemaFor(['Rival Homes']).safeParse(ideas());
+  assert.equal(parsed.success, true);
+  assert.equal(metaCreativeSchema.safeParse({ variants: parsed.data.meta.variants.map(({ headline, primaryText }) => ({ headline, primaryText })) }).success, true);
+  assert.equal(googleCreativeSchema.safeParse({ headlines: parsed.data.google.headlines, descriptions: parsed.data.google.descriptions }).success, true);
+});
+
+test('ad ideas schema rejects competitor names, shouting and long copy', () => {
+  const named = ideas();
+  named.meta.variants[0].primaryText = 'Better than Rival Homes in every way. Book a site visit this weekend.';
+  assert.equal(adIdeasSchemaFor(['Rival Homes']).safeParse(named).success, false);
+  const loud = ideas();
+  loud.google.headlines[0] = 'BEST Homes Here!';
+  assert.equal(adIdeasSchemaFor([]).safeParse(loud).success, false);
+  const long = ideas();
+  long.meta.variants[1].headline = 'A headline that is much longer than forty characters';
+  assert.equal(adIdeasSchemaFor([]).safeParse(long).success, false);
+  const repeated = ideas();
+  repeated.google.headlines[1] = 'homes near the metro';
+  assert.equal(adIdeasSchemaFor([]).safeParse(repeated).success, false);
 });
 
 test('the copy rule and missing-metric marker are fixed strings', () => {

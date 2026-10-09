@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { useResource } from '../data.js';
 import { num, when } from '../format.js';
@@ -524,6 +525,118 @@ export function CompetitorStrategy({ id, canManage, onOpenAds }) {
           empty={data.summary.analysed ? 'No strategy yet. Press Make strategy.' : 'Their ads are not read by AI yet. Press Analyse ads now on Market overview, or wait up to an hour.'}
         />
       ) : <NoAdsYet onOpenAds={onOpenAds} />) : null}
+    </State>
+  );
+}
+
+// AIRO's own ads and moves, written against what competitors show publicly.
+export function AdIdeas({ competitorId = 0, canManage }) {
+  const base = competitorId ? `/api/competitors/${competitorId}/ad-ideas` : '/api/competitors/intelligence/ad-ideas';
+  const { data, loading, error, reload } = useResource(base);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [drafted, setDrafted] = useState({});
+  const ideas = data?.ideas;
+  const idea = ideas?.payload;
+
+  async function generate() {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await api.post(base, {});
+      setMessage(result.reused ? 'Nothing new about the competitors since last time, so the saved ads are shown.' : '');
+      setDrafted({});
+      reload({ silent: true });
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function draft(platform) {
+    setDrafted((current) => ({ ...current, [platform]: { busy: true } }));
+    try {
+      await api.post('/api/ads-agent/launches', { platform, ideaId: Number(ideas.id) });
+      setDrafted((current) => ({ ...current, [platform]: { done: true } }));
+    } catch (err) {
+      setDrafted((current) => ({ ...current, [platform]: { error: err.message } }));
+    }
+  }
+
+  function DraftButton({ platform }) {
+    const state = drafted[platform] || {};
+    if (!canManage) return null;
+    if (state.done) return <span className="quiet">Saved as a draft. <Link to="/app/growth/ads-agent?section=Launch">Open Launch</Link></span>;
+    return (
+      <span className="idea-draft">
+        <button className="btn" type="button" disabled={state.busy} onClick={() => draft(platform)}>{state.busy ? 'Saving...' : `Use for ${PLATFORM[platform]} in Launch`}</button>
+        {state.error ? <small className="error-text">{state.error}</small> : null}
+      </span>
+    );
+  }
+
+  return (
+    <State loading={loading} error={error} onRetry={reload}>
+      {data && !data.ready ? <p className="quiet">{data.note}</p> : (
+        <div className="comp-block">
+          <header className="comp-head">
+            <div>
+              <h3>Ads AIRO suggests for you</h3>
+              <p className="quiet">
+                AIRO reads {competitorId ? 'this competitor\'s' : 'your competitors\''} website report and public ads, then writes ads that stand apart. It never names them or copies their wording, creatives, trademarks or claims. Claims come only from your business profile and Products &amp; Projects.
+                {ideas?.createdAt ? ` Made ${when(ideas.createdAt)}${ideas.model ? ` by ${ideas.model}` : ''}.` : ''}
+              </p>
+            </div>
+            {canManage ? <button className="btn-primary" type="button" onClick={generate} disabled={busy}>{busy ? 'Writing...' : idea ? 'Make again' : 'Make ads'}</button> : null}
+          </header>
+          {message ? <p className="quiet">{message}</p> : null}
+          {idea ? (
+            <div className="stack">
+              <div className="intel-verdict">
+                <span>What AIRO thinks is right</span>
+                <p>{idea.verdict}</p>
+                <ConfidenceBadge value={idea.confidence} />
+              </div>
+              <div className="comp-block">
+                <h3>Suggestions</h3>
+                <ol className="idea-moves">
+                  {idea.suggestions.map((item, index) => (
+                    <li key={`${index}-${item.title}`}>
+                      <strong>{item.title}</strong>
+                      <p>{item.why}</p>
+                      {item.basedOn ? <small>Seen: {item.basedOn}</small> : null}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+              <div className="comp-block">
+                <header className="comp-head"><h3>Meta ads (Facebook and Instagram)</h3><DraftButton platform="meta" /></header>
+                <div className="idea-ads">
+                  {idea.meta.variants.map((item, index) => (
+                    <article className="idea-ad" key={`${index}-${item.headline}`}>
+                      <span className="badge info">Ad {String.fromCharCode(65 + index)} · {item.angle}</span>
+                      <p>{item.primaryText}</p>
+                      <strong>{item.headline}</strong>
+                      <small>Why: {item.why}</small>
+                    </article>
+                  ))}
+                </div>
+              </div>
+              <div className="comp-block">
+                <header className="comp-head"><h3>Google search ad</h3><DraftButton platform="google" /></header>
+                <div className="comp-two">
+                  <Bullets title="Headlines" items={idea.google.headlines} />
+                  <Bullets title="Descriptions" items={idea.google.descriptions} />
+                </div>
+                <p className="quiet">Why: {idea.google.why}</p>
+              </div>
+              <Bullets title="Avoid" items={idea.avoid} />
+              <p className="quiet comp-note">A draft takes the budget, cities and audience from your approved AI Ads Agent strategy. Nothing goes live from here: in Launch you check it, create it paused, and publish only when you choose.</p>
+            </div>
+          ) : <p className="quiet">No ads yet. Press Make ads. It works once a competitor website is analysed or their ads are checked.</p>}
+        </div>
+      )}
     </State>
   );
 }

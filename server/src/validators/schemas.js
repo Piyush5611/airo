@@ -62,9 +62,10 @@ export const adsAgentSettingsSchema = body({
 export const businessProfileBody = body(businessProfileSchema.shape);
 
 export const launchCreateSchema = body({
-  strategyId: z.number().int().positive(),
+  strategyId: z.number().int().positive().optional(),
   platform: z.enum(['meta', 'google']),
-  connectionId: z.number().int().positive().optional()
+  connectionId: z.number().int().positive().optional(),
+  ideaId: z.number().int().positive().optional()
 });
 
 export const launchEditBody = idParams.merge(body(launchEditSchema.shape));

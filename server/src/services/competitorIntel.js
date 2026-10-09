@@ -3,6 +3,7 @@ import { z } from 'zod';
 import * as intelRepo from '../repositories/competitorIntelRepo.js';
 import * as repo from '../repositories/competitorRepo.js';
 import * as offeringRepo from '../repositories/offeringRepo.js';
+import { claimJob } from '../repositories/adsAgentRepo.js';
 import { catalogFacts, structuredLlm } from './llmService.js';
 import { businessProfile } from './adsAgent/chatPlanner.js';
 import { domainOf } from './competitorDiscovery.js';
@@ -12,6 +13,7 @@ import { ApiError } from '../utils/errors.js';
 export const NOT_AVAILABLE = 'NOT_AVAILABLE';
 export const ANALYSIS_VERSION = 1;
 const STRATEGY_VERSION = 1;
+const IDEAS_VERSION = 1;
 const BATCH = 15;
 const ORG_LIMIT_PER_RUN = 45;
 const PURPOSES = ['competitors', 'ads', 'assistant', 'whatsapp'];
@@ -91,6 +93,63 @@ export const strategySchema = z.object({
 }).refine((value) => value.advertising.length > 5, { message: 'advertising is required', path: ['advertising'] });
 
 export const COPY_RULE = 'Use competitor intelligence to understand the market, but do not copy competitor wording, creatives, trademarks, or claims.';
+
+const copy = (max, min) => z.string().trim().min(min).max(max);
+const short = (max) => z.preprocess((value) => (value == null ? '' : String(value)), z.string().trim().max(max));
+const noBangOrCaps = (value) => !/[!]/.test(value) && !/\b[A-Z]{5,}\b/.test(value);
+
+// Ad copy goes straight into a launch draft, so the limits match metaCreativeSchema and googleCreativeSchema.
+export function adIdeasSchemaFor(competitorNames = []) {
+  const names = competitorNames.map((name) => String(name || '').trim().toLowerCase()).filter((name) => name.length >= 3);
+  const mentions = (value) => names.find((name) => value.toLowerCase().includes(name));
+  return z.object({
+    verdict: copy(600, 20),
+    suggestions: z.array(z.object({ title: copy(120, 3), why: copy(360, 10), basedOn: short(240) })).min(2).max(6),
+    meta: z.object({
+      variants: z.array(z.object({
+        angle: copy(120, 3),
+        headline: copy(40, 5),
+        primaryText: copy(300, 20),
+        why: copy(260, 10)
+      })).min(2).max(3)
+    }),
+    google: z.object({
+      headlines: z.array(copy(30, 3)).min(8).max(15),
+      descriptions: z.array(copy(90, 10)).min(2).max(4),
+      why: copy(260, 10)
+    }),
+    avoid: z.array(copy(220, 5)).max(5).default([]),
+    confidence: pick(CONFIDENCE, 'low')
+  }).superRefine((value, ctx) => {
+    if (new Set(value.google.headlines.map((item) => item.toLowerCase())).size !== value.google.headlines.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['google', 'headlines'], message: 'Headlines must all be different.' });
+    }
+    const copyLines = [
+      ...value.meta.variants.flatMap((item) => [['meta', item.headline], ['meta', item.primaryText]]),
+      ...value.google.headlines.map((item) => ['google', item]),
+      ...value.google.descriptions.map((item) => ['google', item])
+    ];
+    for (const [platform, line] of copyLines) {
+      const name = mentions(line);
+      if (name) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [platform], message: `Ad copy must not name a competitor ("${name}").` });
+      if (!noBangOrCaps(line)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [platform], message: 'No exclamation marks or ALL CAPS words in ad copy.' });
+    }
+  });
+}
+
+const IDEAS_BRIEF = `You are AIRO's ad strategist for an Indian business. You get what competitors show publicly (their website reports and their observed public ads, already classified) and the owner's own business facts.
+Decide what is right for the owner, then write ads that stand apart from the competitors.
+${COPY_RULE}
+- verdict: in 2 to 4 plain sentences, what AIRO thinks the owner should do against these competitors and why.
+- suggestions: 2 to 6 concrete moves. why = the reasoning. basedOn = the observed competitor fact it comes from (for example "4 of 6 of their ads push EMI"), or empty.
+- meta.variants: 2 or 3 Meta image ads, each a different angle. headline under 40 characters, primaryText under 300 characters, why = how it differs from what competitors say.
+- google: one responsive search ad. 8 to 15 headlines of 30 characters or fewer, all different. 2 to 4 descriptions of 90 characters or fewer. why = how it differs.
+- avoid: up to 5 things the owner should not do (for example fighting on the same discount everyone runs).
+- Claims in the ads must come only from the owner's facts. Never invent prices, offers, discounts, awards, dates, rankings or guarantees.
+- Never name a competitor in ad copy, never compare by name, never use their trademarks or slogans.
+- No ALL CAPS words, no exclamation marks, no emojis. Write ads in the owner's ad language, English if none is given.
+- Spend, reach, targeting and results of competitors are not public. Never state or guess them.
+- confidence: high only with website reports and many analysed ads from several competitors, otherwise medium or low.`;
 
 const ANALYSIS_BRIEF = `You are AIRO's ad analyst. You classify competitor ads that are public in the Meta Ad Library or the Google Ads Transparency Center.
 Use only the ad text, headline, button and landing page given. You cannot see the image or video, so do not describe visuals you were not told about.
@@ -603,6 +662,97 @@ export async function generateStrategy(auth, req, competitorId = 0) {
   const id = await intelRepo.addInsight(auth.organizationId, { competitorId, kind: 'strategy', inputHash, payload: data, model, version: STRATEGY_VERSION });
   await recordAudit(req, { action: 'competitor.strategy_generated', resource: 'competitor', resourceId: competitorId || null, metadata: { model } });
   return { id, payload: data, model, version: STRATEGY_VERSION, current: true, reused: false, name };
+}
+
+function reportFacts(name, analysis) {
+  if (!analysis) return '';
+  const list = (rows, max = 5) => (rows || []).slice(0, max).join(' | ');
+  const offers = (analysis.offerings || []).slice(0, 6)
+    .map((row) => [row.name, row.price, row.offer].filter(Boolean).join(' - ')).filter(Boolean).join(' | ');
+  return [
+    `${name} website report: ${analysis.summary || ''}`,
+    analysis.positioning ? `Their positioning: ${analysis.positioning}` : '',
+    analysis.priceRange ? `Their price range: ${analysis.priceRange}` : '',
+    offers ? `Their offerings: ${offers}` : '',
+    analysis.messaging?.length ? `Their website messages: ${list(analysis.messaging)}` : '',
+    analysis.strengths?.length ? `Their strengths: ${list(analysis.strengths)}` : '',
+    analysis.weaknesses?.length ? `Their weak spots: ${list(analysis.weaknesses)}` : '',
+    analysis.gaps?.length ? `Gaps seen: ${list(analysis.gaps)}` : ''
+  ].filter(Boolean).join('\n');
+}
+
+async function ideaFacts(organizationId, competitorId) {
+  const parts = [];
+  let names;
+  let label;
+  if (competitorId) {
+    const found = await loadCompetitor(organizationId, competitorId);
+    label = found.name;
+    names = [found.name];
+    const ads = (await intelRepo.listAds(organizationId, { competitorId }, 500)).map(adRow);
+    const summary = competitorSummary(ads);
+    if (summary.analysed) parts.push(summaryFacts(found.name, summary, timeline(ads, await intelRepo.competitorSnapshots(organizationId, competitorId)).months));
+    const report = await repo.latestReport(organizationId, competitorId);
+    if (report?.status === 'ready') parts.push(reportFacts(found.name, parseJson(report.analysis, null)));
+  } else {
+    label = 'All tracked competitors';
+    names = (await intelRepo.competitorRows(organizationId)).map((row) => row.name);
+    const market = marketGaps((await intelRepo.marketAds(organizationId)).map(adRow));
+    if (market.analysedAds) {
+      const list = (rows) => rows.slice(0, 8).map((row) => `${row.label} ${row.share}%`).join(', ') || 'none';
+      parts.push([
+        `Market: ${market.analysedCompetitors} competitors, ${market.analysedAds} analysed active ads (confidence ${market.confidence}).`,
+        `Themes: ${list(market.distributions.themes)}. Offers: ${list(market.distributions.offers)}. Buttons: ${list(market.distributions.ctas)}. Formats: ${list(market.distributions.formats)}. Styles: ${list(market.distributions.styles)}.`,
+        market.gaps.length ? `Observed gaps: ${market.gaps.map((gap) => gap.text).join(' ')}` : 'No clear gaps observed.'
+      ].join('\n'));
+    }
+    for (const row of await repo.readyReports(organizationId, 5)) parts.push(reportFacts(row.name, parseJson(row.analysis, null)));
+  }
+  const evidence = parts.filter(Boolean);
+  if (!evidence.length) {
+    throw new ApiError(422, competitorId
+      ? 'Nothing to work from yet. Press Analyse website or Check ads for this competitor first.'
+      : 'Nothing to work from yet. Analyse a competitor website or check competitor ads first.', 'validation_error');
+  }
+  const strategy = await intelRepo.latestInsight(organizationId, competitorId, 'strategy');
+  const ideas = parseJson(strategy?.payload, null);
+  if (ideas) evidence.push(`AIRO's earlier stand-apart ideas: whitespace ${ideas.whitespace.join(' | ')}. Hooks ${ideas.hooks.join(' | ')}.`);
+  return { label, names, competitorFacts: evidence.join('\n\n') };
+}
+
+export async function generateAdIdeas(auth, req, competitorId = 0) {
+  const { label, names, competitorFacts } = await ideaFacts(auth.organizationId, competitorId);
+  const facts = `${competitorFacts}\n\n${await ourFacts(auth.organizationId)}`;
+  const inputHash = sha(facts);
+  const last = await intelRepo.latestInsight(auth.organizationId, competitorId, 'ad_ideas');
+  if (last && last.inputHash === inputHash && Number(last.version) >= IDEAS_VERSION) {
+    return { ...last, payload: parseJson(last.payload, null), current: true, reused: true, name: label };
+  }
+  if (!(await claimJob(`competitors.ideas.org.${auth.organizationId}`, 1))) {
+    throw new ApiError(429, 'Ad ideas were requested less than a minute ago. Try again shortly.', 'rate_limited');
+  }
+  const { data, model } = await structuredLlm({
+    organizationId: auth.organizationId,
+    schema: adIdeasSchemaFor(names),
+    system: IDEAS_BRIEF,
+    facts,
+    task: 'Reply as JSON with: verdict, suggestions[{title, why, basedOn}], meta{variants[{angle, headline, primaryText, why}]}, google{headlines[], descriptions[], why}, avoid[], confidence.',
+    maxTokens: 3500,
+    purposes: ['ads', ...PURPOSES.filter((item) => item !== 'ads')]
+  });
+  const id = await intelRepo.addInsight(auth.organizationId, { competitorId, kind: 'ad_ideas', inputHash, payload: data, model, version: IDEAS_VERSION });
+  await recordAudit(req, { action: 'competitor.ad_ideas_generated', resource: 'competitor', resourceId: competitorId || null, metadata: { model } });
+  return { id, payload: data, model, version: IDEAS_VERSION, current: true, reused: false, name: label, createdAt: new Date().toISOString() };
+}
+
+export async function latestAdIdeas(auth, competitorId = 0) {
+  try {
+    const row = await intelRepo.latestInsight(auth.organizationId, competitorId, 'ad_ideas');
+    return { ready: true, ideas: row ? { ...row, payload: parseJson(row.payload, null) } : null };
+  } catch (error) {
+    if (missingTable(error)) return { ready: false, ideas: null, note: 'Run npm run migrate to set up competitor intelligence.' };
+    throw error;
+  }
 }
 
 export async function overview(auth) {

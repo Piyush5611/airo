@@ -6,6 +6,7 @@ import { ApiError } from '../../utils/errors.js';
 import { recordAudit } from '../auditService.js';
 import { structuredLlm } from '../llmService.js';
 import { competitorContext } from '../competitorIntel.js';
+import * as intelRepo from '../../repositories/competitorIntelRepo.js';
 import { checkLaunch, normalizeSettings } from './guardrails.js';
 import { adConnections } from './metricsSync.js';
 
@@ -119,28 +120,51 @@ export async function listLaunches(auth) {
   };
 }
 
+async function ideaCreative(organizationId, ideaId, platform) {
+  const idea = await intelRepo.insightById(organizationId, ideaId, 'ad_ideas');
+  const payload = parseJson(idea?.payload);
+  if (!payload) throw new ApiError(404, 'These competitor ad ideas were not found. Make them again.', 'not_found');
+  const creative = platform === 'meta'
+    ? { variants: payload.meta.variants.map((item) => ({ headline: item.headline, primaryText: item.primaryText })) }
+    : { headlines: payload.google.headlines, descriptions: payload.google.descriptions, path1: '', path2: '' };
+  const checked = (platform === 'meta' ? metaCreativeSchema : googleCreativeSchema).safeParse(creative);
+  if (!checked.success) throw new ApiError(422, 'This ad idea does not fit the ad limits. Make the ideas again.', 'validation_error');
+  return { data: checked.data, model: idea.model };
+}
+
 export async function createLaunch(auth, req) {
-  const { strategyId, platform, connectionId } = req.body;
-  const row = await repo.approvedStrategy(auth.organizationId, strategyId);
-  if (!row) throw new ApiError(422, 'Approve a strategy before making ads from it.', 'validation_error');
+  const { strategyId, platform, connectionId, ideaId } = req.body;
+  const row = strategyId
+    ? await repo.approvedStrategy(auth.organizationId, strategyId)
+    : await repo.latestApprovedStrategy(auth.organizationId);
+  if (!row) {
+    throw new ApiError(422, strategyId
+      ? 'Approve a strategy before making ads from it.'
+      : 'Approve a strategy in AI Ads Agent first. AIRO takes the budget, cities and audience from it.', 'validation_error');
+  }
   const profile = parseJson(row.profileSnapshot);
   const strategy = parseJson(row.strategy);
   if (!strategy.platforms.some((item) => item.platform === platform)) {
-    throw new ApiError(422, `This strategy does not use ${PLATFORM_NAME[platform]}.`, 'validation_error');
+    throw new ApiError(422, `The approved strategy does not use ${PLATFORM_NAME[platform]}.`, 'validation_error');
   }
   const account = await accountFor(auth.organizationId, platform, connectionId);
-  if (!(await repo.claimJob(`ads.creative.org.${auth.organizationId}`, 1))) {
-    throw new ApiError(429, 'Ads were requested less than a minute ago. Try again shortly.', 'rate_limited');
+  let written;
+  if (ideaId) {
+    written = await ideaCreative(auth.organizationId, ideaId, platform);
+  } else {
+    if (!(await repo.claimJob(`ads.creative.org.${auth.organizationId}`, 1))) {
+      throw new ApiError(429, 'Ads were requested less than a minute ago. Try again shortly.', 'rate_limited');
+    }
+    written = await structuredLlm({
+      organizationId: auth.organizationId,
+      schema: platform === 'meta' ? metaCreativeSchema : googleCreativeSchema,
+      system: platform === 'meta' ? META_BRIEF : GOOGLE_BRIEF,
+      facts: [creativeFacts(profile, strategy, platform), await competitorContext(auth.organizationId)].filter(Boolean).join('\n'),
+      task: `Write the ${PLATFORM_NAME[platform]} ad copy as JSON.`
+    });
   }
-  const written = await structuredLlm({
-    organizationId: auth.organizationId,
-    schema: platform === 'meta' ? metaCreativeSchema : googleCreativeSchema,
-    system: platform === 'meta' ? META_BRIEF : GOOGLE_BRIEF,
-    facts: [creativeFacts(profile, strategy, platform), await competitorContext(auth.organizationId)].filter(Boolean).join('\n'),
-    task: `Write the ${PLATFORM_NAME[platform]} ad copy as JSON.`
-  });
   const daily = budgetPlan(profile, strategy)?.platforms.find((item) => item.platform === platform)?.daily || null;
-  const name = `${profile.businessName} · AIRO v${row.version}`.slice(0, 150);
+  const name = `${profile.businessName} · ${ideaId ? 'vs competitors' : `AIRO v${row.version}`}`.slice(0, 150);
   let settings;
   if (platform === 'meta') {
     const audience = strategy.audiences.find((item) => item.platform === 'meta');
@@ -185,7 +209,7 @@ export async function createLaunch(auth, req) {
     model: written.model,
     userId: auth.userId
   });
-  await recordAudit(req, { action: 'ads_agent.launch_drafted', resource: 'ad_launches', resourceId: id, metadata: { platform, strategyId: row.id } });
+  await recordAudit(req, { action: 'ads_agent.launch_drafted', resource: 'ad_launches', resourceId: id, metadata: { platform, strategyId: row.id, ideaId: ideaId || null } });
   return publicLaunch(await repo.launch(auth.organizationId, id));
 }
 

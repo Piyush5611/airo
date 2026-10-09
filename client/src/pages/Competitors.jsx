@@ -5,13 +5,28 @@ import { useAuth } from '../auth.jsx';
 import { useResource } from '../data.js';
 import { inr, num, when } from '../format.js';
 import { Page, State } from '../ui.jsx';
-import { AdLibrary, CompetitorInsights, IntelOverview, MarketGaps, TypeBadge } from './CompetitorIntel.jsx';
+import { AdInsights, AdLibrary, AdSnapshot, CompetitorStrategy, IntelOverview, MarketGaps, StepGuide, TypeBadge } from './CompetitorIntel.jsx';
 
 const EMPTY = { name: '', website: '', facebook: '', instagram: '', city: '', notes: '', status: 'active', competitorType: '' };
-const VIEWS = [['list', 'Competitors'], ['overview', 'Overview'], ['ads', 'Ads'], ['gaps', 'Market gaps']];
+const VIEWS = [['list', 'Competitors'], ['ads', 'Their ads'], ['overview', 'Market overview'], ['gaps', 'Opportunities']];
 const THREAT = { high: ['bad', 'High threat'], medium: ['warn', 'Medium threat'], low: ['good', 'Low threat'], unknown: ['', 'Threat unclear'] };
 const VERDICT = { we_lead: ['good', 'We lead'], they_lead: ['bad', 'They lead'], even: ['info', 'Even'], unclear: ['', 'Unclear'] };
-const TABS = [['overview', 'Overview'], ['offers', 'Website & offers'], ['compare', 'Compare with us'], ['keywords', 'Search demand'], ['sources', 'Sources']];
+const TABS = [['summary', 'Summary'], ['website', 'Website & offers'], ['compare', 'Compare with us'], ['ads', 'Their ads'], ['say', 'What their ads say'], ['strategy', 'How to stand apart'], ['more', 'Search & sources']];
+const TAB_HINT = {
+  summary: 'The short version: their ads, what their website pushes, and what you can do.',
+  website: 'What they sell, prices and offers, read from their public website.',
+  compare: 'Their products and prices next to yours, item by item.',
+  ads: 'Their live ads on Meta and Google, from the public ad libraries. Press Check ads to read them again.',
+  say: 'AI reads the text of each ad: message, topics, offers, buttons and how it changed over time.',
+  strategy: 'AI ideas to stand apart from them. It never copies their wording, creatives or claims.',
+  more: 'Monthly Google searches linked to them, and the website pages AIRO read.'
+};
+const VIEW_HINT = {
+  list: 'Everyone you track. Open one to see their website, their ads and ideas against them.',
+  ads: 'Every ad of every competitor in one place. Filter, then open an ad to see the AI reading and public signals.',
+  overview: 'The whole market at a glance: who advertises, where, and which topics, offers and buttons are common.',
+  gaps: 'What competitors are not doing, and an AI strategy to stand apart. Observations, not predictions.'
+};
 
 function host(url) {
   try {
@@ -591,7 +606,7 @@ function Suggestions({ canManage, project, onAdded }) {
 
 function Detail({ id, canManage, projects, onChanged, onEdit }) {
   const { data, loading, error, reload } = useResource(`/api/competitors/${id}`);
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState('summary');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const running = Boolean(data?.running);
@@ -648,6 +663,9 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
     }
   }
 
+  const report = data?.report?.status === 'ready' && data.report.analysis ? data.report : null;
+  const websiteStatus = data ? <WebsiteStatus data={data} running={running} canManage={canManage} busy={busy} onFind={findWebsite} /> : null;
+
   return (
     <State loading={loading} error={error} onRetry={reload}>
       {data ? (
@@ -675,18 +693,50 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
               {canManage ? <button className="btn" type="button" onClick={() => onEdit(data)}>Edit</button> : null}
               {canManage ? (
                 <button className="btn-primary" type="button" onClick={analyze} disabled={busy || running || !data.website}>
-                  {running ? 'Analysing...' : data.report ? 'Analyse again' : 'Analyse now'}
+                  {running ? 'Reading website...' : data.report ? 'Analyse website again' : 'Analyse website'}
                 </button>
               ) : null}
             </div>
           </header>
           {message ? <p className="quiet">{message}</p> : null}
-          <AdsPanel key={data.id} id={data.id} canManage={canManage} />
+          <div className="chip-tabs comp-tabs" role="tablist">
+            {TABS.map(([key, text]) => <button key={key} type="button" className={tab === key ? 'is-on' : ''} onClick={() => setTab(key)}>{text}</button>)}
+          </div>
+          <p className="quiet comp-note">{TAB_HINT[tab]}</p>
+          {tab === 'summary' ? (
+            <div className="stack">
+              <AdSnapshot id={data.id} onOpenAds={() => setTab('ads')} onOpenInsights={() => setTab('say')} />
+              {report ? <Overview analysis={report.analysis} /> : websiteStatus}
+            </div>
+          ) : null}
+          {tab === 'website' ? (report ? <Offers analysis={report.analysis} website={report.website} /> : websiteStatus) : null}
+          {tab === 'compare' ? (report ? <Compare analysis={report.analysis} /> : websiteStatus) : null}
+          {tab === 'ads' ? <AdsPanel key={data.id} id={data.id} canManage={canManage} /> : null}
+          {tab === 'say' ? <AdInsights id={data.id} onOpenAds={() => setTab('ads')} /> : null}
+          {tab === 'strategy' ? <CompetitorStrategy id={data.id} canManage={canManage} onOpenAds={() => setTab('ads')} /> : null}
+          {tab === 'more' ? (report ? (
+            <div className="stack">
+              <h3>Search demand</h3>
+              <Keywords keywords={report.keywords} notes={report.notes || []} />
+              <h3>Pages AIRO read</h3>
+              <Sources report={report} />
+            </div>
+          ) : websiteStatus) : null}
+          {report?.notes?.length && ['summary', 'website', 'compare'].includes(tab) ? <p className="quiet comp-note">{report.notes.join(' ')}</p> : null}
+        </section>
+      ) : null}
+    </State>
+  );
+}
+
+function WebsiteStatus({ data, running, canManage, busy, onFind }) {
+  return (
+    <>
           {!data.website ? (
             <div className="comp-failed">
               <strong>No website yet.</strong>
               <span>AIRO needs their website to make a report. It can look for it on Google by their name{data.city ? ` and ${data.city}` : ''}, or you can add it with Edit.</span>
-              {canManage ? <div><button className="btn-primary" type="button" onClick={findWebsite} disabled={busy}>{busy ? 'Looking...' : 'Find website'}</button></div> : null}
+              {canManage ? <div><button className="btn-primary" type="button" onClick={onFind} disabled={busy}>{busy ? 'Looking...' : 'Find website'}</button></div> : null}
             </div>
           ) : null}
           {running ? (
@@ -704,24 +754,13 @@ function Detail({ id, canManage, projects, onChanged, onEdit }) {
               <ul className="comp-list">{(data.report.notes || []).map((note) => <li key={note}>{note}</li>)}</ul>
             </div>
           ) : null}
-          {!running && !data.report && data.website ? <p className="quiet">Not analysed yet. Press Analyse now.</p> : null}
-          {data.report?.status === 'ready' && data.report.analysis ? (
-            <>
-              <div className="chip-tabs comp-tabs">
-                {TABS.map(([key, text]) => <button key={key} type="button" className={tab === key ? 'is-on' : ''} onClick={() => setTab(key)}>{text}</button>)}
-              </div>
-              {tab === 'overview' ? <Overview analysis={data.report.analysis} /> : null}
-              {tab === 'offers' ? <Offers analysis={data.report.analysis} website={data.report.website} /> : null}
-              {tab === 'compare' ? <Compare analysis={data.report.analysis} /> : null}
-              {tab === 'keywords' ? <Keywords keywords={data.report.keywords} notes={data.report.notes || []} /> : null}
-              {tab === 'sources' ? <Sources report={data.report} /> : null}
-              {data.report.notes?.length && tab !== 'keywords' ? <p className="quiet comp-note">{data.report.notes.join(' ')}</p> : null}
-            </>
+          {!running && !data.report && data.website ? (
+            <div className="offer-empty">
+              <strong>Their website is not read yet</strong>
+              <p className="quiet">Press Analyse website at the top. AIRO reads their public pages, finds what they sell, prices and offers, and compares them with yours.</p>
+            </div>
           ) : null}
-          <CompetitorInsights key={`insights-${data.id}`} id={data.id} canManage={canManage} />
-        </section>
-      ) : null}
-    </State>
+    </>
   );
 }
 
@@ -799,7 +838,7 @@ export function Competitors() {
     <Page
       eyebrow="Growth"
       title="Competitors"
-      lede="AIRO finds who you compete with, reads their website, finds what they sell, their prices and offers, compares them with your products and projects, and suggests what to do. Ask for it on WhatsApp too: send competitors."
+      lede="Know who you compete with, what they sell, what their ads say, and how to stand apart. Follow the four steps below. On WhatsApp, send: competitors."
       actions={canManage && editing === null ? (
         <>
           <button className="btn" type="button" onClick={importProfile}>Import from profile</button>
@@ -810,9 +849,11 @@ export function Competitors() {
       <State loading={loading} error={error} onRetry={reload}>
         {data && !data.ready ? <p className="quiet">{data.note}</p> : (
           <div className="stack">
+            <StepGuide onGo={show} />
             <div className="chip-tabs intel-views" role="tablist" aria-label="Competitor views">
               {VIEWS.map(([key, text]) => <button key={key} type="button" className={view === key ? 'is-on' : ''} onClick={() => show(key)}>{text}</button>)}
             </div>
+            <p className="quiet comp-note">{VIEW_HINT[view]}</p>
             {view === 'overview' ? <IntelOverview canManage={canManage} onOpenCompetitor={(competitorId) => navigate(`/app/growth/competitors/${competitorId}`)} /> : null}
             {view === 'ads' ? <AdLibrary competitors={all.filter((row) => row.status === 'active')} /> : null}
             {view === 'gaps' ? <MarketGaps canManage={canManage} /> : null}
@@ -829,15 +870,10 @@ export function Competitors() {
             ) : null}
             <div className="metric-strip offer-metrics">
               <div className="metric"><span>Tracked</span><strong>{num(items.filter((row) => row.status === 'active').length)}</strong><em>{project ? `For ${project.name}` : `${num(items.length)} saved`}</em></div>
-              <div className="metric"><span>Analysed</span><strong>{num(analysed)}</strong><em>Have a report</em></div>
+              <div className="metric"><span>Website read</span><strong>{num(analysed)}</strong><em>Have a website report</em></div>
               <div className="metric"><span>High threat</span><strong>{num(high)}</strong><em>Same market, similar or better deal</em></div>
             </div>
             {editing !== null ? <CompetitorForm key={editing?.id || `new-${scope}`} item={editing || null} projects={projects} scope={scope} onDone={done} onCancel={() => setEditing(null)} /> : null}
-            <Suggestions key={scope} canManage={canManage} project={project} onAdded={(competitorId) => {
-              refresh();
-              open(competitorId);
-              setTimeout(() => document.querySelector('.comp-layout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 600);
-            }} />
             {note ? <p className="quiet">{note}</p> : null}
             {items.length ? (
               <div className="comp-layout">
@@ -858,7 +894,7 @@ export function Competitors() {
                       {!project ? <ProjectChips ids={item.offeringIds} projects={projects} /> : null}
                       {item.summary ? <p className="comp-card-summary">{item.summary}</p> : null}
                       <footer>
-                        <small>{item.running ? 'Analysing...' : item.lastAnalyzedAt ? `Analysed ${when(item.lastAnalyzedAt)}` : 'Not analysed yet'}</small>
+                        <small>{item.running ? 'Reading website...' : item.lastAnalyzedAt ? `Website read ${when(item.lastAnalyzedAt)}` : 'Website not read yet'}</small>
                         {canManage ? <button type="button" className="comp-remove" onClick={(event) => { event.stopPropagation(); remove(item); }}>Remove</button> : null}
                       </footer>
                     </article>
@@ -868,7 +904,7 @@ export function Competitors() {
                   {selected ? (
                     <Detail key={`${selected}-${version}`} id={selected} canManage={canManage} projects={projects} onChanged={refresh} onEdit={(row) => { setEditing(row); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
                   ) : (
-                    <div className="offer-empty"><strong>Pick a competitor</strong><p className="quiet">Open one to see the analysis, or press Analyse now.</p></div>
+                    <div className="offer-empty"><strong>Pick a competitor</strong><p className="quiet">Open one to see a summary, their website, their ads, and ideas to stand apart.</p></div>
                   )}
                 </div>
               </div>
@@ -877,12 +913,17 @@ export function Competitors() {
                 <strong>{project ? `No competitors linked to ${project.name} yet` : 'No competitors yet'}</strong>
                 <p className="quiet">
                   {project
-                    ? 'Add one from the suggestions above, or add a competitor and tick this project.'
+                    ? 'Add one from the suggestions below, or add a competitor and tick this project.'
                     : 'Add a competitor with their website. AIRO reads it and compares it with your products and projects. No paid tool is needed.'}
                 </p>
                 {canManage && editing === null ? <button className="btn-primary" type="button" onClick={() => setEditing(false)}>Add competitor</button> : null}
               </div>
             )}
+            <Suggestions key={scope} canManage={canManage} project={project} onAdded={(competitorId) => {
+              refresh();
+              open(competitorId);
+              setTimeout(() => document.querySelector('.comp-layout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 600);
+            }} />
             </>)}
           </div>
         )}

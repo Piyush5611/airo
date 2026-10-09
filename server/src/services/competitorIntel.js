@@ -37,7 +37,8 @@ export const LABELS = {
   awareness: 'Awareness', consideration: 'Consideration', conversion: 'Conversion',
   location: 'Location', quality: 'Quality', features: 'Features', convenience: 'Convenience', urgency: 'Urgency', payment_plan: 'Payment plan',
   brand: 'Brand', investment: 'Investment', service: 'Service',
-  static: 'Static', video: 'Video', carousel: 'Carousel', reel: 'Reel', text: 'Text', image: 'Image'
+  static: 'Static', video: 'Video', carousel: 'Carousel', reel: 'Reel', text: 'Text', image: 'Image',
+  meta: 'Meta', google: 'Google'
 };
 const label = (key) => LABELS[key] || String(key || '').replace(/_/g, ' ');
 

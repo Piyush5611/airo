@@ -2,6 +2,11 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-09 (Competitors page reorganised)
+
+- **Change (client):** The Competitors page shows a four-step guide (add competitors, check their ads, AI reads the ads, get ideas) with live progress, and tabs Competitors, Their ads, Market overview, Opportunities, each with a one-line explanation. The competitor detail has one tab set: Summary, Website & offers, Compare with us, Their ads, What their ads say, How to stand apart, Search & sources. AIRO suggestions moved below the list.
+- **Change (client):** Competitor ad class names no longer start with `ads-` and the client calls `/api/competitors/:id/watch`, `/watch/check`, `/creatives/:id` and `/intelligence/creatives` (old paths still work), so browser ad blockers do not hide them. The ad detail shows public signals (running time, versions, same copy, placements, landing page).
+
 ### 2026-10-08 (Competitor intelligence)
 
 - **Change:** Migration 032 adds `competitors.competitor_type` (direct, indirect, market, emerging), `confidence`, `source`, `reason`, `verified_at`, and new tables `competitor_ads` (one row per public ad, content hash, AI analysis), `competitor_ad_snapshots` (new, changed, stopped, restarted per check) and `competitor_insights` (cached AI strategies by input hash). Every query filters on `organization_id`.

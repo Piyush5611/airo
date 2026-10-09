@@ -1148,6 +1148,7 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
 .intel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .intel-bars { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; align-content: start; }
 .intel-bar { display: grid; grid-template-columns: minmax(80px, 1fr) 2fr 40px; gap: 8px; align-items: center; font-size: 12px; }
+.intel-bar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .intel-bar > div { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
 .intel-bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
 .intel-bar strong { text-align: right; font-variant-numeric: tabular-nums; }
@@ -1164,3 +1165,24 @@ pre.panel { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; co
 .intel-timeline li { display: grid; gap: 2px; }
 .intel-strategy { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .intel-verified { margin-left: 6px; }
+.intel-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.intel-steps button { width: 100%; height: 100%; display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: white; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.intel-steps button:hover { border-color: var(--line-strong); }
+.intel-steps b { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; background: var(--surface-2); color: var(--muted); }
+.intel-steps span { display: grid; gap: 2px; min-width: 0; }
+.intel-steps strong { font-size: 14px; }
+.intel-steps small { color: var(--muted); font-size: 12px; }
+.intel-steps .is-done b { background: var(--good-soft); color: #067647; }
+.intel-steps .is-next button { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91, 77, 255, 0.08); }
+.intel-steps .is-next b { background: var(--accent); color: white; }
+.intel-section { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: white; }
+.intel-section > header h3 { margin: 0; font-size: 15px; }
+.intel-section > header p { margin: 2px 0 0; font-size: 12px; }
+.intel-snapshot { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: stretch; }
+.intel-snapshot > div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.intel-snapshot span { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.intel-snapshot strong { font-size: 14px; font-weight: 600; }
+.intel-snapshot > .btn { align-self: center; justify-self: start; }
+@media (max-width: 900px) {
+  .intel-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

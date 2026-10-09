@@ -9,6 +9,7 @@ const CONFIDENCE = { high: ['good', 'High confidence'], medium: ['warn', 'Medium
 const PLATFORM = { meta: 'Meta', google: 'Google' };
 const CHANGE = { new: 'First seen', changed: 'Copy changed', stopped: 'Stopped', restarted: 'Running again' };
 const NOT_AVAILABLE = 'NOT_AVAILABLE';
+const METRIC = { spend: 'Spend', impressions: 'Impressions', reach: 'Reach', targeting: 'Targeting', clicks: 'Clicks', conversions: 'Conversions', roas: 'ROAS' };
 
 const OPTIONS = {
   platform: [['meta', 'Meta'], ['google', 'Google']],
@@ -41,7 +42,7 @@ function ShareBars({ title, rows, empty = 'Nothing observed yet.' }) {
       <h3>{title}</h3>
       {rows?.length ? rows.slice(0, 6).map((row) => (
         <div className="intel-bar" key={row.key}>
-          <span>{row.label}</span>
+          <span title={row.label}>{PLATFORM[row.key] || row.label}</span>
           <div><i style={{ width: `${Math.max(3, row.share)}%` }} /></div>
           <strong>{row.share}%</strong>
         </div>
@@ -246,8 +247,8 @@ export function AdDetail({ id, onClose }) {
             </div>
             {data.signals ? <PublicSignals signals={data.signals} /> : null}
             <div className="comp-block">
-              <h3>Not available</h3>
-              <div className="comp-chips">{(data.notAvailable || []).map((key) => <span key={key} className="badge">{key}</span>)}</div>
+              <h3>Not public, so not shown</h3>
+              <div className="comp-chips">{(data.notAvailable || []).map((key) => <span key={key} className="badge">{METRIC[key] || key}</span>)}</div>
               <p className="quiet comp-note">{data.note}</p>
             </div>
             <div className="comp-block">
@@ -439,74 +440,143 @@ export function AdLibrary({ competitors }) {
   );
 }
 
-const INSIGHT_TABS = [['messaging', 'Messaging'], ['offers', 'Offers'], ['creatives', 'Creatives'], ['timeline', 'Timeline'], ['insights', 'Insights']];
-
-export function CompetitorInsights({ id, canManage }) {
-  const { data, loading, error, reload } = useResource(`/api/competitors/${id}/insights`);
-  const [tab, setTab] = useState('messaging');
-  if (loading || error || !data?.ready) return null;
-  const { summary, timeline } = data;
-  if (!summary.ads) return null;
+function Section({ title, hint, children }) {
   return (
-    <section className="rival-panel">
-      <header className="comp-head">
-        <div>
-          <h3>What their ads say</h3>
-          <p className="quiet">{`${num(summary.active)} live ads stored, ${num(summary.analysed)} with readable text analysed by AI.`}</p>
-        </div>
-        <ConfidenceBadge value={summary.confidence} />
+    <section className="intel-section">
+      <header>
+        <h3>{title}</h3>
+        {hint ? <p className="quiet">{hint}</p> : null}
       </header>
-      <div className="chip-tabs comp-tabs">
-        {INSIGHT_TABS.map(([key, text]) => <button key={key} type="button" className={tab === key ? 'is-on' : ''} onClick={() => setTab(key)}>{text}</button>)}
-      </div>
-      {tab === 'messaging' ? (
+      {children}
+    </section>
+  );
+}
+
+function NoAdsYet({ onOpenAds }) {
+  return (
+    <div className="offer-empty">
+      <strong>No ads stored for this competitor yet</strong>
+      <p className="quiet">Open Their ads and press Check ads. AIRO reads their public Meta and Google ads, then AI reads the text of each ad.</p>
+      {onOpenAds ? <button className="btn-primary" type="button" onClick={onOpenAds}>Go to Their ads</button> : null}
+    </div>
+  );
+}
+
+export function AdInsights({ id, onOpenAds }) {
+  const { data, loading, error, reload } = useResource(`/api/competitors/${id}/insights`);
+  return (
+    <State loading={loading} error={error} onRetry={reload}>
+      {data && !data.ready ? <p className="quiet">{data.note}</p> : data ? (data.summary.ads ? (
         <div className="stack">
-          <Bullets title="Main messages" items={summary.messages} />
-          <div className="intel-grid">
-            <ShareBars title="Themes" rows={summary.themes} />
-            <ShareBars title="Buttons" rows={summary.ctas} />
-            <ShareBars title="Landing pages" rows={summary.landing} />
+          <div className="comp-chips">
+            <ConfidenceBadge value={data.summary.confidence} />
+            <span className="quiet">{`${num(data.summary.active)} live ads, ${num(data.summary.analysed)} read by AI. Ads without text (most Google ads) only count for format and platform.`}</span>
           </div>
+          <Section title="What they say" hint="The main message of each ad, and the topics they repeat most.">
+            <Bullets title="Main messages" items={data.summary.messages} />
+            <div className="intel-grid">
+              <ShareBars title="Topics" rows={data.summary.themes} />
+              <ShareBars title="Buttons" rows={data.summary.ctas} />
+              <ShareBars title="Landing pages" rows={data.summary.landing} />
+            </div>
+          </Section>
+          <Section title="What they offer" hint="Offers written in their ads, word for word, and how often each kind appears.">
+            <Bullets title="Offers in their ads" items={data.summary.offerTexts} />
+            <ShareBars title="Offer types" rows={data.summary.offers} empty="No offer found in their ad text." />
+          </Section>
+          <Section title="How their ads look" hint="Format and platform come from the ad library. Style is read from the text only; AIRO cannot see images or videos.">
+            <div className="intel-grid">
+              <ShareBars title="Formats" rows={data.summary.formats} />
+              <ShareBars title="Styles" rows={data.summary.styles} />
+              <ShareBars title="Platforms" rows={data.summary.platforms} />
+            </div>
+          </Section>
+          <Section title="Timeline" hint="When their ads started, and what was new each month.">
+            {data.timeline.months.length ? (
+              <ol className="intel-timeline">
+                {data.timeline.months.map((row) => (
+                  <li key={row.month}>
+                    <strong>{row.month}</strong>
+                    <span>{`${num(row.ads)} ${row.ads === 1 ? 'ad' : 'ads'} started · ${[...row.formats, ...row.platforms.map((key) => PLATFORM[key] || key)].join(', ')}`}</span>
+                    {row.changes.length ? <span className="quiet">{row.changes.join(' · ')}</span> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : <p className="quiet">No start dates in the public data yet.</p>}
+            {data.timeline.events.length ? <Bullets title="Changes seen between checks" items={data.timeline.events.map((row) => `${PLATFORM[row.platform] || row.platform} ad: ${CHANGE[row.change] || row.change}, ${when(row.at)}`)} /> : null}
+          </Section>
         </div>
-      ) : null}
-      {tab === 'offers' ? (
-        <div className="stack">
-          <Bullets title="Offers as written in their ads" items={summary.offerTexts} />
-          <ShareBars title="Offer types" rows={summary.offers} empty="No offer found in their ad text." />
-        </div>
-      ) : null}
-      {tab === 'creatives' ? (
-        <div className="intel-grid">
-          <ShareBars title="Formats" rows={summary.formats} />
-          <ShareBars title="Creative styles (from text)" rows={summary.styles} />
-          <ShareBars title="Platforms" rows={summary.platforms} />
-        </div>
-      ) : null}
-      {tab === 'timeline' ? (
-        <div className="stack">
-          {timeline.months.length ? (
-            <ol className="intel-timeline">
-              {timeline.months.map((row) => (
-                <li key={row.month}>
-                  <strong>{row.month}</strong>
-                  <span>{`${num(row.ads)} ads started · ${[...row.formats, ...row.platforms.map((key) => PLATFORM[key] || key)].join(', ')}`}</span>
-                  {row.changes.length ? <span className="quiet">{row.changes.join(' · ')}</span> : null}
-                </li>
-              ))}
-            </ol>
-          ) : <p className="quiet">No start dates in the public data yet.</p>}
-          {timeline.events.length ? <Bullets title="Changes seen between checks" items={timeline.events.map((row) => `${PLATFORM[row.platform] || row.platform} ad ${CHANGE[row.change] || row.change} · ${when(row.at)}`)} /> : null}
-        </div>
-      ) : null}
-      {tab === 'insights' ? (
+      ) : <NoAdsYet onOpenAds={onOpenAds} />) : null}
+    </State>
+  );
+}
+
+export function CompetitorStrategy({ id, canManage, onOpenAds }) {
+  const { data, loading, error, reload } = useResource(`/api/competitors/${id}/insights`);
+  return (
+    <State loading={loading} error={error} onRetry={reload}>
+      {data && !data.ready ? <p className="quiet">{data.note}</p> : data ? (data.summary.ads ? (
         <Strategy
           path={`/api/competitors/${id}/strategy`}
           insight={data.strategy}
           canManage={canManage}
           onDone={() => reload({ silent: true })}
-          empty={summary.analysed ? 'No strategy yet. Press Make strategy.' : 'Their ads are not analysed yet. AIRO analyses new ads every hour.'}
+          empty={data.summary.analysed ? 'No strategy yet. Press Make strategy.' : 'Their ads are not read by AI yet. Press Analyse ads now on Market overview, or wait up to an hour.'}
         />
-      ) : null}
-    </section>
+      ) : <NoAdsYet onOpenAds={onOpenAds} />) : null}
+    </State>
+  );
+}
+
+// Short facts for the competitor Summary tab, from stored ads only.
+export function AdSnapshot({ id, onOpenAds, onOpenInsights }) {
+  const { data } = useResource(`/api/competitors/${id}/insights`);
+  if (!data?.ready) return null;
+  const { summary } = data;
+  if (!summary.ads) {
+    return (
+      <div className="intel-snapshot">
+        <div><span>Their ads</span><strong>Not checked yet</strong></div>
+        {onOpenAds ? <button className="btn" type="button" onClick={onOpenAds}>Check their ads</button> : null}
+      </div>
+    );
+  }
+  const top = (rows) => rows.slice(0, 3).map((row) => row.label).join(', ') || 'Not clear yet';
+  return (
+    <div className="intel-snapshot">
+      <div><span>Live ads</span><strong>{num(summary.active)}</strong></div>
+      <div><span>Platforms</span><strong>{summary.platforms.map((row) => PLATFORM[row.key] || row.label).join(', ') || '—'}</strong></div>
+      <div><span>Main topics</span><strong>{top(summary.themes)}</strong></div>
+      <div><span>Main offer</span><strong>{summary.offerTexts[0] || 'No offer in their ads'}</strong></div>
+      {onOpenInsights ? <button className="btn" type="button" onClick={onOpenInsights}>See what their ads say</button> : null}
+    </div>
+  );
+}
+
+const STEP_VIEWS = ['list', 'overview', 'overview', 'gaps'];
+
+// The four steps of competitor intelligence, with where the user is now.
+export function StepGuide({ onGo }) {
+  const { data } = useResource('/api/competitors/intelligence');
+  if (!data?.ready) return null;
+  const checked = data.competitors.filter((row) => row.adsCheckedAt).length;
+  const steps = [
+    { title: 'Add competitors', done: data.tracked > 0, text: data.tracked ? `${num(data.tracked)} tracked` : 'Add them yourself or from AIRO suggestions' },
+    { title: 'Check their ads', done: checked > 0, text: data.tracked ? `${num(checked)} of ${num(data.tracked)} checked` : 'Reads their public Meta and Google ads' },
+    { title: 'AI reads the ads', done: data.market.analysedAds > 0 && !data.pendingAnalysis, text: data.market.ads ? `${num(data.market.analysedAds)} read${data.pendingAnalysis ? `, ${num(data.pendingAnalysis)} waiting` : ''}` : 'Message, offer, button and style of each ad' },
+    { title: 'Get ideas', done: Boolean(data.strategy), text: data.strategy ? `Strategy made ${when(data.strategy.createdAt)}` : 'Gaps in the market and how to stand apart' }
+  ];
+  const next = steps.findIndex((step) => !step.done);
+  return (
+    <ol className="intel-steps">
+      {steps.map((step, index) => (
+        <li key={step.title} className={step.done ? 'is-done' : index === next ? 'is-next' : ''}>
+          <button type="button" onClick={() => onGo(STEP_VIEWS[index])}>
+            <b>{step.done ? '✓' : index + 1}</b>
+            <span><strong>{step.title}</strong><small>{step.text}</small></span>
+          </button>
+        </li>
+      ))}
+    </ol>
   );
 }

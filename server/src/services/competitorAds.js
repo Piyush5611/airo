@@ -5,6 +5,7 @@ import { distinctWords, domainOf } from './competitorDiscovery.js';
 import { recordAudit } from './auditService.js';
 import { analyzePending, storeCheckAds } from './competitorIntel.js';
 import { ApiError } from '../utils/errors.js';
+import { withUsage } from '../utils/usageContext.js';
 
 const DAY_MS = 86400000;
 const AD_LIMIT = 30;
@@ -242,7 +243,7 @@ export async function checkCompetitorAds(auth, req, id) {
   const checkId = await repo.startAdCheck(auth.organizationId, found.id);
   running.add(key);
   await recordAudit(req, { action: 'competitor.ads_checked', resource: 'competitor', resourceId: found.id });
-  runCheck(auth.organizationId, found, checkId)
+  withUsage({ organizationId: auth.organizationId, feature: 'competitor_ads_check' }, () => runCheck(auth.organizationId, found, checkId))
     .catch(async (error) => {
       console.error('Competitor ad check failed:', clip(error?.message || error, 200));
       await repo.finishAdCheck(checkId, { status: 'failed', notes: ['The check failed. Try again later.'] }).catch(() => {});

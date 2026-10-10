@@ -686,8 +686,8 @@ export function PlatformAi() {
           {section === 'Assistant' ? <AssistantChat manageModels={data.canManage} onOpenModels={() => setSection('AI Models')} /> : null}
           {section === 'AI Policies' || section === 'AI Configuration' || section === 'AI Overview' ? <p>{data.policy}</p> : null}
           {section === 'AI Models' || section === 'AI Configuration' ? <ModelConnect data={data} reload={reload} /> : null}
-          {section === 'AI Costs' ? <p>{data.models?.length ? 'Connected models have no spend figure from the provider yet.' : 'No model is connected, so there is no model bill.'}</p> : null}
-          {section !== 'Assistant' && section !== 'AI Models' && section !== 'AI Costs' && section !== 'AI Policies' && section !== 'AI Configuration' ? (
+          {section === 'AI Costs' || section === 'AI Usage' ? <p>Tokens per model, per day, per kind of work and per business are on <Link to="/platform/usage">Usage &amp; Costs</Link>, with Apify and WhatsApp.</p> : null}
+          {section !== 'Assistant' && section !== 'AI Models' && section !== 'AI Costs' && section !== 'AI Usage' && section !== 'AI Policies' && section !== 'AI Configuration' ? (
             data.usage.length ? data.usage.map((row) => <p key={row.surface}>{label(row.surface)}: {num(row.total)} logged answers</p>) : <p className="quiet">No AI usage is logged yet.</p>
           ) : null}
         </section>

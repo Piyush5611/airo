@@ -28,6 +28,7 @@ import * as discovery from '../services/competitorDiscovery.js';
 import * as competitorAds from '../services/competitorAds.js';
 import * as compIntel from '../services/competitorIntel.js';
 import * as research from '../services/researchTools.js';
+import * as usage from '../services/usageService.js';
 import { pingDatabase } from '../config/db.js';
 
 const router = Router();
@@ -544,6 +545,7 @@ admin.post('/ai/connect', requirePermission('platform_ai.manage'), validate(sche
 admin.post('/ai/disconnect', requirePermission('platform_ai.manage'), validate(schemas.llmDisconnectSchema), asyncHandler(async (req, res) => {
   ok(res, await llm.disconnectLlm(req));
 }));
+admin.get('/usage', requirePermission('platform_ai.view'), asyncHandler(async (req, res) => ok(res, await usage.platformUsage(req.query))));
 admin.get('/research', requirePermission('research_tools.manage'), asyncHandler(async (req, res) => ok(res, await research.researchTools())));
 admin.post('/research/apify', requirePermission('research_tools.manage'), validate(schemas.researchKeySchema), asyncHandler(async (req, res) => {
   ok(res, await research.connectApify(req));

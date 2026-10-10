@@ -344,6 +344,7 @@ export async function analyzePending(organizationId, limit = ORG_LIMIT_PER_RUN) 
         const { data, model } = await structuredLlm({
           organizationId,
           schema: adAnalysisSchema,
+          feature: 'competitor_ad_analysis',
           system: ANALYSIS_BRIEF,
           facts: adFacts(batch),
           task: `Classify these ${batch.length} ads. Reply as JSON: {"items":[{"id":<ad id>, ...}]} with one item per ad.`,
@@ -653,6 +654,7 @@ export async function generateStrategy(auth, req, competitorId = 0) {
   const { data, model } = await structuredLlm({
     organizationId: auth.organizationId,
     schema: strategySchema,
+    feature: 'competitor_strategy',
     system: STRATEGY_BRIEF,
     facts: `${facts}\n\n${await ourFacts(auth.organizationId)}`,
     task: 'Reply as JSON with: advertising, mainOffers[], mainMessages[], positioning, changes, whitespace[], hooks[], offers[], formats[], positioningIdeas[], confidence.',
@@ -734,6 +736,7 @@ export async function generateAdIdeas(auth, req, competitorId = 0) {
   const { data, model } = await structuredLlm({
     organizationId: auth.organizationId,
     schema: adIdeasSchemaFor(names),
+    feature: 'competitor_ad_ideas',
     system: IDEAS_BRIEF,
     facts,
     task: 'Reply as JSON with: verdict, suggestions[{title, why, basedOn}], meta{variants[{angle, headline, primaryText, why}]}, google{headlines[], descriptions[], why}, avoid[], confidence.',

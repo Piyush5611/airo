@@ -145,6 +145,7 @@ export async function captureFromMessage({ organizationId, text, source = 'whats
   const { data } = await structuredLlm({
     organizationId,
     schema: captureSchema,
+    feature: 'offering_capture',
     system: CAPTURE_BRIEF,
     facts: [
       `Allowed kinds (use the key): ${kinds.map((kind) => `${kind.key} = ${kind.label}`).join('; ')}`,

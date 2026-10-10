@@ -319,7 +319,7 @@ export function modelBusy(error) {
     || /high demand|overloaded|temporarily unavailable|try again later|too many requests|rate limit/i.test(String(error?.message || ''));
 }
 
-export async function structuredLlm({ organizationId = null, schema, system, facts, task, maxTokens = 4096, purposes }) {
+export async function structuredLlm({ organizationId = null, schema, system, facts, task, maxTokens = 4096, purposes, feature = 'structured' }) {
   const attempts = await adModels(purposes);
   if (!attempts.length) throw new ApiError(422, 'Connect an AI model for Ad writing on Platform AI first.', 'llm_missing');
   const brief = `${system}\nReply with one JSON object only. No markdown and no text outside the JSON.`;
@@ -339,7 +339,8 @@ export async function structuredLlm({ organizationId = null, schema, system, fac
           facts,
           system: brief,
           maxTokens,
-          maxChars: 24000
+          maxChars: 24000,
+          usage: { purpose: attempt.purpose, feature, organizationId }
         });
       } catch (error) {
         lastError = error;
@@ -407,7 +408,8 @@ export async function writeGoogleAdPlan({ intake, english }) {
         baseUrl: attempt.row.baseUrl || '',
         messages: [{ role: 'user', content: 'Write the Google Search ad from these facts.' }],
         facts,
-        system: GOOGLE_PLAN_BRIEF
+        system: GOOGLE_PLAN_BRIEF,
+        usage: { purpose: attempt.purpose, feature: 'google_ad_plan', organizationId: intake.organizationId || null }
       });
       await recordAudit({ auth: null, ip: null }, {
         action: 'llm.chat',
@@ -451,7 +453,8 @@ export async function writeAdPlan({ intake, publicAds, english }) {
         baseUrl: attempt.row.baseUrl || '',
         messages: [{ role: 'user', content: 'Write the Meta ad plan from the intake.' }],
         facts,
-        system: AD_PLAN_BRIEF
+        system: AD_PLAN_BRIEF,
+        usage: { purpose: attempt.purpose, feature: 'meta_ad_plan', organizationId: intake.organizationId || null }
       });
       await recordAudit({ auth: null, ip: null }, {
         action: 'llm.chat',
@@ -509,7 +512,8 @@ export async function replyWhatsapp({ organizationId, recognized, businessLabel,
         baseUrl: attempt.row.baseUrl || '',
         messages,
         facts,
-        system: WHATSAPP_BRIEF
+        system: WHATSAPP_BRIEF,
+        usage: { purpose: attempt.purpose, feature: 'whatsapp_reply', organizationId: organizationId || null }
       });
       await recordAudit({ auth: null, ip: null }, {
         action: 'llm.chat',
@@ -549,7 +553,8 @@ export async function chatLlm(req) {
     apiKey: await readKey(row),
     baseUrl: row.baseUrl || '',
     messages: req.body.messages,
-    facts: await assistantFacts(req.auth)
+    facts: await assistantFacts(req.auth),
+    usage: { purpose: 'assistant', feature: 'assistant_chat', organizationId: req.auth?.realm === 'client' ? req.auth.organizationId : null }
   });
   const text = canConnect || req.auth?.realm === 'platform' ? withoutPermissionNote(reply) : reply;
   await recordAudit(req, {

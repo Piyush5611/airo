@@ -98,6 +98,7 @@ export async function classifyMessage({ organizationId, conversationId, messages
     const call = structuredLlm({
       organizationId,
       schema: intentSchema,
+      feature: 'whatsapp_router',
       system: ROUTER_BRIEF,
       facts: chatFacts(messages, draft),
       task: 'Route the latest user message as JSON: {"intent":"","request":"","platform":"none","topic":""}',

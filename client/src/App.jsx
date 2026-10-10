@@ -18,6 +18,7 @@ const pages = {
   assistant: () => import('./pages/AssistantChat.jsx'),
   workspace: () => import('./pages/Workspace.jsx'),
   platform: () => import('./pages/Platform.jsx'),
+  usage: () => import('./pages/PlatformUsage.jsx'),
   whatsapp: () => import('./pages/Whatsapp.jsx')
 };
 
@@ -41,7 +42,7 @@ function page(group, name) {
 
 export function preloadPages(realm) {
   const groups = realm === 'platform'
-    ? ['platform', 'assistant', 'whatsapp']
+    ? ['platform', 'usage', 'assistant', 'whatsapp']
     : ['command', 'growth', 'sales', 'intel', 'connections', 'adsAgent', 'offerings', 'competitors', 'ai', 'assistant', 'workspace', 'whatsapp'];
   for (const group of groups) pages[group]().catch(() => null);
 }
@@ -84,6 +85,7 @@ const PlatformIntegrations = page('platform', 'PlatformIntegrations');
 const PlatformModeration = page('platform', 'PlatformModeration');
 const PlatformSales = page('platform', 'PlatformSales');
 const PlatformResearch = page('platform', 'PlatformResearch');
+const PlatformUsage = page('usage', 'PlatformUsage');
 const PlatformSecurity = page('platform', 'PlatformSecurity');
 const PlatformSettings = page('platform', 'PlatformSettings');
 const PlatformSupport = page('platform', 'PlatformSupport');
@@ -171,6 +173,7 @@ export function App() {
           <Route path="assistant" element={<AssistantPage />} />
           <Route path="ai" element={<PlatformAi />} />
           <Route path="research" element={<PlatformResearch />} />
+          <Route path="usage" element={<PlatformUsage />} />
           <Route path="security" element={<PlatformSecurity />} />
           <Route path="settings" element={<PlatformSettings />} />
         </Route>

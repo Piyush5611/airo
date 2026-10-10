@@ -236,6 +236,7 @@ export async function suggestTargeting({ organizationId, payload, profile, platf
     const { data } = await structuredLlm({
       organizationId,
       schema: suggestionSchema,
+      feature: 'ad_targeting',
       system: SUGGEST_BRIEF,
       facts: [`Platform: ${platform === 'google' ? 'Google Search' : 'Meta (Facebook and Instagram)'}`, ...intakeFacts(payload, profile)].join('\n'),
       task: 'Suggest the targeting as JSON: {"cities":[],"cityNotes":[{"city":"","why":""}],"bestCities":[],"bestPick":"","ageMin":25,"ageMax":55,"gender":"all","interestSeeds":[],"keywordSeeds":[],"negatives":[],"sellingPoints":[],"why":""}',
@@ -354,6 +355,7 @@ export async function pickMetaAudience({ organizationId, apiKey, payload, profil
     const { data } = await structuredLlm({
       organizationId,
       schema: audienceSchema,
+      feature: 'meta_audience',
       system: AUDIENCE_BRIEF,
       facts: [
         `Language: ${english ? 'English' : 'Hinglish'}`,
@@ -400,6 +402,7 @@ export async function writeGoogleCopy({ organizationId, payload, profile, candid
   const { data } = await structuredLlm({
     organizationId,
     schema: googleCopySchema,
+    feature: 'google_ad_copy',
     system: GOOGLE_COPY_BRIEF,
     facts,
     task: 'Write the Google Search ad as JSON: {"strategy":"","headlines":[],"descriptions":[],"path1":"","path2":"","keywords":[{"text":"","matchType":"PHRASE"}],"negatives":[]}',
@@ -432,6 +435,7 @@ export async function writeMetaCopy({ organizationId, payload, profile, publicAd
   const { data } = await structuredLlm({
     organizationId,
     schema: metaCopySchema,
+    feature: 'meta_ad_copy',
     system: META_COPY_BRIEF,
     facts,
     task: 'Write the Meta ad as JSON: {"strategy":"","variants":[{"angle":"","headline":"","primaryText":""}],"cta":"LEARN_MORE","tips":[]}',

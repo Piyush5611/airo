@@ -294,6 +294,7 @@ async function runAnalysis(organizationId, competitor) {
     const { data, model } = await structuredLlm({
       organizationId,
       schema: analysisSchema,
+      feature: 'competitor_website',
       system: BRIEF,
       facts,
       task: 'Analyse this competitor and reply as JSON with: summary, positioning, audience, priceRange, offerings[{name,type,location,price,offer,highlights[],source}], strengths[], weaknesses[], messaging[], leadCapture[], comparison[{ours,theirs,verdict,note}], actions[{title,detail}], threat, threatWhy, gaps[].',

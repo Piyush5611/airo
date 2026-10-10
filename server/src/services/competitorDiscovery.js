@@ -11,6 +11,7 @@ import { recordAudit } from './auditService.js';
 import { analyzeCompetitor } from './competitorService.js';
 import { discoveryFields } from './competitorIntel.js';
 import { ApiError } from '../utils/errors.js';
+import { withUsage } from '../utils/usageContext.js';
 
 const MANUAL_COOLDOWN_MS = 30 * 60 * 1000;
 const CHECK_TOP = 15;
@@ -111,6 +112,7 @@ async function planSearch(organizationId, { profile, items, sector, orgName, pro
     const { data } = await structuredLlm({
       organizationId,
       schema: planSchema,
+      feature: 'competitor_search_plan',
       system: PLAN_BRIEF,
       facts,
       task: 'Reply as JSON with searches[], adKeywords[], places[], location.',
@@ -303,6 +305,7 @@ async function judge(organizationId, { candidates, homes, ourFacts }) {
   const { data } = await structuredLlm({
     organizationId,
     schema: verdictSchema,
+    feature: 'competitor_verdict',
     system: VERDICT_BRIEF,
     facts: `${ourFacts}\n\n${lines.join('\n\n')}`,
     task: `Reply as JSON: {"items":[{"id":<candidate number>,"verdict":"direct|indirect|not_competitor|unclear","reason":"","name":"","city":""}]} for all ${candidates.length} candidates.`,
@@ -359,7 +362,7 @@ export async function findWebsite(auth, req, id) {
     throw new ApiError(429, 'AIRO looked for this website a few minutes ago. Add it yourself with Edit, or try again in 10 minutes.', 'rate_limited');
   }
   lookedUp.set(key, Date.now());
-  const [website] = await lookupWebsites(apiKey, [found]);
+  const [website] = await withUsage({ organizationId: auth.organizationId, feature: 'find_website' }, () => lookupWebsites(apiKey, [found]));
   if (!website) {
     throw new ApiError(422, `AIRO could not find a website that clearly belongs to ${found.name}. Add it yourself with Edit.`, 'website_not_found');
   }
@@ -475,7 +478,7 @@ async function begin(organizationId, offeringId, trigger) {
   const runId = await repo.startRun(organizationId, offeringId, trigger);
   running.add(key);
   try {
-    return await discover(organizationId, offeringId, runId);
+    return await withUsage({ organizationId, feature: `competitor_search_${trigger}` }, () => discover(organizationId, offeringId, runId));
   } catch (error) {
     await repo.finishRun(runId, { status: 'failed', notes: [String(error?.message || 'The search failed.').slice(0, 300)] }).catch(() => {});
     throw error;

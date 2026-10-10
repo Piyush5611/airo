@@ -1,4 +1,6 @@
+import { addUsage } from '../repositories/usageRepo.js';
 import { ApiError } from '../utils/errors.js';
+import { usageContext } from '../utils/usageContext.js';
 
 const BASE = 'https://api.apify.com/v2';
 
@@ -12,8 +14,38 @@ export const ACTORS = {
 // Apify rejects a maxTotalChargeUsd below $0.50; maxItems keeps the real charge far lower.
 const MIN_CHARGE_USD = 0.5;
 
+const ACTOR_FEATURE = {
+  [ACTORS.google]: 'google_search',
+  [ACTORS.meta]: 'meta_ad_library',
+  [ACTORS.maps]: 'google_maps',
+  [ACTORS.googleAds]: 'google_ads_transparency'
+};
+
+export async function runActor(token, actor, input, options) {
+  const started = Date.now();
+  let items = null;
+  try {
+    items = await runActorOnce(token, actor, input, options);
+    return items;
+  } finally {
+    const context = usageContext();
+    addUsage({
+      tool: 'apify',
+      provider: 'apify',
+      model: actor,
+      purpose: context.feature || null,
+      feature: ACTOR_FEATURE[actor] || 'other',
+      organizationId: context.organizationId || null,
+      status: items ? 'ok' : 'failed',
+      items: items?.length || 0,
+      maxChargeUsd: options.maxChargeUsd ? Math.max(MIN_CHARGE_USD, options.maxChargeUsd) : null,
+      durationMs: Date.now() - started
+    }).catch((error) => console.error('Usage not recorded:', String(error?.message || error).slice(0, 160)));
+  }
+}
+
 // maxTotalChargeUsd caps what one run may bill on pay-per-event actors.
-export async function runActor(token, actor, input, { maxItems, maxChargeUsd, timeoutSecs = 180 }) {
+async function runActorOnce(token, actor, input, { maxItems, maxChargeUsd, timeoutSecs = 180 }) {
   const url = new URL(`${BASE}/acts/${actor}/run-sync-get-dataset-items`);
   url.searchParams.set('timeout', String(timeoutSecs));
   url.searchParams.set('format', 'json');
@@ -45,6 +77,38 @@ export async function runActor(token, actor, input, { maxItems, maxChargeUsd, ti
     throw new ApiError(502, reason, 'apify_failed');
   }
   return Array.isArray(body) ? body : [];
+}
+
+async function accountGet(token, path) {
+  let response;
+  try {
+    response = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+  } catch {
+    throw new ApiError(502, 'Apify did not answer in time.', 'apify_unreachable');
+  }
+  const body = await response.json().catch(() => null);
+  if (response.status === 401 || response.status === 403) throw new ApiError(422, 'The Apify token is not accepted. Update it in Research tools.', 'apify_auth');
+  if (!response.ok) throw new ApiError(502, String(body?.error?.message || `Apify answered ${response.status}`).slice(0, 200), 'apify_failed');
+  return body?.data || {};
+}
+
+const usd = (value) => (Number.isFinite(Number(value)) ? Math.round(Number(value) * 10000) / 10000 : null);
+
+// The account's own billing numbers for the current cycle, read live from Apify.
+export async function apifyAccountUsage(token) {
+  const [limits, monthly] = await Promise.all([accountGet(token, '/users/me/limits'), accountGet(token, '/users/me/usage/monthly')]);
+  const services = Object.entries(monthly.monthlyServiceUsage || {})
+    .map(([key, row]) => ({ key, quantity: Number(row?.quantity) || 0, usd: usd(row?.amountAfterVolumeDiscountUsd ?? row?.baseAmountUsd) }))
+    .filter((row) => row.usd)
+    .sort((a, b) => b.usd - a.usd);
+  return {
+    cycleStart: limits.monthlyUsageCycle?.startAt || monthly.usageCycle?.startAt || null,
+    cycleEnd: limits.monthlyUsageCycle?.endAt || monthly.usageCycle?.endAt || null,
+    limitUsd: usd(limits.limits?.maxMonthlyUsageUsd),
+    usedUsd: usd(limits.current?.monthlyUsageUsd ?? monthly.totalUsageCreditsUsdAfterVolumeDiscount),
+    daily: (monthly.dailyServiceUsages || []).map((row) => ({ day: String(row.date || '').slice(0, 10), usd: usd(row.totalUsageCreditsUsd) || 0 })),
+    services
+  };
 }
 
 export function googleSearch(token, queries) {

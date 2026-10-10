@@ -158,6 +158,7 @@ export async function createLaunch(auth, req) {
     written = await structuredLlm({
       organizationId: auth.organizationId,
       schema: platform === 'meta' ? metaCreativeSchema : googleCreativeSchema,
+      feature: 'launch_ad_copy',
       system: platform === 'meta' ? META_BRIEF : GOOGLE_BRIEF,
       facts: [creativeFacts(profile, strategy, platform), await competitorContext(auth.organizationId)].filter(Boolean).join('\n'),
       task: `Write the ${PLATFORM_NAME[platform]} ad copy as JSON.`

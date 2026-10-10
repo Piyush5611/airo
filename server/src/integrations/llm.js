@@ -1,3 +1,4 @@
+import { addUsage } from '../repositories/usageRepo.js';
 import { ApiError } from '../utils/errors.js';
 
 const PROVIDERS = {
@@ -164,13 +165,53 @@ function hasDevanagari(text) {
   return /[\u0900-\u097F]/.test(String(text || ''));
 }
 
-async function completeLlm({ provider, model, apiKey, baseUrl, system, turns, maxTokens = 1024 }) {
+// Token counts exactly as each provider reports them; thinking tokens are billed as output.
+export function tokensOf(provider, data) {
+  if (provider === 'openai') return { input: data?.usage?.prompt_tokens, output: data?.usage?.completion_tokens };
+  if (provider === 'anthropic') return { input: data?.usage?.input_tokens, output: data?.usage?.output_tokens };
+  const meta = data?.usageMetadata || {};
+  return { input: meta.promptTokenCount, output: Number(meta.candidatesTokenCount || 0) + Number(meta.thoughtsTokenCount || 0) };
+}
+
+async function track(usage, { provider, model }, work) {
+  const started = Date.now();
+  let data = null;
+  let failed = true;
+  try {
+    const result = await work((raw) => { data = raw; });
+    failed = false;
+    return result;
+  } finally {
+    if (usage) {
+      const tokens = data ? tokensOf(provider, data) : {};
+      addUsage({
+        tool: 'llm',
+        provider,
+        model,
+        purpose: usage.purpose,
+        feature: usage.feature,
+        organizationId: usage.organizationId,
+        status: failed ? 'failed' : 'ok',
+        inputTokens: tokens.input,
+        outputTokens: tokens.output,
+        durationMs: Date.now() - started
+      }).catch((error) => console.error('Usage not recorded:', String(error?.message || error).slice(0, 160)));
+    }
+  }
+}
+
+async function completeLlm(options) {
+  return track(options.usage, options, (seen) => completeWith(options, seen));
+}
+
+async function completeWith({ provider, model, apiKey, baseUrl, system, turns, maxTokens = 1024 }, seen) {
   if (provider === 'openai') {
     const origin = httpsOrigin(baseUrl, 'https://api.openai.com');
     const data = await postJson(`${origin}/v1/chat/completions`, { Authorization: `Bearer ${apiKey}` }, {
       model,
       messages: [{ role: 'system', content: system }, ...turns]
     });
+    seen(data);
     const content = data?.choices?.[0]?.message?.content;
     return Array.isArray(content) ? content.map((part) => part.text || '').join('') : content;
   }
@@ -184,6 +225,7 @@ async function completeLlm({ provider, model, apiKey, baseUrl, system, turns, ma
       system,
       messages: turns
     });
+    seen(data);
     return Array.isArray(data.content) ? data.content.map((part) => part.text || '').join('') : '';
   }
   const data = await postJson(
@@ -197,6 +239,7 @@ async function completeLlm({ provider, model, apiKey, baseUrl, system, turns, ma
       }))
     }
   );
+  seen(data);
   const parts = data?.candidates?.[0]?.content?.parts || [];
   if (!parts.length && data?.promptFeedback?.blockReason) {
     throw new ApiError(422, `The model declined this message (${data.promptFeedback.blockReason}).`, 'validation_error');
@@ -209,7 +252,7 @@ async function completeLlm({ provider, model, apiKey, baseUrl, system, turns, ma
   return text;
 }
 
-export async function replyLlm({ provider, model, apiKey, baseUrl, messages, facts, system, maxTokens, maxChars }) {
+export async function replyLlm({ provider, model, apiKey, baseUrl, messages, facts, system, maxTokens, maxChars, usage = null }) {
   if (!PROVIDERS[provider]) throw new ApiError(422, 'Choose a model provider.', 'validation_error');
   const brief = `${system || ASSISTANT_BRIEF}\n\nStatus from AIRO just now:\n${facts || 'No status was loaded.'}`;
   const turns = messages
@@ -219,7 +262,7 @@ export async function replyLlm({ provider, model, apiKey, baseUrl, messages, fac
   if (!turns.length || turns.at(-1).role !== 'user') {
     throw new ApiError(422, 'Type a message first.', 'validation_error');
   }
-  const call = { provider, model, apiKey, baseUrl, maxTokens };
+  const call = { provider, model, apiKey, baseUrl, maxTokens, usage };
   let text = await completeLlm({ ...call, system: brief, turns });
   if (hasDevanagari(text)) {
     const fixed = await completeLlm({

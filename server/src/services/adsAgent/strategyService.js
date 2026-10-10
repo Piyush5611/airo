@@ -125,6 +125,7 @@ export async function generateStrategy(auth, req) {
   const result = await structuredLlm({
     organizationId: auth.organizationId,
     schema: strategySchemaFor(profile),
+    feature: 'ads_strategy',
     system: STRATEGY_BRIEF,
     facts: [factsFor(profile, metrics, await organizationSector(auth.organizationId)), await competitorContext(auth.organizationId)].filter(Boolean).join('\n'),
     task: 'Write the ads strategy for this business as JSON.'

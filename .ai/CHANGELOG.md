@@ -2,6 +2,13 @@
 
 Significant structural changes only. Newest first.
 
+### 2026-10-10 (Usage and costs on the platform)
+
+- **Change:** New `paid_usage` table. `completeLlm` records every model call (provider, model, purpose, feature, organization, input/output tokens as reported by the provider, duration, ok/failed); `runActor` records every Apify run (items, max charge cap, duration, status). The organization and feature for Apify runs come from `utils/usageContext.js` (AsyncLocalStorage). Calls made before this change have no record.
+- **Change:** `GET /api/admin/usage?days=7|30|90` (`platform_ai.view`) returns totals, per-day series, splits by model, work and business, the live Apify bill from the Apify account API (`/v2/users/me/limits`, `/v2/users/me/usage/monthly`) and WhatsApp sent/received volume.
+- **Change (client):** New Platform page "Usage & Costs" (`/platform/usage`) with stat cards, per-day bar charts and share bars. Model calls show tokens, not money, because the providers expose no price through their API; Apify shows the real USD from the account.
+- **Migration/API impact:** Run `npm run migrate` (`035_paid_usage.sql`).
+
 ### 2026-10-09 (Ads written against competitors)
 
 - **Change:** New `generateAdIdeas` in `competitorIntel.js`. From one competitor (website report plus classified public ads) or all of them (market summary plus up to 5 website reports), plus the earlier stand-apart strategy and the owner's profile and Products & Projects, the model returns a verdict, 2-6 suggestions with the observed fact behind each, 2-3 Meta ad variants, one Google responsive search ad and things to avoid. `adIdeasSchemaFor` keeps the copy inside the Launch limits and rejects copy that names a tracked competitor, uses exclamation marks or ALL CAPS words. Same input reuses the saved result; a new run is limited to one a minute per organization.
